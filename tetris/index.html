@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=70d2a7df">
-<link rel="stylesheet" href="tetris.css?v=4a423810">
+<link rel="stylesheet" href="tetris.css?v=27e04d72">
 </head>
 <body>
 <div class="topline"></div>
@@ -34,6 +34,7 @@
       <h1>俄罗斯方块<em>TETRIS</em></h1>
       <div class="sp"></div>
       <button class="tbtn" id="skinBtn" aria-label="换方块样式">样式</button>
+      <button class="tbtn tbtn-sq" id="muteBtn" aria-label="音效开关"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6.5 9H3v6h3.5L11 19z"/><path class="wave" d="M15.6 8.6a5 5 0 0 1 0 6.8"/><path class="wave" d="M18.4 5.8a9 9 0 0 1 0 12.4"/><path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/></svg></button>
       <button class="tbtn tbtn-ic" id="fsBtn" aria-label="进入游戏模式"><i id="fsIc">⛶</i><span id="fsTx">游戏模式</span></button>
       <button class="tbtn" id="pauseBtn">暂停</button>
       <button class="tbtn" id="restartBtn">重开</button>
@@ -52,6 +53,7 @@
               下面四个键：<b>左移 · 右移 · 落底 · 变换</b>，点右边 HOLD 框暂存。<br>
               手机建议先点右上角<b>「游戏模式」</b>，横过来也能玩。
             </p>
+            <button class="pbtn" id="resumeSaveBtn" data-save>接着上次玩 · <b id="resumeScore">0</b></button>
             <button class="pbtn" id="startBtn">开始</button>
           </div>
 
@@ -117,7 +119,6 @@
     <div class="sheet-box">
       <div class="sheet-top">
         <h3>方块样式</h3>
-        <button class="row-btn" id="muteBtn">音效：开</button>
       </div>
       <span class="sheet-lb">配色</span>
       <div class="seg" id="palOpts"></div>
@@ -127,10 +128,9 @@
     </div>
   </div>
 
-  <div class="hint">点 HOLD 框暂存<span class="only-wide"> · 键盘 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>空格</kbd> 也能玩</span> · 分数只存在这台设备上</div>
 
 </div>
 
-<script src="tetris.js?v=ef22fdab"></script>
+<script src="tetris.js?v=2032e876"></script>
 </body>
 </html>

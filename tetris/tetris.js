@@ -20,10 +20,10 @@ const PALETTES = {
 
 // 四种画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
 const STYLES = {
-  gap:   { name:'宽缝',  gap:.10,  fill:.14, edge:.30, lw:.07, rad:.20 },
-  soft:  { name:'柔和',  gap:.10,  fill:.22, edge:.40, lw:.06, rad:.26 },
-  ring:  { name:'暗圈',  gap:.085, fill:.14, edge:.32, lw:.07, rad:.20, ring:.40 },
-  plain: { name:'纯色',  gap:.13,  fill:.10, edge:0,   lw:0,   rad:.22 },
+  gap:   { name:'标准',  gap:.055, fill:.14, edge:.30, lw:.07, rad:.20 },
+  soft:  { name:'柔和',  gap:.06,  fill:.22, edge:.40, lw:.06, rad:.26 },
+  ring:  { name:'暗圈',  gap:.045, fill:.14, edge:.32, lw:.07, rad:.20, ring:.40 },
+  plain: { name:'纯色',  gap:.08,  fill:.10, edge:0,   lw:0,   rad:.22 },
 };
 
 const skin = { pal: 'clear', style: 'gap' };
@@ -116,6 +116,7 @@ function gravityFor(level){
 
 const STORE_KEY = 'tetris.best.v1';
 const SKIN_KEY  = 'tetris.skin.v1';
+const SAVE_KEY  = 'tetris.save.v1';
 
 // ───────────────────────── 工具 ─────────────────────────
 
@@ -128,6 +129,73 @@ function readBest(){
 }
 function writeBest(v){
   try { localStorage.setItem(STORE_KEY, String(v)); } catch { /* 存不了就算了 */ }
+}
+
+// 正在玩的这一局也存下来：手机上切个 App、锁个屏回来还能接着打
+function saveGame(){
+  if (!game.started || game.over){ clearSave(); return; }
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      board: game.board,
+      queue: game.queue,
+      bag: game.bag,
+      hold: game.hold,
+      holdUsed: game.holdUsed,
+      piece: game.piece,
+      score: game.score,
+      lines: game.lines,
+      level: game.level,
+      combo: game.combo,
+      b2b: game.b2b,
+      at: Date.now(),
+    }));
+  } catch { /* 存不下就算了，不影响玩 */ }
+}
+
+function readSave(){
+  try {
+    const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    if (!d || !Array.isArray(d.board) || d.board.length !== TOTAL_ROWS) return null;
+    if (typeof d.score !== 'number') return null;
+    return d;
+  } catch { return null; }
+}
+
+function clearSave(){
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* 忽略 */ }
+}
+
+function restoreGame(d){
+  game.board = d.board;
+  game.queue = d.queue || [];
+  game.bag = d.bag || [];
+  game.hold = d.hold || null;
+  game.holdUsed = !!d.holdUsed;
+  game.piece = d.piece || null;
+  game.score = d.score || 0;
+  game.lines = d.lines || 0;
+  game.level = d.level || 1;
+  game.combo = typeof d.combo === 'number' ? d.combo : -1;
+  game.b2b = !!d.b2b;
+  game.over = false;
+  game.paused = false;
+  game.frozen = false;
+  game.started = true;
+  particles.length = 0;
+  clearing = null;
+  softDropping = false;
+  held.left = held.right = false;
+  dropTimer = lockTimer = 0;
+  lockResets = 0;
+  grounded = false;
+  fillQueue();
+  if (!game.piece) spawnNext();
+  $('overlay').classList.remove('show');
+  $('pauseBtn').textContent = '暂停';
+  syncHud();
+  lastFrame = performance.now();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(tick);
 }
 
 function readSkin(){
@@ -340,11 +408,10 @@ function lockPiece(){
   const p = game.piece;
   if (!p) return;
   const spin = detectTSpin();
-  const color = colorOf(p.type);
 
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
     const by = p.y + cy, bx = p.x + cx;
-    if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = color;
+    if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
   }
   game.piece = null;
 
@@ -363,7 +430,7 @@ function lockPiece(){
   } else {
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
-    if (topOut) endGame(); else spawnNext();
+    if (topOut) endGame(); else { spawnNext(); saveGame(); }
   }
 }
 
@@ -418,6 +485,7 @@ function applyClear(rows){
 function endGame(){
   game.over = true;
   game.piece = null;
+  clearSave();
   cancelAnimationFrame(rafId);
   if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
   $('overScore').textContent = game.score.toLocaleString();
@@ -561,8 +629,9 @@ function draw(){
   // 已落地的块（BUFFER 以上不画，自然被裁掉）
   for (let y = BUFFER; y < TOTAL_ROWS; y++){
     for (let x = 0; x < COLS; x++){
-      const col = game.board[y][x];
-      if (!col) continue;
+      const t = game.board[y][x];
+      if (!t) continue;
+      const col = colorOf(t);
       const py = (y - BUFFER) * CELL;
       if (clearingSet && clearingSet.has(y)){
         drawCell(ctx, x * CELL, py, CELL, mix(col, '#ffffff', .55 + .45 * flash), { alpha: .35 + .65 * flash });
@@ -654,7 +723,8 @@ function burst(p, power){
 function burstRow(y){
   if (y < BUFFER) return;
   for (let x = 0; x < COLS; x++){
-    const color = game.board[y][x] || '#ffffff';
+    const t = game.board[y][x];
+    const color = t ? colorOf(t) : '#ffffff';
     for (let i = 0; i < 3; i++){
       particles.push({
         x: (x + .5) * CELL,
@@ -770,6 +840,7 @@ function tick(now){
       applyClear(clearing.rows);
       clearing = null;
       spawnNext();
+      saveGame();
     }
     draw();
     return;
@@ -1055,6 +1126,7 @@ function launchedAsApp(){
 // ───────────────────────── 开关局 ─────────────────────────
 
 function restart(){
+  clearSave();
   game.board = newBoard();
   game.bag = [];
   game.queue = [];
@@ -1100,8 +1172,15 @@ function togglePause(){
 
 function toggleMute(){
   muted = !muted;
-  $('muteBtn').textContent = muted ? '音效：关' : '音效：开';
-  $('muteBtn').classList.toggle('off', muted);
+  syncMuteBtn();
+  try { localStorage.setItem('tetris.muted.v1', muted ? '1' : '0'); } catch { /* 忽略 */ }
+}
+
+function syncMuteBtn(){
+  const b = $('muteBtn');
+  b.classList.toggle('muted', muted);
+  b.setAttribute('aria-label', muted ? '音效已关' : '音效已开');
+  b.setAttribute('aria-pressed', muted ? 'true' : 'false');
 }
 
 // ───────────────────────── 启动 ─────────────────────────
@@ -1109,6 +1188,7 @@ function toggleMute(){
 function init(){
   const savedSkin = readSkin();
   if (savedSkin) { skin.pal = savedSkin.pal; skin.style = savedSkin.style; }
+  try { muted = localStorage.getItem('tetris.muted.v1') === '1'; } catch { /* 忽略 */ }
   game.board = newBoard();
   game.best = readBest();
   syncHud();
@@ -1137,6 +1217,7 @@ function init(){
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); holdPiece(); }
   });
 
+  window.addEventListener('pagehide', saveGame);
   window.addEventListener('resize', layout);
   // 字体和外部 CSS 到位后容器尺寸会变，靠 observer 兜住，不然首帧棋盘是塌的
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe($('boardWrap'));
@@ -1147,12 +1228,24 @@ function init(){
   if (window.visualViewport) window.visualViewport.addEventListener('resize', layout);
   // 切到后台自动暂停，回来不至于已经死了
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && game.started && !game.over && !game.paused) togglePause();
+    if (document.hidden){
+      saveGame();
+      if (game.started && !game.over && !game.paused) togglePause();
+    }
     if (!document.hidden && document.body.classList.contains('immersive')) keepAwake(true);
   });
 
   if (launchedAsApp()) { document.body.classList.add('immersive'); keepAwake(true); }
   syncFsBtn();
+  syncMuteBtn();
+
+  // 上次没打完的那局还在，就给个「接着玩」的入口
+  const save = readSave();
+  if (save){
+    $('resumeScore').textContent = (save.score || 0).toLocaleString();
+    $('overlay').classList.add('has-save');
+    $('resumeSaveBtn').addEventListener('click', () => restoreGame(save));
+  }
 
   $('overlay').dataset.mode = 'start';
   $('overlay').classList.add('show');
