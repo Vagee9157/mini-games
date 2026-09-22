@@ -13,10 +13,23 @@ const TOTAL_ROWS = ROWS + BUFFER;
 
 // 两套配色。clear 那套把青/蓝/紫的明度拉开、红橙黄错开，
 // 相邻色块更好分，整体饱和度略降，久看不累。
+const mono = (c) => ({ mono: true, I:c, O:c, T:c, S:c, Z:c, J:c, L:c });
+
 const PALETTES = {
   classic: { I:'#22d3ee', O:'#fbbf24', T:'#a855f7', S:'#4ade80', Z:'#f43f5e', J:'#3b82f6', L:'#fb923c' },
   clear:   { I:'#5ee7f5', O:'#f2c14e', T:'#a463dd', S:'#56c877', Z:'#e8546b', J:'#3f6fd0', L:'#ef8f4a' },
+  // 单色：只看形状，不看颜色
+  cyan:  mono('#4fd8e8'),   // 和界面同一个调子
+  amber: mono('#f0b849'),   // 八十年代那种琥珀色单色显示器，暖、低蓝光
+  paper: mono('#d5e0f2'),   // 月白，最接近线稿
+  mint:  mono('#5fd99a'),   // 老绿屏终端的味道
 };
+
+const PAL_NAMES = {
+  clear: '高区分', classic: '原配色',
+  cyan: '青', amber: '琥珀', paper: '月白', mint: '薄荷',
+};
+const PAL_ORDER = ['clear', 'classic', 'cyan', 'amber', 'paper', 'mint'];
 
 // 四种画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
 const STYLES = {
@@ -136,8 +149,13 @@ function writeBest(v){
 }
 
 // 正在玩的这一局也存下来：手机上切个 App、锁个屏回来还能接着打
-function saveGame(){
+let lastSaveAt = 0;
+function saveGame(force){
   if (!game.started || game.over){ clearSave(); return; }
+  // localStorage 是同步 I/O，连续落块时每次都写会拖帧
+  const now = performance.now();
+  if (!force && now - lastSaveAt < 1500) return;
+  lastSaveAt = now;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       board: game.board,
@@ -434,8 +452,8 @@ function lockPiece(){
     const by = p.y + cy, bx = p.x + cx;
     if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
   }
+  stampToStatic(p);        // 只补这一块，不整盘重画
   game.piece = null;
-  staticDirty = true;
   needsDraw = true;
 
   // 找满行
@@ -531,6 +549,7 @@ function riseGarbage(){
 function endGame(){
   game.over = true;
   game.piece = null;
+  particles.length = 0;
   staticDirty = true;
   needsDraw = true;
   clearSave();
@@ -653,9 +672,13 @@ function drawCell(c, px, py, size, color, opts = {}){
     c.stroke();
     off = lw;
   }
-  if (v.edge){
-    const lw = Math.max(1, d * v.lw), o = off + lw / 2;
-    c.strokeStyle = mix(color, '#ffffff', v.edge);
+  // 单色时相邻方块颜色一样，没有描边就糊成一片，所以强制给一道
+  const isMono = PALETTES[skin.pal].mono;
+  const edge = v.edge || (isMono ? .38 : 0);
+  const elw  = v.lw   || (isMono ? .07 : 0);
+  if (edge){
+    const lw = Math.max(1, d * elw), o = off + lw / 2;
+    c.strokeStyle = mix(color, isMono ? '#05080f' : '#ffffff', isMono ? .42 : edge);
     c.lineWidth = lw;
     roundRect(c, x + o, y + o, d - o * 2, d - o * 2, Math.max(0, R - o));
     c.stroke();
@@ -686,6 +709,17 @@ function hex(h){
     ? h.slice(1).split('').map(x => parseInt(x + x, 16))
     : [1,3,5].map(i => parseInt(h.slice(i, i + 2), 16));
   return v;
+}
+
+// 刚锁定的方块直接盖到静态层上，省掉一次满盘重画。
+// 满盘时全量重画是 150 格 × (fill+stroke)，落一块就来一次，很费。
+function stampToStatic(p){
+  if (staticDirty) return;          // 反正马上要全量重画了
+  for (const [cx, cy] of cellsOf(p.type, p.rot)){
+    const by = p.y + cy;
+    if (by < BUFFER) continue;
+    drawCell(bgCtx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, colorOf(p.type));
+  }
 }
 
 // 格线 + 已落地的方块，画一次存着用
@@ -1172,7 +1206,8 @@ function buildStylePanel(){
   const palWrap = $('palOpts'), stWrap = $('styleOpts');
   palWrap.innerHTML = ''; stWrap.innerHTML = '';
 
-  [['clear', '高区分'], ['classic', '原配色']].forEach(([k, label]) => {
+  PAL_ORDER.forEach((k) => {
+    const label = PAL_NAMES[k] || k;
     const b = document.createElement('button');
     b.className = 'seg-btn' + (skin.pal === k ? ' on' : '');
     b.dataset.pal = k;
@@ -1403,7 +1438,7 @@ function init(){
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); holdPiece(); }
   });
 
-  window.addEventListener('pagehide', saveGame);
+  window.addEventListener('pagehide', () => saveGame(true));
   window.addEventListener('resize', layout);
   // 字体和外部 CSS 到位后容器尺寸会变，靠 observer 兜住，不然首帧棋盘是塌的
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe($('boardWrap'));
@@ -1415,7 +1450,7 @@ function init(){
   // 切到后台自动暂停，回来不至于已经死了
   document.addEventListener('visibilitychange', () => {
     if (document.hidden){
-      saveGame();
+      saveGame(true);
       if (game.started && !game.over && !game.paused) togglePause();
     }
     if (!document.hidden && document.body.classList.contains('immersive')) keepAwake(true);
