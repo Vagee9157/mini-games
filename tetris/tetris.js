@@ -133,6 +133,7 @@ function garbagePeriod(){
 
 const STORE_KEY = 'tetris.best.v1';
 const BUZZ_KEY  = 'tetris.buzz.v1';
+const MUSIC_KEY = 'tetris.music.v1';
 const SKIN_KEY  = 'tetris.skin.v1';
 const SAVE_KEY  = 'tetris.save.v1';
 
@@ -225,6 +226,7 @@ function restoreGame(d){
   lastFrame = performance.now();
   cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(tick);
+  syncMusic();
 }
 
 function readSkin(){
@@ -588,6 +590,7 @@ function endGame(){
   syncHud();
   sfx('over');
   buzz([90, 60, 90, 60, 160]);
+  syncMusic();
 }
 
 // ───────────────────────── 画面 ─────────────────────────
@@ -1040,6 +1043,9 @@ function unlockAudio(){
   } catch { /* 不给就算了 */ }
 }
 
+// 音效总音量。手机外放偏小，之前那一档在车厢、路上基本听不见。
+const SFX_GAIN = 1.9;
+
 function sfx(kind){
   if (muted) return;
   const layers = SPECS[kind];
@@ -1058,12 +1064,158 @@ function sfx(kind){
       o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
       // 直接 setValueAtTime 会"啪"一下削波，给 4ms 的起音更干净
       g.gain.setValueAtTime(.0001, t);
-      g.gain.exponentialRampToValueAtTime(spec.v, t + .004);
+      g.gain.exponentialRampToValueAtTime(Math.min(.9, spec.v * SFX_GAIN), t + .004);
       g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
       o.start(t);
       o.stop(t + spec.d + .02);
     }
   } catch { /* 浏览器不给声音就静音运行 */ }
+}
+
+// ───────────────────────── 背景音乐 ─────────────────────────
+
+// 《Korobeiniki》，1861 年的俄罗斯民谣，公有领域。这里是自己合成的版本，
+// 不加载任何音频文件——离线能放，也不占缓存。
+// 时值单位是八分音符；0 表示休止。
+const BPM = 148;
+const EIGHTH = 60 / BPM / 2;
+
+const A4 = 69, B4 = 71, C5 = 72, D5 = 74, E5 = 76, F5 = 77, G5 = 79, A5 = 81, GS5 = 80;
+const A3 = 57, B3 = 59, C4 = 60, D4 = 62, E4 = 64, GS4 = 68;
+// 低音也得待在手机喇叭放得出来的区间：A2 才 110Hz，外放等于没有，
+// 整条低音线往上挪一个八度。
+const A2 = 57, E2 = 52, D3 = 62;
+
+const MELODY = [
+  // A 段
+  [E5,2],[B4,1],[C5,1],[D5,2],[C5,1],[B4,1],
+  [A4,2],[A4,1],[C5,1],[E5,2],[D5,1],[C5,1],
+  [B4,3],[C5,1],[D5,2],[E5,2],
+  [C5,2],[A4,2],[A4,4],
+  [D5,3],[F5,1],[A5,2],[G5,1],[F5,1],
+  [E5,3],[C5,1],[E5,2],[D5,1],[C5,1],
+  [B4,2],[B4,1],[C5,1],[D5,2],[E5,2],
+  [C5,2],[A4,2],[A4,4],
+  // B 段：低一个八度的长音
+  [E4,4],[C4,4],
+  [D4,4],[B3,4],
+  [C4,4],[A3,4],
+  [GS4,4],[B3,3],[0,1],
+  [E4,4],[C4,4],
+  [D4,4],[B3,4],
+  [C4,4],[E4,4],
+  [A4,4],[GS4,4],
+];
+
+// 每小节的低音根音，一小节 8 个八分
+const BASS = [A2,A2,E2,A2,D3,A2,E2,A2, A2,A2,A2,E2,A2,A2,A2,E2];
+
+let musicOn = true;
+let musicGain = null;     // 音乐总线，暂停时淡出
+let mTimer = 0;           // 调度器
+let mAt = 0;              // 下一个音符的绝对时间
+let mIdx = 0;             // 走到旋律第几个音
+let mBar = 0;             // 走到第几小节（给低音用）
+let mBeat = 0;            // 当前小节内走了几个八分
+
+const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+function musicBus(){
+  if (!musicGain){
+    musicGain = actx.createGain();
+    musicGain.gain.value = 0;
+    // 方波直接出来太扎耳朵，过一道低通削掉高次谐波，剩下老掌机那种闷闷的味道
+    const lp = actx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2200;
+    lp.Q.value = .4;
+    musicGain.connect(lp);
+    lp.connect(actx.destination);
+  }
+  return musicGain;
+}
+
+// 一个音：主音 + 低五度的薄薄一层，听着不那么单薄
+function playNote(m, t, dur, kind){
+  const bus = musicBus();
+  const cfg = kind === 'bass'
+    ? { type: 'triangle', v: .105, rel: .9 }
+    : { type: 'square',   v: .060, rel: .8 };
+  const o = actx.createOscillator();
+  const g = actx.createGain();
+  o.type = cfg.type;
+  o.frequency.setValueAtTime(midi(m), t);
+  o.connect(g); g.connect(bus);
+  const hold = dur * cfg.rel;
+  g.gain.setValueAtTime(.0001, t);
+  g.gain.exponentialRampToValueAtTime(cfg.v, t + .012);
+  g.gain.exponentialRampToValueAtTime(.0001, t + hold);
+  o.start(t);
+  o.stop(t + hold + .02);
+}
+
+// 提前 0.35 秒排好后面的音，setInterval 抖动就不会听出来
+function scheduleMusic(){
+  if (!actx || actx.state !== 'running') return;
+  const ahead = actx.currentTime + .35;
+  let guard = 0;
+  while (mAt < ahead && guard++ < 64){
+    const [note, len] = MELODY[mIdx];
+    if (note) playNote(note, mAt, len * EIGHTH, 'lead');
+    // 低音踩在每小节的第 1、5 个八分上
+    for (let k = 0; k < len; k++){
+      const pos = (mBeat + k) % 8;
+      if (pos === 0 || pos === 4){
+        const bar = (mBar + ((mBeat + k) / 8 | 0)) % BASS.length;
+        playNote(BASS[bar] , mAt + k * EIGHTH, EIGHTH * 3.2, 'bass');
+      }
+    }
+    mAt += len * EIGHTH;
+    mBeat += len;
+    while (mBeat >= 8){ mBeat -= 8; mBar = (mBar + 1) % BASS.length; }
+    mIdx = (mIdx + 1) % MELODY.length;
+  }
+}
+
+function musicStart(){
+  if (!musicOn || muted) return;
+  unlockAudio();
+  if (!actx || actx.state !== 'running') return;
+  const bus = musicBus();
+  bus.gain.cancelScheduledValues(actx.currentTime);
+  bus.gain.setValueAtTime(Math.max(.0001, bus.gain.value), actx.currentTime);
+  bus.gain.linearRampToValueAtTime(.42, actx.currentTime + .5);
+  if (mTimer) return;
+  mAt = actx.currentTime + .12;
+  scheduleMusic();
+  mTimer = setInterval(scheduleMusic, 120);
+}
+
+function musicStop(fade = .35){
+  if (musicGain && actx){
+    const t = actx.currentTime;
+    musicGain.gain.cancelScheduledValues(t);
+    musicGain.gain.setValueAtTime(Math.max(.0001, musicGain.gain.value), t);
+    musicGain.gain.linearRampToValueAtTime(.0001, t + fade);
+  }
+  if (mTimer){ clearInterval(mTimer); mTimer = 0; }
+}
+
+// 只在真正开着局、没暂停、没静音的时候放
+function syncMusic(){
+  const want = musicOn && !muted && game.started && !game.over && !game.paused && !document.hidden;
+  if (want) musicStart(); else musicStop();
+  const b = $('musicBtn');
+  if (b){
+    b.textContent = musicOn ? '音乐：开' : '音乐：关';
+    b.classList.toggle('off', !musicOn);
+  }
+}
+
+function toggleMusic(){
+  musicOn = !musicOn;
+  try { localStorage.setItem(MUSIC_KEY, musicOn ? '1' : '0'); } catch { /* 忽略 */ }
+  syncMusic();
 }
 
 // ───────────────────────── 主循环 ─────────────────────────
@@ -1451,6 +1603,7 @@ function restart(){
   cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(tick);
   sfx('hold');
+  syncMusic();
 }
 
 function togglePause(){
@@ -1466,11 +1619,13 @@ function togglePause(){
     ov.classList.remove('show');
     resumeLoop();
   }
+  syncMusic();
 }
 
 function toggleMute(){
   muted = !muted;
   syncMuteBtn();
+  syncMusic();
   try { localStorage.setItem('tetris.muted.v1', muted ? '1' : '0'); } catch { /* 忽略 */ }
 }
 
@@ -1489,6 +1644,7 @@ function init(){
   try {
     muted = localStorage.getItem('tetris.muted.v1') === '1';
     buzzOn = localStorage.getItem(BUZZ_KEY) !== '0';
+    musicOn = localStorage.getItem(MUSIC_KEY) !== '0';
   } catch { /* 忽略 */ }
   game.board = newBoard();
   game.best = readBest();
@@ -1499,8 +1655,12 @@ function init(){
 
   // 任何一次触碰都先把音频上下文拉起来（iOS 必须在手势里做）
   for (const ev of ['pointerdown', 'touchstart', 'keydown']){
-    window.addEventListener(ev, unlockAudio, { once: true, passive: true });
+    window.addEventListener(ev, () => { unlockAudio(); syncMusic(); }, { once: true, passive: true });
   }
+
+  const mb = $('musicBtn');
+  if (mb) mb.addEventListener('click', toggleMusic);
+  syncMusic();
 
   $('startBtn').addEventListener('click', restart);
   $('againBtn').addEventListener('click', restart);
@@ -1539,7 +1699,7 @@ function init(){
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); holdPiece(); }
   });
 
-  window.addEventListener('pagehide', () => saveGame(true));
+  window.addEventListener('pagehide', () => { saveGame(true); musicStop(0); });
   window.addEventListener('resize', layout);
   // 字体和外部 CSS 到位后容器尺寸会变，靠 observer 兜住，不然首帧棋盘是塌的
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe($('boardWrap'));
@@ -1555,6 +1715,7 @@ function init(){
       if (game.started && !game.over && !game.paused) togglePause();
     }
     if (!document.hidden && document.body.classList.contains('immersive')) keepAwake(true);
+    syncMusic();
   });
 
   if (launchedAsApp()) { document.body.classList.add('immersive'); keepAwake(true); }
