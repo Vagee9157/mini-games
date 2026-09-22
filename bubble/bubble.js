@@ -36,6 +36,9 @@ const ctx = canvas.getContext('2d');
 const bg = document.createElement('canvas');
 const bgCtx = bg.getContext('2d');
 
+// 泡泡从小恐龙嘴里吐出来的位置
+function muzzleY(){ return H - R * 3.55; }
+
 // ── 网格坐标 ──
 const colsIn = (r) => r % 2 ? COLS - 1 : COLS;
 function cellX(r, c){ return R + c * R * 2 + (r % 2 ? R : 0); }
@@ -95,10 +98,20 @@ function restart(){
 function fire(){
   if (over || shot || !started) return;
   const a = clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06);
-  shot = { x: W / 2, y: H - R, vx: Math.cos(a) * SPEED, vy: Math.sin(a) * SPEED, c: cur };
+  shot = { x: W / 2, y: muzzleY(), vx: Math.cos(a) * SPEED, vy: Math.sin(a) * SPEED, c: cur };
   cur = next; next = pickColor();
   shots++;
   sfx('shoot');
+  needsDraw = true;
+}
+
+// 手里这颗和下一颗对调。盘面不合适时这一下很救命。
+function swap(){
+  if (over || shot || !started) return;
+  const t = cur; cur = next; next = t;
+  traceAim();
+  sfx('swap');
+  syncHud();
   needsDraw = true;
 }
 
@@ -158,6 +171,9 @@ function land(){
     const loose = dropFloating();
     if (loose) score += loose * 20;      // 连带掉下来的更值钱
     sfx(same.length >= 5 ? 'big' : 'pop');
+    const total = same.length + loose;
+    if (loose >= 3) toast(`掉了 ${loose} 颗！`);
+    else if (total >= 6) toast(`${total} 连！`);
   } else {
     sfx('stick');
   }
@@ -208,7 +224,9 @@ function dropFloating(){
   return n;
 }
 
-// 整体往下压一行
+// 整体往下压一行。
+// 奇偶行列数不一样（8 / 7），下移时最右那颗装不下会被丢掉，
+// 原本挂在它下面的可能就断了 —— 所以压完必须再跑一次悬空检查。
 function pushDown(){
   for (let r = ROWS - 1; r > 0; r--) {
     const src = grid[r - 1], dst = grid[r];
@@ -217,6 +235,8 @@ function pushDown(){
   grid[0] = new Array(colsIn(0)).fill(null);
   for (let c = 0; c < colsIn(0); c++) grid[0][c] = (Math.random() * COLORS.length) | 0;
   rows++;
+  const loose = dropFloating();
+  if (loose) score += loose * 20;
   staticDirty = true;
 }
 
@@ -241,6 +261,17 @@ function finish(win){
   needsDraw = true;
 }
 
+let toastT = 0;
+function toast(text){
+  const el = $('toast');
+  el.textContent = text;
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 1000);
+}
+
 // ── 消除动画 ──
 function addPop(r, c, color, fall){
   pops.push({ x: cellX(r, c), y: cellY(r), c: color, t: 0, fall: !!fall, vy: fall ? 60 + Math.random() * 90 : 0 });
@@ -259,8 +290,8 @@ function stepPops(dt){
 // 只在角度变了的时候算，不是每帧。
 function traceAim(){
   const a = clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06);
-  const pts = [{ x: W / 2, y: H - R }];
-  let x = W / 2, y = H - R;
+  const pts = [{ x: W / 2, y: muzzleY() }];
+  let x = W / 2, y = muzzleY();
   const vx0 = Math.cos(a), vy0 = Math.sin(a);
   let vx = vx0, vy = vy0;
   const stepLen = R * .55, hitR2 = (R * 1.86) ** 2;
@@ -297,7 +328,7 @@ function layout(){
   if (needH > availH) r *= availH / needH;
   R = Math.floor(r);
   W = R * COLS * 2;
-  H = Math.round(R + (DEAD_ROW + 0.6) * R * SQ3 + R * 2.2);
+  H = Math.round(R + (DEAD_ROW + 0.6) * R * SQ3 + R * 4.0);   // 底下那截留给小恐龙
 
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
@@ -309,7 +340,7 @@ function layout(){
   staticDirty = true; needsDraw = true;
   traceAim();
 }
-function R_needH(r){ return r + (DEAD_ROW + 0.6) * r * SQ3 + r * 2.2; }
+function R_needH(r){ return r + (DEAD_ROW + 0.6) * r * SQ3 + r * 4.0; }
 
 function ball(c, x, y, color, scale = 1, alpha = 1){
   const rr = R * scale;
@@ -327,15 +358,98 @@ function ball(c, x, y, color, scale = 1, alpha = 1){
   c.restore();
 }
 
+// 泡泡龙的发射器本来就是只小恐龙（Bub），把它画出来：
+// 身子跟着瞄准方向轻轻侧一下，眼珠子也跟着看过去。
+function drawDino(c, cx, cy, a){
+  const s = R * .90;
+  const lean = (a + Math.PI / 2) * .30;          // 正上方是 0，越偏侧得越多
+  const look = clamp((a + Math.PI / 2) * .5, -.9, .9);
+
+  c.save();
+  c.translate(cx, cy + R * 2.36);   // 头顶刚好托住嘴上那颗泡泡
+  c.rotate(lean * .5);
+
+  const green = '#4ade80', deep = '#1c8b4e';
+
+  // 尾巴
+  c.fillStyle = deep;
+  c.beginPath();
+  c.moveTo(-s * .2, s * .35);
+  c.quadraticCurveTo(-s * 1.5, s * .5, -s * 1.25, -s * .25);
+  c.quadraticCurveTo(-s * .95, s * .1, -s * .2, s * .05);
+  c.closePath(); c.fill();
+
+  // 两只脚
+  c.fillStyle = deep;
+  for (const dx of [-s * .52, s * .52]){
+    c.beginPath(); c.ellipse(dx, s * .92, s * .34, s * .2, 0, 0, Math.PI * 2); c.fill();
+  }
+
+  // 身子
+  const g = c.createRadialGradient(-s * .3, -s * .35, s * .1, 0, 0, s * 1.25);
+  g.addColorStop(0, '#86efac');
+  g.addColorStop(.6, green);
+  g.addColorStop(1, deep);
+  c.fillStyle = g;
+  c.beginPath(); c.ellipse(0, 0, s * 1.02, s * .95, 0, 0, Math.PI * 2); c.fill();
+
+  // 肚皮
+  c.fillStyle = 'rgba(255,255,230,.85)';
+  c.beginPath(); c.ellipse(0, s * .24, s * .55, s * .48, 0, 0, Math.PI * 2); c.fill();
+
+  // 背上三根小刺
+  c.fillStyle = '#facc15';
+  for (const [bx, by, sz] of [[-s * .82, -s * .46, .26], [-s * .95, -s * .02, .22], [-s * .86, s * .38, .18]]){
+    c.beginPath();
+    c.moveTo(bx, by - s * sz);
+    c.lineTo(bx - s * sz * 1.1, by);
+    c.lineTo(bx, by + s * sz);
+    c.closePath(); c.fill();
+  }
+
+  // 头
+  c.fillStyle = g;
+  c.beginPath(); c.arc(s * .12, -s * .92, s * .74, 0, Math.PI * 2); c.fill();
+
+  // 眼睛：白眼球 + 跟着瞄准方向挪的黑眼珠
+  for (const ex of [-s * .16, s * .42]){
+    c.fillStyle = '#fff';
+    c.beginPath(); c.ellipse(ex, -s * 1.1, s * .22, s * .26, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#0b1120';
+    c.beginPath(); c.arc(ex + look * s * .11, -s * 1.08, s * .12, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.9)';
+    c.beginPath(); c.arc(ex + look * s * .11 - s * .04, -s * 1.13, s * .045, 0, Math.PI * 2); c.fill();
+  }
+
+  // 嘴：一个小小的 O，泡泡就是从这儿吐出去的
+  c.fillStyle = '#7f1d3a';
+  c.beginPath(); c.ellipse(s * .12, -s * .48, s * .2, s * .16, 0, 0, Math.PI * 2); c.fill();
+
+  // 腮红
+  c.fillStyle = 'rgba(244,114,182,.5)';
+  c.beginPath(); c.ellipse(-s * .48, -s * .66, s * .16, s * .1, 0, 0, Math.PI * 2); c.fill();
+
+  c.restore();
+}
+
 function drawStatic(){
   bgCtx.clearRect(0, 0, W, H);
-  // 死亡线
+  // 死亡线；还剩两行以内就烧红加粗，提前给个警告
+  const near = DEAD_ROW - topRow();
+  const hot = near <= 2;
   const dy = cellY(DEAD_ROW) - R * .9;
   bgCtx.save();
-  bgCtx.strokeStyle = 'rgba(244,63,94,.34)';
-  bgCtx.lineWidth = 1.5;
+  bgCtx.strokeStyle = hot ? 'rgba(244,63,94,.85)' : 'rgba(244,63,94,.34)';
+  bgCtx.lineWidth = hot ? 2.5 : 1.5;
   bgCtx.setLineDash([6, 6]);
   bgCtx.beginPath(); bgCtx.moveTo(0, dy); bgCtx.lineTo(W, dy); bgCtx.stroke();
+  if (hot){
+    const grd = bgCtx.createLinearGradient(0, dy - R * 2.2, 0, dy);
+    grd.addColorStop(0, 'rgba(244,63,94,0)');
+    grd.addColorStop(1, 'rgba(244,63,94,.16)');
+    bgCtx.fillStyle = grd;
+    bgCtx.fillRect(0, dy - R * 2.2, W, R * 2.2);
+  }
   bgCtx.restore();
 
   for (let r = 0; r < ROWS; r++)
@@ -381,8 +495,29 @@ function draw(){
   // 飞行中的
   if (shot) ball(ctx, shot.x, shot.y, COLORS[shot.c]);
 
-  // 发射口的这颗
-  if (!over) ball(ctx, W / 2, H - R, COLORS[cur]);
+  // 小恐龙 + 它嘴上叼着的那颗
+  if (!over){
+    drawDino(ctx, W / 2, muzzleY(), clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06));
+    if (!shot) ball(ctx, W / 2, muzzleY(), COLORS[cur]);
+
+    // 旁边的「下一颗」，点它就换手
+    const n = nextSpot();
+    ctx.save();
+    ctx.globalAlpha = .9;
+    ctx.strokeStyle = 'rgba(150,180,230,.30)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 1.35, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    const keep = R; R = n.r;
+    ball(ctx, n.x, n.y, COLORS[next]);
+    R = keep;
+  }
+}
+
+// 「下一颗」摆在小恐龙右手边
+function nextSpot(){
+  return { x: W / 2 + R * 2.6, y: muzzleY() + R * 2.1, r: R * .62 };
 }
 
 function mix(a, b, t){
@@ -411,7 +546,9 @@ function drawNext(){
 function syncHud(){
   $('score').textContent = score.toLocaleString();
   $('best').textContent = best.toLocaleString();
-  $('rows').textContent = Math.max(0, DEAD_ROW - topRow());
+  const left = Math.max(0, DEAD_ROW - topRow());
+  $('rows').textContent = left;
+  $('rowsCell').classList.toggle('warn', left <= 2);
   drawNext();
 }
 function topRow(){
@@ -440,13 +577,18 @@ function bindAim(){
     return { x: t.clientX - box.left, y: t.clientY - box.top };
   };
   const setAim = (p) => {
-    const dx = p.x - W / 2, dy = p.y - (H - R);
+    const dx = p.x - W / 2, dy = p.y - muzzleY();
     if (dy > -R * .4) return;                 // 别往下瞄
     aim = Math.atan2(dy, dx);
     traceAim();
     needsDraw = true;
   };
-  const start = (e) => { if (over || shot) return; aiming = true; setAim(point(e)); };
+  const start = (e) => {
+    if (over || shot) return;
+    const p = point(e), n = nextSpot();
+    if (Math.hypot(p.x - n.x, p.y - n.y) < n.r * 1.9){ swap(); return; }   // 点到「下一颗」= 换手
+    aiming = true; setAim(p);
+  };
   const move  = (e) => { if (!aiming) return; setAim(point(e)); };
   const end   = () => { if (!aiming) return; aiming = false; fire(); };
 
@@ -461,6 +603,7 @@ function bindAim(){
     if (e.code === 'ArrowLeft'){ aim -= .06; needsDraw = true; }
     if (e.code === 'ArrowRight'){ aim += .06; needsDraw = true; }
     if (e.code === 'Space'){ e.preventDefault(); fire(); }
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'ArrowDown'){ e.preventDefault(); swap(); }
     if (e.code === 'KeyR') restart();
     aim = clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06);
     traceAim();
@@ -471,6 +614,7 @@ function bindAim(){
 let actx = null, muted = false;
 const SPECS = {
   shoot: { f: 520, to: 700,  d: .05, v: .024, type: 'sine' },
+  swap:  { f: 400, to: 560,  d: .06, v: .026, type: 'triangle' },
   stick: { f: 300, to: 240,  d: .05, v: .022, type: 'triangle' },
   pop:   { f: 620, to: 900,  d: .12, v: .04,  type: 'sine' },
   big:   { f: 520, to: 1180, d: .26, v: .055, type: 'triangle' },
@@ -533,7 +677,7 @@ function syncMute(){
 window.__bubble = {
   get grid(){ return grid; },
   get state(){ return { score, best, shots, over, won, started, R, W, H, cur, next, shot: !!shot, rows }; },
-  restart, fire, land: () => land(),
+  restart, fire, swap, land: () => land(), checkEnd, dropFloating,
   setAim: (a) => { aim = a; traceAim(); needsDraw = true; },
   colsIn, neighbours, COLORS, DEAD_ROW, ROWS, COLS,
 };

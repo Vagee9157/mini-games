@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
 <link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
-<link rel="stylesheet" href="bubble.css?v=837bf23d">
+<link rel="stylesheet" href="bubble.css?v=4ff7cd54">
 </head>
 <body>
 <div class="topline"></div>
@@ -45,20 +45,22 @@
   <div class="hud">
     <div class="cell hi"><span>得分</span><b id="score">0</b></div>
     <div class="cell"><span>最高</span><b id="best">0</b></div>
-    <div class="cell"><span>离底线</span><b id="rows">0</b></div>
+    <div class="cell" id="rowsCell"><span>离底线</span><b id="rows">0</b></div>
     <div class="cell next"><span>下一颗</span><canvas id="nextCv"></canvas></div>
   </div>
 
   <div class="boardwrap" id="boardWrap">
     <canvas id="board"></canvas>
+    <div class="toast" id="toast"></div>
 
     <div class="overlay" id="overlay" data-mode="start">
       <div class="card">
         <div data-when="start">
           <h2>泡泡<span class="neon">龙</span></h2>
           <p>
-            在棋盘上<b>拖着瞄准，松手就发</b>；也可以用下面那个按钮直发。<br>
-            三个同色连上就消，<b>被消断了的一串会整片掉下来</b>，掉落的更值分。
+            在棋盘上<b>拖着瞄准，松手就发</b>，瞄准线会把撞墙反弹算进去。<br>
+            三个同色连上就消，<b>被打断的一串会整片掉下来</b>，掉落的更值分。<br>
+            手里这颗不合适？<b>点小恐龙旁边那颗就换手</b>。
           </p>
           <button class="pbtn" id="startBtn">开始</button>
         </div>
@@ -87,10 +89,10 @@
     </button>
   </div>
 
-  <div class="hint">拖着瞄准 · 松手发射 · 键盘 ←→ 调整、空格发射</div>
+  <div class="hint">拖着瞄准 · 松手发射 · 点旁边那颗换手 · 键盘 ←→ 空格 Shift</div>
 
 </div>
 
-<script src="bubble.js?v=8b69899e"></script>
+<script src="bubble.js?v=d007ebf5"></script>
 </body>
 </html>
