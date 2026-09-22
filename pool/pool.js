@@ -51,6 +51,10 @@ let winner = -1;
 let shotFirstHit = 0, shotPotted = [], shotCushion = false;
 let msg = '', msgT = 0;
 let rafId = 0, lastT = 0, needsDraw = true;
+let recoil = 0;            // 出杆瞬间杆往前冲一下，再慢慢回位
+
+// 杆当前该退多远：蓄力时按力度退，出杆瞬间往前冲
+function cueBack(){ return Math.max(0, power * R * 7 - recoil); }
 
 const canvas = $('board');
 const ctx = canvas.getContext('2d');
@@ -426,7 +430,7 @@ function searchShot(who, bank){
 
       const score = cut * 2.2 - (cd + d) / (TW + TH);
       if (!best || score > best.score){
-        best = { score, aim: Math.atan2(cdy, cdx), cut, dist: cd + d, bank: !!p.wall };
+        best = { score, aim: Math.atan2(cdy, cdx), cut, dist: cd + d, bank: !!p.wall, target: t.n };
       }
     }
   }
@@ -523,6 +527,7 @@ function shoot(){
   shotFirstHit = 0; shotPotted = []; shotCushion = false;
   moving = true; ballInHand = false;
   shots++;
+  recoil = R * 9;            // 杆往前送出去，随后在 tick 里回位
   power = 0;
   sfx('hit');
   needsDraw = true;
@@ -554,23 +559,16 @@ function layout(){
   const wrap = $('boardWrap');
   const aw = wrap.clientWidth, ah = wrap.clientHeight;
   if (!aw || !ah) return;
-  const portrait = ah > aw;
-  // 台面 1:2；竖屏竖着放，横屏横着放
-  const ratio = 2;
-  let w, h;
-  if (portrait){
-    w = Math.min(aw, ah / ratio);
-    h = w * ratio;
-  } else {
-    h = Math.min(ah, aw / ratio);
-    w = h * ratio;
-  }
-  CU = Math.max(10, Math.round(Math.min(w, h) * .055));
-  TW = Math.round(w - CU * 2);
-  TH = Math.round(h - CU * 2);
-  if (!portrait){ const t = TW; TW = Math.round(h - CU * 2); TH = Math.round(w - CU * 2); }
-  // 统一成「竖着的台面」，横屏时整体旋转画
-  R = Math.max(6, Math.round(Math.min(TW, TH) / 22));
+  // 台面永远竖着放（长边垂直，朝上打），横屏时就是两边留白。
+  // 严格 1:2（标准球台 254×127cm）：先定库边，再让内框刚好卡进可用空间。
+  CU = Math.max(9, Math.round(Math.min(aw, ah / 2) * .062));   // 真库边约占台面宽 4~5%
+  let th = Math.min(ah - CU * 2, (aw - CU * 2) * 2);
+  TW = Math.max(40, Math.round(th / 2));
+  TH = TW * 2;
+
+  // 真实台球桌：台面宽度约等于 19.6 个球（8 尺台）到 22 个球（9 尺台）。
+  // 原来按 11 个球算，球整整大了一倍，看着像弹珠不像台球。
+  R = Math.max(5, Math.round(Math.min(TW, TH) / 39.2));
   W = TW + CU * 2; H = TH + CU * 2;
 
   const pr = R * 1.58;   // 再大就变成「沿边滚过去也掉」
@@ -622,19 +620,21 @@ function drawBall(c, b){
   c.restore();
 
   // 号码：白圆底 + 数字。6 和 9 底下加一横，倒过来不会认错
-  if (b.n > 0 && R > 8){
+  if (b.n > 0 && R >= 5){
     c.save();
     c.fillStyle = '#fbfcfd';
     c.beginPath(); c.arc(b.x, b.y, R * .43, 0, Math.PI * 2); c.fill();
     c.strokeStyle = 'rgba(0,0,0,.10)'; c.lineWidth = .8; c.stroke();
 
-    c.fillStyle = '#111827';
-    const fs = Math.round(R * (b.n > 9 ? .50 : .58));
-    c.font = `700 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
-    c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(String(b.n), b.x, b.y + R * .02);
-    if (b.n === 6 || b.n === 9){
-      c.fillRect(b.x - fs * .28, b.y + R * .26, fs * .56, Math.max(1, R * .05));
+    if (R >= 9){                       // 球够大才写得下数字
+      c.fillStyle = '#111827';
+      const fs = Math.round(R * (b.n > 9 ? .52 : .60));
+      c.font = `700 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(String(b.n), b.x, b.y + R * .02);
+      if (b.n === 6 || b.n === 9){
+        c.fillRect(b.x - fs * .28, b.y + R * .28, fs * .56, Math.max(1, R * .06));
+      }
     }
     c.restore();
   }
@@ -659,6 +659,85 @@ function drawBall(c, b){
   c.strokeStyle = 'rgba(0,0,0,.34)';
   c.lineWidth = 1;
   c.beginPath(); c.arc(b.x, b.y, R - .5, 0, Math.PI * 2); c.stroke();
+}
+
+// 画球杆。真实球杆约 1.45m，球直径 5.7cm，所以杆长差不多 25 个球径；
+// 这里取 20 个，太长会戳出台面外。
+// pull 是蓄力拉开的距离：拉得越多杆退得越远，杆身也越烫。
+function drawCue(c, x, y, angle, pull){
+  const len = R * 26;          // 真杆约 25 个球径长，画 26 个，再长就戳出台面了
+  const gap = R * 1.5 + pull;                 // 皮头离白球多远
+  const tipX = x - Math.cos(angle) * gap;
+  const tipY = y - Math.sin(angle) * gap;
+  const endX = tipX - Math.cos(angle) * len;
+  const endY = tipY - Math.sin(angle) * len;
+
+  const nx = -Math.sin(angle), ny = Math.cos(angle);   // 法线，用来做杆的粗细
+  const wTip = Math.max(1.4, R * .19);                 // 前端细
+  const wEnd = Math.max(2.6, R * .40);                 // 后把粗
+
+  c.save();
+
+  // 杆影，让它像是浮在台面上
+  c.globalAlpha = .28;
+  c.fillStyle = '#000';
+  c.beginPath();
+  c.moveTo(tipX + nx * wTip + R * .22, tipY + ny * wTip + R * .3);
+  c.lineTo(endX + nx * wEnd + R * .22, endY + ny * wEnd + R * .3);
+  c.lineTo(endX - nx * wEnd + R * .22, endY - ny * wEnd + R * .3);
+  c.lineTo(tipX - nx * wTip + R * .22, tipY - ny * wTip + R * .3);
+  c.closePath(); c.fill();
+  c.globalAlpha = 1;
+
+  // 杆身：前段浅木、后把深木；蓄力越满越往红里走
+  const heat = clamp(pull / (R * 7), 0, 1);
+  const wood0 = mix('#e8d3a8', '#ff8f6b', heat * .55);
+  const wood1 = mix('#8b5a2b', '#a0332c', heat * .5);
+  const g = c.createLinearGradient(tipX, tipY, endX, endY);
+  g.addColorStop(0,   wood0);
+  g.addColorStop(.28, mix(wood0, wood1, .35));
+  g.addColorStop(.62, wood1);
+  g.addColorStop(1,   mix(wood1, '#2b1a10', .55));
+  c.fillStyle = g;
+  c.beginPath();
+  c.moveTo(tipX + nx * wTip, tipY + ny * wTip);
+  c.lineTo(endX + nx * wEnd, endY + ny * wEnd);
+  c.lineTo(endX - nx * wEnd, endY - ny * wEnd);
+  c.lineTo(tipX - nx * wTip, tipY - ny * wTip);
+  c.closePath(); c.fill();
+
+  // 杆身高光，一条细亮线
+  c.strokeStyle = 'rgba(255,255,255,.22)';
+  c.lineWidth = Math.max(.8, R * .07);
+  c.beginPath();
+  c.moveTo(tipX + nx * wTip * .35, tipY + ny * wTip * .35);
+  c.lineTo(endX + nx * wEnd * .35, endY + ny * wEnd * .35);
+  c.stroke();
+
+  // 前箍（银色）+ 皮头（蓝色）
+  const fx = tipX - Math.cos(angle) * R * .55, fy = tipY - Math.sin(angle) * R * .55;
+  c.strokeStyle = '#e6e8ec';
+  c.lineWidth = wTip * 2.1;
+  c.beginPath(); c.moveTo(tipX, tipY); c.lineTo(fx, fy); c.stroke();
+  c.strokeStyle = '#3b6fb5';
+  c.lineWidth = wTip * 2.2;
+  c.beginPath();
+  c.moveTo(tipX, tipY);
+  c.lineTo(tipX + Math.cos(angle) * R * .22, tipY + Math.sin(angle) * R * .22);
+  c.stroke();
+
+  // 后把的缠绳
+  c.strokeStyle = 'rgba(20,12,8,.5)';
+  c.lineWidth = Math.max(1, R * .1);
+  for (let i = 0; i < 7; i++){
+    const t = .66 + i * .045;
+    const px = tipX + (endX - tipX) * t, py = tipY + (endY - tipY) * t;
+    c.beginPath();
+    c.moveTo(px + nx * wEnd * .95, py + ny * wEnd * .95);
+    c.lineTo(px - nx * wEnd * .95, py - ny * wEnd * .95);
+    c.stroke();
+  }
+  c.restore();
 }
 
 function draw(){
@@ -709,7 +788,7 @@ function draw(){
     ctx.beginPath(); ctx.arc(p.x, p.y, vr * .92, Math.PI * .15, Math.PI * .85); ctx.stroke();
   }
 
-  // 瞄准辅助
+  // 瞄准辅助（球都停了才画杆和辅助线）
   if (!moving && phase !== 'over'){
     const pv = aimPreview();
     const c = cue();
@@ -733,15 +812,26 @@ function draw(){
     }
     ctx.restore();
 
-    // 拉杆力度
-    if (pulling && power > .02){
+    // 球杆：平时贴着白球，蓄力时往后拉开，松手弹回去
+    drawCue(ctx, c.x, c.y, aimA, cueBack());
+
+    // 力度条：顺着杆身方向铺一条，满力变红
+    if (power > .02){
       ctx.save();
-      ctx.strokeStyle = `rgba(${Math.round(120 + 135 * power)},${Math.round(220 - 150 * power)},120,.85)`;
-      ctx.lineWidth = Math.max(3, R * .5);
+      const bx = c.x - Math.cos(aimA) * R * 2.0, by = c.y - Math.sin(aimA) * R * 2.0;
+      const nx = -Math.sin(aimA), ny = Math.cos(aimA);
+      const L = R * 7;
       ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(255,255,255,.14)';
+      ctx.lineWidth = Math.max(3, R * .5);
       ctx.beginPath();
-      ctx.moveTo(c.x - Math.cos(aimA) * R * 1.4, c.y - Math.sin(aimA) * R * 1.4);
-      ctx.lineTo(c.x - Math.cos(aimA) * (R * 1.4 + power * R * 5), c.y - Math.sin(aimA) * (R * 1.4 + power * R * 5));
+      ctx.moveTo(bx + nx * R * 2.2, by + ny * R * 2.2);
+      ctx.lineTo(bx + nx * R * 2.2 - Math.cos(aimA) * L, by + ny * R * 2.2 - Math.sin(aimA) * L);
+      ctx.stroke();
+      ctx.strokeStyle = power > .8 ? '#f43f5e' : power > .5 ? '#fbbf24' : '#4ade80';
+      ctx.beginPath();
+      ctx.moveTo(bx + nx * R * 2.2, by + ny * R * 2.2);
+      ctx.lineTo(bx + nx * R * 2.2 - Math.cos(aimA) * L * power, by + ny * R * 2.2 - Math.sin(aimA) * L * power);
       ctx.stroke();
       ctx.restore();
     }
@@ -763,6 +853,11 @@ function mix(a, b, t){
   return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`;
 }
 function hex(h){
+  // mix() 吐出来的是 rgb(...)，球杆的渐变会把它再喂回 mix()，所以两种格式都得认
+  if (h[0] === 'r'){
+    const m = h.match(/\d+/g);
+    return m ? m.slice(0, 3).map(Number) : [255, 255, 255];
+  }
   return h.length === 4 ? h.slice(1).split('').map(x => parseInt(x + x, 16))
                         : [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 }
@@ -887,6 +982,7 @@ function tick(now){
   rafId = requestAnimationFrame(tick);
   const dt = Math.min(now - lastT, 50);
   lastT = now;
+  if (recoil > 0){ recoil = Math.max(0, recoil - dt * R * .05); needsDraw = true; }
   if (moving) physics(dt);
   if (needsDraw || moving){ draw(); needsDraw = false; }
 }
