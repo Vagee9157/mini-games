@@ -33,8 +33,8 @@
       <a class="back" href="../">← 合集</a>
       <h1>俄罗斯方块<em>TETRIS</em></h1>
       <div class="sp"></div>
-      <button class="tbtn" id="fsBtn" aria-label="进入游戏模式">⛶ 游戏模式</button>
-      <button class="tbtn" id="muteBtn">静音</button>
+      <button class="tbtn" id="skinBtn" aria-label="换方块样式">样式</button>
+      <button class="tbtn tbtn-ic" id="fsBtn" aria-label="进入游戏模式"><i id="fsIc">⛶</i><span id="fsTx">游戏模式</span></button>
       <button class="tbtn" id="pauseBtn">暂停</button>
       <button class="tbtn" id="restartBtn">重开</button>
     </header>
@@ -99,16 +99,30 @@
     <!-- 按键区：上排四个功能键，右下角单独一个落底 -->
     <div class="pads">
       <div class="pad-g pad-l">
-        <button class="k" id="btnLeft"  aria-label="左移"><span class="ico">←</span><em>左移</em></button>
-        <button class="k" id="btnRight" aria-label="右移"><span class="ico">→</span><em>右移</em></button>
+        <button class="k" id="btnLeft"  aria-label="左移"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 6.2 8.4 12l5.8 5.8"/></svg><em>左移</em></button>
+        <button class="k" id="btnRight" aria-label="右移"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.8 6.2 15.6 12l-5.8 5.8"/></svg><em>右移</em></button>
       </div>
       <div class="pad-g pad-r">
-        <button class="k" id="btnDown" aria-label="软降"><span class="ico">↓</span><em>软落</em></button>
-        <button class="k" id="btnCw"   aria-label="旋转"><span class="ico">↻</span><em>变换</em></button>
-        <button class="k k-drop" id="btnDrop" aria-label="直接落底"><span class="ico">⤓</span><em>落底</em></button>
+        <button class="k" id="btnDown" aria-label="软降"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 8.2 12 14l5.8-5.8"/><path d="M6.2 14.6 12 20.4l5.8-5.8" opacity=".42"/></svg><em>软落</em></button>
+        <button class="k" id="btnCw"   aria-label="旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.2 12a7.2 7.2 0 1 1-2.1-5.1"/><path d="M19.2 4.6v4.4h-4.4"/></svg><em>变换</em></button>
+        <button class="k k-drop" id="btnDrop" aria-label="直接落底"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v8.2"/><path d="M7.8 8 12 12.2 16.2 8"/><path d="M6.2 17.8h11.6"/></svg><em>落底</em></button>
       </div>
     </div>
 
+  </div>
+
+  <div class="sheet" id="styleSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top">
+        <h3>方块样式</h3>
+        <button class="row-btn" id="muteBtn">音效：开</button>
+      </div>
+      <span class="sheet-lb">配色</span>
+      <div class="seg" id="palOpts"></div>
+      <span class="sheet-lb">画法</span>
+      <div class="seg seg-4" id="styleOpts"></div>
+      <button class="pbtn sheet-done" id="skinDone">好了</button>
+    </div>
   </div>
 
   <div class="hint">点 HOLD 框暂存<span class="only-wide"> · 键盘 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>空格</kbd> 也能玩</span> · 分数只存在这台设备上</div>

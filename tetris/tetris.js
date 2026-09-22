@@ -11,46 +11,64 @@ const ROWS = 20;        // 可见行
 const BUFFER = 2;       // 顶部隐藏行，方块在这里出生
 const TOTAL_ROWS = ROWS + BUFFER;
 
+// 两套配色。clear 那套把青/蓝/紫的明度拉开、红橙黄错开，
+// 相邻色块更好分，整体饱和度略降，久看不累。
+const PALETTES = {
+  classic: { I:'#22d3ee', O:'#fbbf24', T:'#a855f7', S:'#4ade80', Z:'#f43f5e', J:'#3b82f6', L:'#fb923c' },
+  clear:   { I:'#5ee7f5', O:'#f2c14e', T:'#a463dd', S:'#56c877', Z:'#e8546b', J:'#3f6fd0', L:'#ef8f4a' },
+};
+
+// 四种画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
+const STYLES = {
+  gap:   { name:'宽缝',  gap:.10,  fill:.14, edge:.30, lw:.07, rad:.20 },
+  soft:  { name:'柔和',  gap:.10,  fill:.22, edge:.40, lw:.06, rad:.26 },
+  ring:  { name:'暗圈',  gap:.085, fill:.14, edge:.32, lw:.07, rad:.20, ring:.40 },
+  plain: { name:'纯色',  gap:.13,  fill:.10, edge:0,   lw:0,   rad:.22 },
+};
+
+const skin = { pal: 'clear', style: 'gap' };
+function colorOf(type){ return PALETTES[skin.pal][type]; }
+
 // 每种方块的四个旋转态，坐标是它在自己 box 里的格子位置 [x, y]。
 // 直接写死每一态，比用旋转矩阵算更不容易在旋转中心上出错。
 const PIECES = {
-  I: { box: 4, spawnX: 3, color: '#22d3ee', states: [
+  I: { box: 4, spawnX: 3, states: [
     [[0,1],[1,1],[2,1],[3,1]],
     [[2,0],[2,1],[2,2],[2,3]],
     [[0,2],[1,2],[2,2],[3,2]],
     [[1,0],[1,1],[1,2],[1,3]],
   ]},
-  O: { box: 2, spawnX: 4, color: '#fbbf24', states: [
+  O: { box: 2, spawnX: 4, states: [
     [[0,0],[1,0],[0,1],[1,1]],
     [[0,0],[1,0],[0,1],[1,1]],
     [[0,0],[1,0],[0,1],[1,1]],
     [[0,0],[1,0],[0,1],[1,1]],
   ]},
-  T: { box: 3, spawnX: 3, color: '#a855f7', states: [
+  T: { box: 3, spawnX: 3, states: [
     [[1,0],[0,1],[1,1],[2,1]],
     [[1,0],[1,1],[2,1],[1,2]],
     [[0,1],[1,1],[2,1],[1,2]],
     [[1,0],[0,1],[1,1],[1,2]],
   ]},
-  S: { box: 3, spawnX: 3, color: '#4ade80', states: [
+  S: { box: 3, spawnX: 3, states: [
     [[1,0],[2,0],[0,1],[1,1]],
     [[1,0],[1,1],[2,1],[2,2]],
     [[1,1],[2,1],[0,2],[1,2]],
     [[0,0],[0,1],[1,1],[1,2]],
   ]},
-  Z: { box: 3, spawnX: 3, color: '#f43f5e', states: [
+  Z: { box: 3, spawnX: 3, states: [
     [[0,0],[1,0],[1,1],[2,1]],
     [[2,0],[1,1],[2,1],[1,2]],
     [[0,1],[1,1],[1,2],[2,2]],
     [[1,0],[0,1],[1,1],[0,2]],
   ]},
-  J: { box: 3, spawnX: 3, color: '#3b82f6', states: [
+  J: { box: 3, spawnX: 3, states: [
     [[0,0],[0,1],[1,1],[2,1]],
     [[1,0],[2,0],[1,1],[1,2]],
     [[0,1],[1,1],[2,1],[2,2]],
     [[1,0],[1,1],[0,2],[1,2]],
   ]},
-  L: { box: 3, spawnX: 3, color: '#fb923c', states: [
+  L: { box: 3, spawnX: 3, states: [
     [[2,0],[0,1],[1,1],[2,1]],
     [[1,0],[1,1],[1,2],[2,2]],
     [[0,1],[1,1],[2,1],[0,2]],
@@ -97,6 +115,7 @@ function gravityFor(level){
 }
 
 const STORE_KEY = 'tetris.best.v1';
+const SKIN_KEY  = 'tetris.skin.v1';
 
 // ───────────────────────── 工具 ─────────────────────────
 
@@ -109,6 +128,17 @@ function readBest(){
 }
 function writeBest(v){
   try { localStorage.setItem(STORE_KEY, String(v)); } catch { /* 存不了就算了 */ }
+}
+
+function readSkin(){
+  try {
+    const raw = JSON.parse(localStorage.getItem(SKIN_KEY) || 'null');
+    if (raw && PALETTES[raw.pal] && STYLES[raw.style]) return raw;
+  } catch { /* 坏数据就用默认 */ }
+  return null;
+}
+function writeSkin(){
+  try { localStorage.setItem(SKIN_KEY, JSON.stringify(skin)); } catch { /* 忽略 */ }
 }
 
 // ───────────────────────── 游戏状态 ─────────────────────────
@@ -128,6 +158,7 @@ const game = {
   best: readBest(),
   over: false,
   paused: false,
+  frozen: false,      // 样式面板开着时暂停推进，但画面照常刷新
   started: false,
   lastRotKick: -1,    // 最近一次旋转用了第几个踢墙偏移，判 T-spin 用
   lastWasRot: false,
@@ -309,7 +340,7 @@ function lockPiece(){
   const p = game.piece;
   if (!p) return;
   const spin = detectTSpin();
-  const color = PIECES[p.type].color;
+  const color = colorOf(p.type);
 
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
     const by = p.y + cy, bx = p.x + cx;
@@ -437,53 +468,55 @@ function layout(){
   draw();
 }
 
-// 一个方块格：底色 + 高光斜面 + 外发光，做出「会发光的塑料」质感
+// 画一个方块格。具体长相由当前 skin.style 决定，见上面的 STYLES。
 function drawCell(c, px, py, size, color, opts = {}){
-  const { ghost = false, alpha = 1, glow = true } = opts;
-  const pad = Math.max(1, size * 0.06);
-  const x = px + pad, y = py + pad, s = size - pad * 2;
-  const r = Math.max(2, s * 0.18);
+  const { ghost = false, alpha = 1 } = opts;
+  const v = STYLES[skin.style];
+  const g = size * v.gap, x = px + g, y = py + g, d = size - g * 2;
+  const R = v.rad * d;
 
   c.save();
   c.globalAlpha = alpha;
 
   if (ghost){
+    c.globalAlpha = alpha * .40;
     c.strokeStyle = color;
-    c.globalAlpha = alpha * 0.42;
-    c.lineWidth = Math.max(1.5, s * 0.09);
-    roundRect(c, x, y, s, s, r);
+    c.lineWidth = Math.max(1.5, d * .075);
+    roundRect(c, x + 1, y + 1, d - 2, d - 2, R);
     c.stroke();
-    c.globalAlpha = alpha * 0.10;
+    c.globalAlpha = alpha * .07;
     c.fillStyle = color;
     c.fill();
     c.restore();
     return;
   }
 
-  if (glow){
-    c.shadowColor = color;
-    c.shadowBlur = size * 0.45;
+  c.fillStyle = mix(color, '#0a1020', v.fill);
+  roundRect(c, x, y, d, d, R);
+  c.fill();
+
+  let off = 0;
+  if (v.ring){            // 先压一圈暗边，相邻同色系方块也能分开
+    const lw = Math.max(1, d * .09);
+    c.strokeStyle = mix(color, '#050912', v.ring);
+    c.lineWidth = lw;
+    roundRect(c, x + lw / 2, y + lw / 2, d - lw, d - lw, Math.max(0, R - lw / 2));
+    c.stroke();
+    off = lw;
   }
-  const g = c.createLinearGradient(x, y, x, y + s);
-  g.addColorStop(0, mix(color, '#ffffff', .30));
-  g.addColorStop(.52, color);
-  g.addColorStop(1, mix(color, '#000010', .34));
-  c.fillStyle = g;
-  roundRect(c, x, y, s, s, r);
-  c.fill();
-
-  c.shadowBlur = 0;
-  // 顶部高光
-  c.globalAlpha = alpha * .55;
-  c.fillStyle = mix(color, '#ffffff', .62);
-  roundRect(c, x + s * .16, y + s * .12, s * .68, s * .16, s * .07);
-  c.fill();
-
+  if (v.edge){
+    const lw = Math.max(1, d * v.lw), o = off + lw / 2;
+    c.strokeStyle = mix(color, '#ffffff', v.edge);
+    c.lineWidth = lw;
+    roundRect(c, x + o, y + o, d - o * 2, d - o * 2, Math.max(0, R - o));
+    c.stroke();
+  }
   c.restore();
 }
 
 function roundRect(c, x, y, w, h, r){
   c.beginPath();
+  if (r <= 0){ c.rect(x, y, w, h); return; }
   if (c.roundRect) { c.roundRect(x, y, w, h, r); return; }
   c.moveTo(x + r, y);
   c.arcTo(x + w, y,     x + w, y + h, r);
@@ -542,7 +575,7 @@ function draw(){
   // 落点虚影 + 当前块
   const p = game.piece;
   if (p && !game.over){
-    const color = PIECES[p.type].color;
+    const color = colorOf(p.type);
     let gy = p.y;
     while (!collides(p.type, p.x, gy + 1, p.rot)) gy++;
     if (gy !== p.y){
@@ -595,14 +628,14 @@ function drawMini(c, type, ox, oy, w, h, alpha){
   const px = ox + (w - bw * cell) / 2;
   const py = oy + (h - bh * cell) / 2;
   for (const [cx, cy] of cells){
-    drawCell(c, px + (cx - minX) * cell, py + (cy - minY) * cell, cell, def.color, { alpha, glow: alpha > .5 });
+    drawCell(c, px + (cx - minX) * cell, py + (cy - minY) * cell, cell, colorOf(type), { alpha });
   }
 }
 
 // ───────────────────────── 粒子 ─────────────────────────
 
 function burst(p, power){
-  const color = PIECES[p.type].color;
+  const color = colorOf(p.type);
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
     const by = p.y + cy;
     if (by < BUFFER) continue;
@@ -725,7 +758,7 @@ function tick(now){
   dbg.frames++;
   const dt = Math.min(now - lastFrame, 100);   // 切后台回来不要瞬移
   lastFrame = now;
-  if (game.paused || game.over) { draw(); return; }
+  if (game.paused || game.over || game.frozen) { draw(); return; }
 
   stepParticles(dt);
   handleAutoRepeat(dt);
@@ -867,6 +900,80 @@ function bindButtons(){
   }
 }
 
+// ───────────────────────── 样式切换 ─────────────────────────
+
+// 面板里每个选项的小预览：三个最容易混的颜色摆一起
+function paintSwatch(cv, pal, style, mode){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 96, h = cv.clientHeight || 30;
+  if (!w || !h) return;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const keep = { pal: skin.pal, style: skin.style };
+  skin.pal = pal; skin.style = style;      // 借 drawCell 当前状态画预览
+
+  if (mode === 'grid'){
+    // 2×2：缝隙、描边这些差别要有相邻方块才看得出来
+    const s = Math.min(h / 2, w / 2);
+    const ox = (w - s * 2) / 2, oy = (h - s * 2) / 2;
+    [['I', 0, 0], ['J', 1, 0], ['T', 0, 1], ['Z', 1, 1]].forEach(([t, gx, gy]) => {
+      drawCell(c, ox + gx * s, oy + gy * s, s, colorOf(t));
+    });
+  } else {
+    const s = Math.min(h, w / 4);
+    ['I', 'J', 'T', 'Z'].forEach((t, i) => {
+      drawCell(c, i * s + (w - s * 4) / 2, (h - s) / 2, s, colorOf(t));
+    });
+  }
+  skin.pal = keep.pal; skin.style = keep.style;
+}
+
+function buildStylePanel(){
+  const palWrap = $('palOpts'), stWrap = $('styleOpts');
+  palWrap.innerHTML = ''; stWrap.innerHTML = '';
+
+  [['clear', '高区分'], ['classic', '原配色']].forEach(([k, label]) => {
+    const b = document.createElement('button');
+    b.className = 'seg-btn' + (skin.pal === k ? ' on' : '');
+    b.dataset.pal = k;
+    b.innerHTML = `<canvas></canvas><span>${label}</span>`;
+    b.addEventListener('click', () => { skin.pal = k; applySkin(); });
+    palWrap.appendChild(b);
+    paintSwatch(b.querySelector('canvas'), k, skin.style, 'row');
+  });
+
+  Object.keys(STYLES).forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'seg-btn' + (skin.style === k ? ' on' : '');
+    b.dataset.style = k;
+    b.innerHTML = `<canvas></canvas><span>${STYLES[k].name}</span>`;
+    b.addEventListener('click', () => { skin.style = k; applySkin(); });
+    stWrap.appendChild(b);
+    paintSwatch(b.querySelector('canvas'), skin.pal, k, 'grid');
+  });
+}
+
+function applySkin(){
+  writeSkin();
+  buildStylePanel();
+  draw();
+}
+
+function toggleStylePanel(open){
+  const el = $('styleSheet');
+  const show = open === undefined ? el.hidden : open;
+  if (show){
+    el.hidden = false;
+    buildStylePanel();
+    requestAnimationFrame(buildStylePanel);   // 首帧 canvas 还没量到宽高
+  } else {
+    el.hidden = true;
+  }
+  game.frozen = show;        // 挑样式的时候方块别接着往下掉
+  if (!show) lastFrame = performance.now();
+}
+
 // ───────────────────────── 游戏模式 ─────────────────────────
 // iPhone 的 Safari 不给网页真全屏，所以这里分两层：
 // 能用 Fullscreen API 就用；用不了也至少把页面上的壳收起来，把棋盘放到最大。
@@ -892,9 +999,9 @@ function fsElement(){
 
 function syncFsBtn(){
   const on = document.body.classList.contains('immersive');
-  const b = $('fsBtn');
-  b.textContent = on ? '✕ 退出' : '⛶ 游戏模式';
-  b.setAttribute('aria-label', on ? '退出游戏模式' : '进入游戏模式');
+  $('fsIc').textContent = on ? '✕' : '⛶';
+  $('fsTx').textContent = on ? '退出' : '游戏模式';
+  $('fsBtn').setAttribute('aria-label', on ? '退出游戏模式' : '进入游戏模式');
 }
 
 async function enterGameMode(){
@@ -961,6 +1068,7 @@ function restart(){
   game.b2b = false;
   game.over = false;
   game.paused = false;
+  game.frozen = false;
   game.started = true;
   particles.length = 0;
   clearing = null;
@@ -993,13 +1101,15 @@ function togglePause(){
 
 function toggleMute(){
   muted = !muted;
-  $('muteBtn').textContent = muted ? '开声音' : '静音';
+  $('muteBtn').textContent = muted ? '音效：关' : '音效：开';
   $('muteBtn').classList.toggle('off', muted);
 }
 
 // ───────────────────────── 启动 ─────────────────────────
 
 function init(){
+  const savedSkin = readSkin();
+  if (savedSkin) { skin.pal = savedSkin.pal; skin.style = savedSkin.style; }
   game.board = newBoard();
   game.best = readBest();
   syncHud();
@@ -1014,6 +1124,9 @@ function init(){
   $('restartBtn').addEventListener('click', restart);
   $('muteBtn').addEventListener('click', toggleMute);
   $('fsBtn').addEventListener('click', toggleGameMode);
+  $('skinBtn').addEventListener('click', () => toggleStylePanel());
+  $('skinDone').addEventListener('click', () => toggleStylePanel(false));
+  $('styleSheet').addEventListener('click', (e) => { if (e.target.id === 'styleSheet') toggleStylePanel(false); });
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
   // HOLD 框本身就是暂存按钮，手机上没地方再塞一个键
