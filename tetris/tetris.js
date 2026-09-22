@@ -671,10 +671,10 @@ function drawCell(c, px, py, size, color, opts = {}){
 
   if (garbage){
     // 底部顶上来的灰线：虚线框 + 很淡的填充，一眼能和自己的方块分开
-    c.fillStyle = 'rgba(150,170,205,.13)';
+    c.fillStyle = 'rgba(150,170,205,.30)';
     roundRect(c, x, y, d, d, R);
     c.fill();
-    c.strokeStyle = 'rgba(200,215,240,.5)';
+    c.strokeStyle = 'rgba(205,218,242,.62)';
     c.lineWidth = Math.max(1, d * .075);
     c.setLineDash([Math.max(2.5, d * .22), Math.max(2, d * .16)]);
     roundRect(c, x + c.lineWidth / 2, y + c.lineWidth / 2, d - c.lineWidth, d - c.lineWidth, Math.max(0, R - 1));
@@ -1013,35 +1013,56 @@ function buzz(pattern){
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch { /* 忽略 */ }
 }
 
+// 每个音效一到两层。手机外放喇叭放不出 300Hz 以下的东西，
+// 原来 lock 150Hz、drop 190→85Hz 在电脑上听得见，到 iPhone 上就是没声音。
+// 所以基频全部抬进 300Hz 以上，低频那口"闷"改用一层高频 click 来代替。
 const SPECS = {
-  rotate: { f: 400, to: 470,  d: .04, v: .026, type: 'sine' },
-  lock:   { f: 150, to: 110,  d: .05, v: .022, type: 'sine' },
-  drop:   { f: 190, to: 85,   d: .09, v: .046, type: 'triangle' },
-  clear:  { f: 520, to: 760,  d: .15, v: .048, type: 'sine' },
-  tetris: { f: 440, to: 1040, d: .26, v: .068, type: 'triangle' },
-  level:  { f: 600, to: 900,  d: .16, v: .04,  type: 'sine' },
-  hold:   { f: 320, to: 380,  d: .05, v: .028, type: 'sine' },
-  over:   { f: 300, to: 70,   d: .60, v: .055, type: 'triangle' },
+  rotate: [{ f: 640,  to: 790, d: .045, v: .070, type: 'triangle' }],
+  lock:   [{ f: 320,  to: 230, d: .060, v: .055, type: 'triangle' },
+           { f: 940,  to: 720, d: .022, v: .028, type: 'sine' }],
+  // 落底要有"砸实"的感觉：一层下沉的身子 + 一层短促的撞击
+  drop:   [{ f: 440,  to: 165, d: .105, v: .120, type: 'triangle' },
+           { f: 1450, to: 620, d: .032, v: .050, type: 'square' }],
+  clear:  [{ f: 620,  to: 940, d: .150, v: .075, type: 'sine' }],
+  tetris: [{ f: 520,  to: 1240, d: .26, v: .100, type: 'triangle' },
+           { f: 784,  to: 1568, d: .24, v: .040, type: 'sine', delay: .045 }],
+  level:  [{ f: 680,  to: 1020, d: .16, v: .065, type: 'sine' }],
+  hold:   [{ f: 470,  to: 560, d: .055, v: .050, type: 'sine' }],
+  over:   [{ f: 520,  to: 150, d: .60,  v: .085, type: 'triangle' }],
 };
 
-function sfx(kind){
-  if (muted) return;
-  const spec = SPECS[kind];
-  if (!spec) return;
+// iOS 上 AudioContext 只能在用户手势里创建/恢复，否则一直 suspended、永远没声。
+// 所以第一次触碰屏幕就把它开起来，不等第一个音效。
+function unlockAudio(){
   try {
     if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
     if (actx.state === 'suspended') actx.resume();
-    const t = actx.currentTime;
-    const o = actx.createOscillator();
-    const g = actx.createGain();
-    o.connect(g); g.connect(actx.destination);
-    o.type = spec.type;
-    o.frequency.setValueAtTime(spec.f, t);
-    o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
-    g.gain.setValueAtTime(spec.v, t);
-    g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
-    o.start(t);
-    o.stop(t + spec.d + .02);
+  } catch { /* 不给就算了 */ }
+}
+
+function sfx(kind){
+  if (muted) return;
+  const layers = SPECS[kind];
+  if (!layers) return;
+  try {
+    unlockAudio();
+    if (!actx || actx.state !== 'running') return;
+    const t0 = actx.currentTime;
+    for (const spec of layers){
+      const t = t0 + (spec.delay || 0);
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.connect(g); g.connect(actx.destination);
+      o.type = spec.type;
+      o.frequency.setValueAtTime(spec.f, t);
+      o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
+      // 直接 setValueAtTime 会"啪"一下削波，给 4ms 的起音更干净
+      g.gain.setValueAtTime(.0001, t);
+      g.gain.exponentialRampToValueAtTime(spec.v, t + .004);
+      g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
+      o.start(t);
+      o.stop(t + spec.d + .02);
+    }
   } catch { /* 浏览器不给声音就静音运行 */ }
 }
 
@@ -1475,6 +1496,11 @@ function init(){
   fillQueue();
   layout();
   bindButtons();
+
+  // 任何一次触碰都先把音频上下文拉起来（iOS 必须在手势里做）
+  for (const ev of ['pointerdown', 'touchstart', 'keydown']){
+    window.addEventListener(ev, unlockAudio, { once: true, passive: true });
+  }
 
   $('startBtn').addEventListener('click', restart);
   $('againBtn').addEventListener('click', restart);
