@@ -2,10 +2,19 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
 <meta name="theme-color" content="#080b14">
 <title>俄罗斯方块 · 小游戏合集</title>
-<meta name="description" content="浏览器里的俄罗斯方块，支持 SRS 旋转、hold、落点预览，手机和键盘都能玩。">
+<meta name="description" content="浏览器里的俄罗斯方块，手机按键操作，竖屏横屏都能玩。">
+
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="方块">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/icons/favicon-32.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
@@ -17,16 +26,18 @@
 
 <div class="game">
 
-  <header class="bar">
-    <a class="back" href="../">← 合集</a>
-    <h1>俄罗斯方块<em>TETRIS</em></h1>
-    <div class="sp"></div>
-    <button class="tbtn" id="muteBtn">静音</button>
-    <button class="tbtn" id="pauseBtn">暂停</button>
-    <button class="tbtn" id="restartBtn">重开</button>
-  </header>
 
   <div class="stage">
+
+    <header class="bar">
+      <a class="back" href="../">← 合集</a>
+      <h1>俄罗斯方块<em>TETRIS</em></h1>
+      <div class="sp"></div>
+      <button class="tbtn" id="fsBtn" aria-label="进入游戏模式">⛶ 游戏模式</button>
+      <button class="tbtn" id="muteBtn">静音</button>
+      <button class="tbtn" id="pauseBtn">暂停</button>
+      <button class="tbtn" id="restartBtn">重开</button>
+    </header>
 
     <div class="slot hold" id="holdSlot" role="button" tabindex="0" aria-label="暂存当前方块">
       <span class="slot-label">HOLD</span>
@@ -55,8 +66,8 @@
           <div data-when="start">
             <h2>俄罗斯<span class="neon">方块</span></h2>
             <p>
-              手机：左右滑移动，轻点旋转，快速下扫直接落底，下面也有按钮。<br>
-              键盘：<kbd>←</kbd><kbd>→</kbd> 移动，<kbd>↑</kbd> 旋转，<kbd>空格</kbd> 硬降，<kbd>C</kbd> 暂存，<kbd>P</kbd> 暂停。
+              下面的按键操作：左右移动、旋转、软降、落底，点 HOLD 框暂存。<br>
+              手机建议先点右上角<b>「游戏模式」</b>，横过来也能玩。
             </p>
             <button class="pbtn" id="startBtn">开始</button>
           </div>
@@ -85,18 +96,23 @@
      </div>
     </div>
 
+    <!-- 按键区：左手管移动，右手管旋转和落下 -->
+    <div class="pads">
+      <div class="pad pad-l">
+        <button class="k" id="btnLeft"  aria-label="左移"><span class="ico">←</span></button>
+        <button class="k" id="btnRight" aria-label="右移"><span class="ico">→</span></button>
+        <button class="k k-wide" id="btnDown" aria-label="软降"><span class="ico">↓</span><em>软降</em></button>
+      </div>
+      <div class="pad pad-r">
+        <button class="k" id="btnCcw" aria-label="逆时针旋转"><span class="ico">↺</span></button>
+        <button class="k" id="btnCw"  aria-label="顺时针旋转"><span class="ico">↻</span></button>
+        <button class="k k-wide k-accent" id="btnDrop" aria-label="直接落底"><span class="ico">⤓</span><em>落底</em></button>
+      </div>
+    </div>
+
   </div>
 
-  <div class="pad">
-    <button id="btnLeft"  aria-label="左移"><span class="ico">←</span>移动</button>
-    <button id="btnRight" aria-label="右移"><span class="ico">→</span>移动</button>
-    <button id="btnCcw"   aria-label="逆时针旋转"><span class="ico">↺</span>逆转</button>
-    <button id="btnCw"    aria-label="顺时针旋转"><span class="ico">↻</span>顺转</button>
-    <button id="btnDown"  aria-label="软降"><span class="ico">↓</span>软降</button>
-    <button id="btnDrop"  class="drop" aria-label="硬降"><span class="ico">⤓</span>落底</button>
-  </div>
-
-  <div class="hint">按住左右可以连发 · 点 HOLD 框暂存（键盘 <kbd>C</kbd>）· 分数只存在这台设备上</div>
+  <div class="hint">点 HOLD 框暂存<span class="only-wide"> · 键盘 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>空格</kbd> 也能玩</span> · 分数只存在这台设备上</div>
 
 </div>
 

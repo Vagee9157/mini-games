@@ -570,8 +570,8 @@ function drawPreview(){
   // next
   const nw = nextCv.clientWidth, nh = nextCv.clientHeight;
   nextCtx.clearRect(0, 0, nw, nh);
-  // 槽是宽的就横排（手机），是高的就竖排（桌面）
-  const horiz = nw > nh;
+  // 槽明显偏宽才横排，否则竖排——横屏时槽是窄高的，能多摆几个
+  const horiz = nw > nh * 1.4;
   const n = Math.min(game.queue.length, horiz ? 3 : 5);
   for (let i = 0; i < n; i++){
     const a = i === 0 ? 1 : .58 - i * .07;
@@ -799,7 +799,7 @@ const KEYMAP = {
   ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'soft',
   ArrowUp: 'cw', KeyX: 'cw', KeyZ: 'ccw', ControlLeft: 'ccw', ControlRight: 'ccw',
   Space: 'hard', KeyC: 'hold', ShiftLeft: 'hold', ShiftRight: 'hold',
-  KeyP: 'pause', Escape: 'pause', KeyR: 'restart', KeyM: 'mute',
+  KeyP: 'pause', Escape: 'pause', KeyR: 'restart', KeyM: 'mute', KeyF: 'fullscreen',
 };
 
 window.addEventListener('keydown', (e) => {
@@ -809,6 +809,7 @@ window.addEventListener('keydown', (e) => {
   if (act === 'restart'){ restart(); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
+  if (act === 'fullscreen'){ toggleGameMode(); return; }
   if (!game.started || game.over || game.paused) return;
   if (e.repeat && act !== 'soft') return;
   switch (act){
@@ -829,48 +830,6 @@ window.addEventListener('keyup', (e) => {
   if (act === 'right') release('right');
   if (act === 'soft')  softDropping = false;
 });
-
-// 触屏：棋盘上滑动操作，下面另有实体按钮
-function bindTouch(){
-  const area = $('boardWrap');
-  let sx = 0, sy = 0, st = 0, moved = false, lastStepX = 0, hardDone = false;
-
-  area.addEventListener('touchstart', (e) => {
-    if (!game.started || game.over || game.paused) return;
-    const t = e.touches[0];
-    sx = t.clientX; sy = t.clientY; st = performance.now();
-    moved = false; lastStepX = 0; hardDone = false;
-  }, { passive: true });
-
-  area.addEventListener('touchmove', (e) => {
-    if (!game.started || game.over || game.paused) return;
-    const t = e.touches[0];
-    const dx = t.clientX - sx, dy = t.clientY - sy;
-    const step = Math.max(22, CELL * .9);
-
-    if (Math.abs(dy) > step * 1.2 && dy > 0 && Math.abs(dy) > Math.abs(dx) * 1.6){
-      // 快速下扫 = 硬降，慢慢往下拖 = 软降
-      const speed = Math.abs(dy) / Math.max(1, performance.now() - st);
-      if (speed > 1.1 && !hardDone){ hardDrop(); hardDone = true; moved = true; }
-      else softDropping = true;
-      return;
-    }
-    const want = Math.trunc(dx / step);
-    if (want !== lastStepX){
-      const n = want - lastStepX;
-      for (let i = 0; i < Math.abs(n); i++) tryMove(Math.sign(n), 0);
-      lastStepX = want;
-      moved = true;
-    }
-  }, { passive: true });
-
-  area.addEventListener('touchend', () => {
-    softDropping = false;
-    if (!moved && performance.now() - st < 260 && game.started && !game.over && !game.paused){
-      tryRotate(1);   // 轻点 = 顺时针转
-    }
-  }, { passive: true });
-}
 
 // 底部按钮：按住能连发
 function bindButtons(){
@@ -896,13 +855,96 @@ function bindButtons(){
       el.classList.remove('active');
       if (up) up();
     };
-    el.addEventListener('touchstart', start, { passive: false });
+    // 触屏走 touch 事件；一旦用过触屏就不再理会浏览器合成的 mouse 事件，
+    // 否则一次点按会被当成两次输入。
+    let touched = false;
+    el.addEventListener('touchstart', (e) => { touched = true; start(e); }, { passive: false });
     el.addEventListener('touchend', end, { passive: false });
     el.addEventListener('touchcancel', end, { passive: false });
-    el.addEventListener('mousedown', start);
-    el.addEventListener('mouseup', end);
-    el.addEventListener('mouseleave', end);
+    el.addEventListener('mousedown', (e) => { if (!touched) start(e); });
+    el.addEventListener('mouseup', (e) => { if (!touched) end(e); });
+    el.addEventListener('mouseleave', (e) => { if (!touched) end(e); });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+}
+
+// ───────────────────────── 游戏模式 ─────────────────────────
+// iPhone 的 Safari 不给网页真全屏，所以这里分两层：
+// 能用 Fullscreen API 就用；用不了也至少把页面上的壳收起来，把棋盘放到最大。
+// 想在 iPhone 上真全屏，把页面「添加到主屏幕」再从图标打开。
+
+let wakeLock = null;
+
+async function keepAwake(on){
+  try {
+    if (on && 'wakeLock' in navigator){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock){
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch { /* 不支持或被拒就算了，不影响游戏 */ }
+}
+
+function fsElement(){
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function syncFsBtn(){
+  const on = document.body.classList.contains('immersive');
+  const b = $('fsBtn');
+  b.textContent = on ? '✕ 退出' : '⛶ 游戏模式';
+  b.setAttribute('aria-label', on ? '退出游戏模式' : '进入游戏模式');
+}
+
+async function enterGameMode(){
+  document.body.classList.add('immersive');
+  syncFsBtn();
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (req){
+    try { await req.call(el, { navigationUI: 'hide' }); } catch { /* 用户拒绝或不支持 */ }
+  }
+  keepAwake(true);
+  layout();
+}
+
+async function exitGameMode(){
+  document.body.classList.remove('immersive');
+  syncFsBtn();
+  if (fsElement()){
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) { try { await exit.call(document); } catch { /* 忽略 */ } }
+  }
+  keepAwake(false);
+  layout();
+}
+
+function toggleGameMode(){
+  if (document.body.classList.contains('immersive')) exitGameMode();
+  else enterGameMode();
+}
+
+// 从系统全屏退出（比如按了 Esc、或 iOS 手势）时，把页面状态同步回来
+function onFsChange(){
+  if (!fsElement() && document.body.classList.contains('immersive')){
+    // 只有真用上了 Fullscreen API 的情况才跟着退出
+    if (document.fullscreenEnabled || document.webkitFullscreenEnabled){
+      document.body.classList.remove('immersive');
+      syncFsBtn();
+      keepAwake(false);
+      layout();
+    }
+  }
+}
+
+// 从主屏幕图标打开（PWA）时直接就是游戏模式
+function launchedAsApp(){
+  return window.navigator.standalone === true
+      || window.matchMedia('(display-mode: fullscreen)').matches
+      || window.matchMedia('(display-mode: standalone)').matches
+      || new URLSearchParams(location.search).get('mode') === 'app';
 }
 
 // ───────────────────────── 开关局 ─────────────────────────
@@ -964,7 +1006,6 @@ function init(){
   syncHud();
   fillQueue();
   layout();
-  bindTouch();
   bindButtons();
 
   $('startBtn').addEventListener('click', restart);
@@ -973,6 +1014,9 @@ function init(){
   $('pauseBtn').addEventListener('click', togglePause);
   $('restartBtn').addEventListener('click', restart);
   $('muteBtn').addEventListener('click', toggleMute);
+  $('fsBtn').addEventListener('click', toggleGameMode);
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
   // HOLD 框本身就是暂存按钮，手机上没地方再塞一个键
   const hs = $('holdSlot');
   hs.addEventListener('click', () => {
@@ -987,11 +1031,17 @@ function init(){
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe($('boardWrap'));
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
   window.addEventListener('load', layout);
-  window.addEventListener('orientationchange', () => setTimeout(layout, 120));
+  // iOS 转屏后尺寸要过一会儿才稳，补两次
+  window.addEventListener('orientationchange', () => { setTimeout(layout, 120); setTimeout(layout, 450); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', layout);
   // 切到后台自动暂停，回来不至于已经死了
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && game.started && !game.over && !game.paused) togglePause();
+    if (!document.hidden && document.body.classList.contains('immersive')) keepAwake(true);
   });
+
+  if (launchedAsApp()) { document.body.classList.add('immersive'); keepAwake(true); }
+  syncFsBtn();
 
   $('overlay').dataset.mode = 'start';
   $('overlay').classList.add('show');
