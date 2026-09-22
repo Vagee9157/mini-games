@@ -45,6 +45,15 @@ tetris/
   tetris.js
 ```
 
+## 改完样式记得跑一下
+
+```bash
+python3 bump.py
+```
+
+它会把 CSS / JS 的内容哈希写进 HTML 的引用里（`tetris.css?v=4a423810`）。
+不跑的话，GitHub Pages 的缓存会让回访的人拿到**新 HTML 配旧 CSS**，布局直接错乱。
+
 ## 加一款新游戏
 
 1. 新建一个文件夹，比如 `snake/`
