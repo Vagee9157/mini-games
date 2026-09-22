@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080b14">
+<title>选样式 · 俄罗斯方块</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/shared.css">
+<style>
+  body{ padding-bottom: 60px; }
+  .wrap{ max-width: 460px; }
+  h1{ font-size: 22px; margin: 26px 0 4px; letter-spacing: .02em; }
+  .sub{ color: var(--ink-soft); font-size: 13px; line-height: 1.7; margin: 0 0 8px; }
+  h2{
+    font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
+    color: var(--ink-dim); text-transform: uppercase;
+    margin: 34px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  }
+  .grid2{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .opt{
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 12px 12px 14px;
+  }
+  .opt .tag{
+    display: flex; align-items: baseline; gap: 7px; margin-bottom: 9px;
+  }
+  .opt .no{
+    font-family: var(--mono); font-size: 15px; font-weight: 500;
+    color: var(--n-cyan); letter-spacing: .04em;
+  }
+  .opt .nm{ font-size: 13px; font-weight: 500; }
+  .opt .ds{ font-size: 11px; color: var(--ink-dim); line-height: 1.6; margin-top: 8px; }
+  .opt canvas{ display: block; width: 100%; height: auto; border-radius: 8px; background: rgba(6,10,20,.66); }
+
+  /* ── 按钮四版 ── */
+  .btnset{ margin-bottom: 14px; }
+  .pads{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+  .pad-g{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .k{
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; min-height: 58px; border-radius: 16px; cursor: pointer;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+    color: var(--ink-soft); border: 1px solid var(--line); background: var(--panel);
+    -webkit-tap-highlight-color: transparent; user-select: none;
+    transition: transform .08s, filter .12s;
+  }
+  .k .ico{ font-size: 20px; line-height: 1; color: var(--ink); }
+  .k em{ font-style: normal; opacity: .78; }
+  .k-drop{ grid-column: span 2; min-height: 50px; }
+  .k:active{ transform: translateY(1px); }
+
+  /* B1 微立体：像实体键帽 */
+  .s1 .k{
+    background: linear-gradient(180deg, #1b2740, #121a2c);
+    border: 1px solid rgba(140,175,255,.16);
+    box-shadow: inset 0 1px 0 rgba(170,200,255,.16), 0 2px 0 rgba(0,0,0,.45), 0 5px 12px rgba(0,0,0,.36);
+  }
+  .s1 .k:active{ transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(170,200,255,.10), 0 0 0 rgba(0,0,0,.4); }
+  .s1 .k-drop{
+    background: linear-gradient(180deg, #14505f, #0d3242);
+    border-color: rgba(34,211,238,.42);
+    box-shadow: inset 0 1px 0 rgba(120,235,255,.26), 0 2px 0 rgba(0,0,0,.45), 0 5px 16px rgba(34,211,238,.20);
+  }
+  .s1 .k-drop .ico, .s1 .k-drop em{ color: #7ee9fb; opacity: 1; }
+
+  /* B2 扁平描边：最干净 */
+  .s2 .k{ background: rgba(255,255,255,.028); border: 1px solid rgba(150,180,255,.20); border-radius: 14px; box-shadow: none; }
+  .s2 .k:active{ background: rgba(34,211,238,.14); border-color: var(--n-cyan); }
+  .s2 .k-drop{ background: rgba(34,211,238,.10); border-color: rgba(34,211,238,.44); }
+  .s2 .k-drop .ico{ color: var(--n-cyan); }
+
+  /* B3 玻璃：磨砂半透 */
+  .s3 .k{
+    background: linear-gradient(150deg, rgba(255,255,255,.11), rgba(255,255,255,.03));
+    border: 1px solid rgba(255,255,255,.14);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 6px 18px rgba(0,0,0,.30);
+    border-radius: 18px;
+  }
+  .s3 .k:active{ background: linear-gradient(150deg, rgba(34,211,238,.26), rgba(34,211,238,.08)); }
+  .s3 .k-drop{
+    background: linear-gradient(150deg, rgba(34,211,238,.26), rgba(168,85,247,.12));
+    border-color: rgba(120,235,255,.34);
+  }
+  .s3 .k-drop .ico, .s3 .k-drop em{ color: #a5f2ff; opacity: 1; }
+
+  /* B4 霓虹描边：边框发光 */
+  .s4 .k{
+    background: rgba(10,16,30,.72);
+    border: 1.5px solid rgba(90,130,200,.34);
+    border-radius: 14px;
+    box-shadow: 0 0 0 1px rgba(10,16,30,.8), 0 0 14px rgba(60,120,220,.10) inset;
+  }
+  .s4 .k .ico{ text-shadow: 0 0 10px rgba(150,200,255,.5); }
+  .s4 .k:active{ border-color: var(--n-cyan); box-shadow: 0 0 18px rgba(34,211,238,.42), inset 0 0 18px rgba(34,211,238,.16); }
+  .s4 .k-drop{
+    border-color: rgba(34,211,238,.72);
+    box-shadow: 0 0 16px rgba(34,211,238,.28), inset 0 0 16px rgba(34,211,238,.10);
+  }
+  .s4 .k-drop .ico, .s4 .k-drop em{ color: #7ee9fb; opacity: 1; text-shadow: 0 0 12px rgba(34,211,238,.8); }
+
+  .note{
+    margin-top: 34px; padding: 14px 16px; border: 1px dashed var(--line-2);
+    border-radius: 14px; color: var(--ink-soft); font-size: 12.5px; line-height: 1.8;
+  }
+  .note b{ color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="topline"></div>
+<div class="wrap">
+
+  <h1>挑一版</h1>
+  <p class="sub">方块和按钮各选一个，告诉我编号就行（比如「A3」「方块 C、按钮 2」）。按钮可以直接按按看手感。</p>
+
+  <h2>方块样式</h2>
+  <div class="grid2" id="skins"></div>
+
+  <h2>按钮样式</h2>
+  <div id="btns"></div>
+
+  <div class="note">
+    现在线上用的是 <b>方块 E + 按钮接近 2</b>。<br>
+    按键布局已经按你说的改成：上排 <b>左移 / 右移 / 软落 / 变换</b> 四个，左下留空、右下 <b>落底</b>。
+  </div>
+
+</div>
+
+<script>
+const SKINS = [
+  ['A', '立体斜面', '左上亮、右下暗，硬朗清楚，最像街机厅那版。'],
+  ['B', '扁平实色', '一块纯色加一圈内描边，干净，颜色最准。'],
+  ['C', '霓虹空心', '只有边框发光，中间透出底色，最赛博。'],
+  ['D', '磨砂玻璃', '半透明加高光，轻，偏现代 App 的感觉。'],
+  ['E', '现在这版', '圆角＋渐变＋外发光，偏糖果塑料。'],
+  ['F', '像素描边', '粗描边加纯色，像素游戏的味道，边界最分明。'],
+];
+const COLS = ['#22d3ee','#fbbf24','#a855f7','#4ade80','#f43f5e','#3b82f6','#fb923c'];
+// 一小块示意棋盘：null 是空，数字是颜色下标，-1 是落点虚影
+const SCENE = [
+  [null,null,null,null,null,null],
+  [null,null,  -1,  -1,null,null],
+  [null,null,null,null,null,null],
+  [null,   2,   2,null,null,null],
+  [null,null,   2,   2,null,null],
+  [   0,   0,null,   4,   4,null],
+  [   1,   1,   1,   3,   3,   5],
+  [   6,   1,   5,   5,   3,   5],
+];
+
+function hex(h){ return h.length===4 ? h.slice(1).split('').map(x=>parseInt(x+x,16)) : [1,3,5].map(i=>parseInt(h.slice(i,i+2),16)); }
+function mix(a,b,t){ const pa=hex(a),pb=hex(b); return `rgb(${pa.map((v,i)=>Math.round(v+(pb[i]-v)*t)).join(',')})`; }
+function rr(c,x,y,w,h,r){ c.beginPath(); if(c.roundRect){c.roundRect(x,y,w,h,r);return;} c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+
+function cell(c, skin, px, py, s, color, ghost){
+  if (ghost){
+    const pad=s*.06, x=px+pad, y=py+pad, d=s-pad*2;
+    c.save(); c.globalAlpha=.4; c.strokeStyle=color; c.lineWidth=Math.max(1.5,d*.08);
+    rr(c,x,y,d,d,skin==='A'||skin==='F'?2:d*.18); c.stroke();
+    c.globalAlpha=.09; c.fillStyle=color; c.fill(); c.restore(); return;
+  }
+  const g=s*.055, x=px+g, y=py+g, d=s-g*2;
+  c.save();
+  if (skin==='A'){                                   // 立体斜面
+    const b=d*.17;
+    c.fillStyle=color; c.fillRect(x,y,d,d);
+    c.fillStyle=mix(color,'#ffffff',.46);
+    c.beginPath(); c.moveTo(x,y); c.lineTo(x+d,y); c.lineTo(x+d-b,y+b); c.lineTo(x+b,y+b); c.lineTo(x+b,y+d-b); c.lineTo(x,y+d); c.closePath(); c.fill();
+    c.fillStyle=mix(color,'#000814',.42);
+    c.beginPath(); c.moveTo(x+d,y); c.lineTo(x+d,y+d); c.lineTo(x,y+d); c.lineTo(x+b,y+d-b); c.lineTo(x+d-b,y+d-b); c.lineTo(x+d-b,y+b); c.closePath(); c.fill();
+  } else if (skin==='B'){                            // 扁平实色
+    c.fillStyle=mix(color,'#0a0f1c',.14); rr(c,x,y,d,d,d*.16); c.fill();
+    c.strokeStyle=mix(color,'#ffffff',.34); c.lineWidth=Math.max(1,d*.07);
+    rr(c,x+d*.045,y+d*.045,d*.91,d*.91,d*.13); c.stroke();
+  } else if (skin==='C'){                            // 霓虹空心
+    c.fillStyle=color; c.globalAlpha=.16; rr(c,x,y,d,d,d*.16); c.fill();
+    c.globalAlpha=1; c.shadowColor=color; c.shadowBlur=d*.5;
+    c.strokeStyle=color; c.lineWidth=Math.max(1.4,d*.09);
+    rr(c,x+d*.06,y+d*.06,d*.88,d*.88,d*.14); c.stroke();
+  } else if (skin==='D'){                            // 磨砂玻璃
+    const lg=c.createLinearGradient(x,y,x+d,y+d);
+    lg.addColorStop(0, mix(color,'#ffffff',.36)); lg.addColorStop(1, mix(color,'#060b16',.30));
+    c.globalAlpha=.86; c.fillStyle=lg; rr(c,x,y,d,d,d*.22); c.fill();
+    c.globalAlpha=1; c.strokeStyle='rgba(255,255,255,.42)'; c.lineWidth=1; rr(c,x+.5,y+.5,d-1,d-1,d*.21); c.stroke();
+    c.globalAlpha=.5; c.fillStyle='rgba(255,255,255,.7)'; rr(c,x+d*.15,y+d*.12,d*.7,d*.13,d*.06); c.fill();
+  } else if (skin==='E'){                            // 现在这版
+    c.shadowColor=color; c.shadowBlur=s*.45;
+    const lg=c.createLinearGradient(x,y,x,y+d);
+    lg.addColorStop(0,mix(color,'#ffffff',.30)); lg.addColorStop(.52,color); lg.addColorStop(1,mix(color,'#000010',.34));
+    c.fillStyle=lg; rr(c,x,y,d,d,d*.18); c.fill();
+    c.shadowBlur=0; c.globalAlpha=.55; c.fillStyle=mix(color,'#ffffff',.62);
+    rr(c,x+d*.16,y+d*.12,d*.68,d*.16,d*.07); c.fill();
+  } else {                                           // F 像素描边
+    c.fillStyle=mix(color,'#060a14',.06); c.fillRect(x,y,d,d);
+    c.strokeStyle=mix(color,'#ffffff',.55); c.lineWidth=Math.max(2,d*.12);
+    c.strokeRect(x+c.lineWidth/2, y+c.lineWidth/2, d-c.lineWidth, d-c.lineWidth);
+    c.fillStyle=mix(color,'#ffffff',.55);
+    c.fillRect(x+d*.30, y+d*.30, d*.40, d*.40);
+  }
+  c.restore();
+}
+
+function drawSkin(cv, skin){
+  const dpr=Math.min(devicePixelRatio||1,2);
+  const w=cv.clientWidth, cs=w/6, h=cs*8;
+  cv.style.height=h+'px';
+  cv.width=w*dpr; cv.height=h*dpr;
+  const c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
+  c.strokeStyle='rgba(120,160,255,.08)'; c.lineWidth=1;
+  for(let i=1;i<6;i++){ c.beginPath(); c.moveTo(i*cs+.5,0); c.lineTo(i*cs+.5,h); c.stroke(); }
+  for(let i=1;i<8;i++){ c.beginPath(); c.moveTo(0,i*cs+.5); c.lineTo(w,i*cs+.5); c.stroke(); }
+  SCENE.forEach((row,y)=>row.forEach((v,x)=>{
+    if(v===null) return;
+    cell(c, skin, x*cs, y*cs, cs, v===-1?'#a855f7':COLS[v], v===-1);
+  }));
+}
+
+const wrapEl=document.getElementById('skins');
+SKINS.forEach(([id,name,desc])=>{
+  const d=document.createElement('div'); d.className='opt';
+  d.innerHTML=`<div class="tag"><span class="no">${id}</span><span class="nm">${name}</span></div>
+               <canvas></canvas><div class="ds">${desc}</div>`;
+  wrapEl.appendChild(d);
+  requestAnimationFrame(()=>drawSkin(d.querySelector('canvas'), id));
+});
+
+const BTN=[['1','微立体','像实体键帽，按下去有下沉感'],
+           ['2','扁平描边','最轻，干净，不抢棋盘的眼'],
+           ['3','磨砂玻璃','半透明加高光，偏现代 App'],
+           ['4','霓虹描边','边框发光，和棋盘一个调子']];
+const bWrap=document.getElementById('btns');
+BTN.forEach(([id,name,desc])=>{
+  const d=document.createElement('div'); d.className='opt btnset';
+  d.innerHTML=`<div class="tag"><span class="no">${id}</span><span class="nm">${name}</span></div>
+    <div class="pads s${id}">
+      <div class="pad-g"><button class="k"><span class="ico">←</span><em>左移</em></button><button class="k"><span class="ico">→</span><em>右移</em></button></div>
+      <div class="pad-g"><button class="k"><span class="ico">↓</span><em>软落</em></button><button class="k"><span class="ico">↻</span><em>变换</em></button>
+      <button class="k k-drop"><span class="ico">⤓</span><em>落底</em></button></div>
+    </div><div class="ds">${desc}</div>`;
+  bWrap.appendChild(d);
+});
+addEventListener('resize', ()=>document.querySelectorAll('#skins .opt').forEach((d,i)=>drawSkin(d.querySelector('canvas'), SKINS[i][0])));
+</script>
+</body>
+</html>
