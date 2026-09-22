@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
+<meta name="theme-color" content="#080b14">
+<title>扫雷 · 小游戏合集</title>
+<meta name="description" content="浏览器里的扫雷，首点必安全，长按插旗，手机上也好点。">
+
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="扫雷">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/icons/favicon-32.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
+<link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
+<link rel="stylesheet" href="mine.css?v=2df98c8e">
+</head>
+<body>
+<div class="topline"></div>
+
+<div class="game">
+
+  <header class="bar">
+    <a class="back" href="../">← 合集</a>
+    <h1>扫雷<em>MINESWEEPER</em></h1>
+    <div class="sp"></div>
+    <button class="tbtn" id="lvBtn">难度</button>
+    <button class="tbtn tbtn-sq" id="muteBtn" aria-label="音效开关">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 5 6.5 9H3v6h3.5L11 19z"/>
+        <path class="wave" d="M15.6 8.6a5 5 0 0 1 0 6.8"/>
+        <path class="wave" d="M18.4 5.8a9 9 0 0 1 0 12.4"/>
+        <path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/>
+      </svg>
+    </button>
+    <button class="tbtn" id="restartBtn">重开</button>
+  </header>
+
+  <div class="hud">
+    <div class="cell"><span>剩余雷</span><b id="left">0</b></div>
+    <div class="cell hi"><span>用时</span><b id="time">0</b></div>
+    <div class="cell"><span>最快</span><b id="best">—</b></div>
+  </div>
+
+  <div class="boardwrap" id="boardWrap">
+    <div class="board" id="board"></div>
+
+    <div class="overlay" id="overlay" data-mode="win">
+      <div class="card">
+        <div data-when="win">
+          <h2>全<span class="neon">清</span></h2>
+          <p id="newBest" hidden><b style="color:var(--n-amber)">新纪录！</b></p>
+        </div>
+        <div data-when="lose">
+          <h2>踩<span class="warn">到了</span></h2>
+        </div>
+        <div class="final">
+          <div><span>用时</span><b id="endTime">0</b></div>
+          <div><span>最快</span><b id="endBest">—</b></div>
+        </div>
+        <button class="pbtn" id="againBtn">再来一局</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad">
+    <button class="k" id="modeBtn" aria-label="切换挖开或插旗">
+      <span id="modeIcon"></span>
+      <em id="modeText">挖开</em>
+    </button>
+  </div>
+
+  <div class="hint">点一下挖开 · 长按插旗 · 点数字可一次翻开周围</div>
+
+  <div class="sheet" id="lvSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>难度</h3></div>
+      <div class="seg" id="lvOpts"></div>
+      <button class="pbtn sheet-done" id="lvDone">好了</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="mine.js?v=9987eda3"></script>
+</body>
+</html>

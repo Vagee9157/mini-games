@@ -8,7 +8,8 @@
 
 | 游戏 | 地址 | 说明 |
 |---|---|---|
-| 俄罗斯方块 | [`/tetris/`](tetris/) | 7-bag 发牌、SRS 旋转 + 踢墙、hold、落点虚影、T-spin、combo、back-to-back |
+| 俄罗斯方块 | [`/tetris/`](tetris/) | 7-bag 发牌、SRS 旋转 + 踢墙、hold、落点虚影、combo、back-to-back；底部定时顶灰线加难度 |
+| 扫雷 | [`/minesweeper/`](minesweeper/) | 首点必安全、空白自动摊开、数字和弦、长按插旗，三档难度各记最快用时 |
 
 ## 怎么玩
 
