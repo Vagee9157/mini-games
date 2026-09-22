@@ -391,11 +391,16 @@ function bankPathClear(t, mp){
 }
 
 function aiPlan(who, allowBank){
+  const useBank = allowBank !== undefined ? allowBank : true;
+  const direct = searchShot(who, false);      // 先找直球
+  if (direct) return direct;
+  return useBank ? searchShot(who, true) : null;   // 实在没有才翻袋
+}
+
+function searchShot(who, bank){
   const c = cue();
   let best = null;
-  const useBank = allowBank !== undefined ? allowBank : true;
-  const aims = pockets.map(p => ({ x: p.x, y: p.y, real: p, wall: null }));
-  if (useBank) aims.push(...mirrorPockets());
+  const aims = bank ? mirrorPockets() : pockets.map(p => ({ x: p.x, y: p.y, real: p, wall: null }));
 
   for (const t of legalTargets(who)){
     for (const p of aims){
@@ -419,8 +424,7 @@ function aiPlan(who, allowBank){
         if (blocked(t.x, t.y, p.x, p.y, t)) continue;
       }
 
-      // 翻袋比直球难，同等条件下不优先选；越菜的档越不爱翻
-      const score = cut * 2.2 - (cd + d) / (TW + TH) - (p.wall ? ai().bankPen : 0);
+      const score = cut * 2.2 - (cd + d) / (TW + TH);
       if (!best || score > best.score){
         best = { score, aim: Math.atan2(cdy, cdx), cut, dist: cd + d, bank: !!p.wall };
       }
