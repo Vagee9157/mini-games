@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
 <link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
-<link rel="stylesheet" href="pool.css?v=3af61306">
+<link rel="stylesheet" href="pool.css?v=f3439b39">
 </head>
 <body>
 <div class="topline"></div>
@@ -75,6 +75,11 @@
         <div class="modes" id="modes">
           <button class="mbtn" data-m="solo"><b>单人清台</b><em>一个人打，比谁杆数少</em></button>
           <button class="mbtn" data-m="ai"><b>人机对战</b><em>跟电脑按黑八规矩来</em></button>
+          <div class="levels" id="levels" hidden>
+            <button data-lv="easy"><b>轻松</b><em>远球薄球常失手</em></button>
+            <button data-lv="normal"><b>普通</b><em>会做安全球</em></button>
+            <button data-lv="hard"><b>高手</b><em>会翻袋，很少失手</em></button>
+          </div>
           <button class="mbtn" data-m="two"><b>双人同屏</b><em>两个人轮流用一台手机</em></button>
         </div>
       </div>
@@ -85,6 +90,12 @@
 
 </div>
 
-<script src="pool.js?v=43eaa96b"></script>
+<script src="pool.js?v=6537fd55"></script>
+<script>
+// 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('../sw.js').catch(() => {}));
+}
+</script>
 </body>
 </html>

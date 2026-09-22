@@ -132,5 +132,11 @@
 </div>
 
 <script src="tetris.js?v=f70c6013"></script>
+<script>
+// 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('../sw.js').catch(() => {}));
+}
+</script>
 </body>
 </html>

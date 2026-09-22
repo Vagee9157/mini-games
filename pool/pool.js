@@ -30,7 +30,17 @@ let balls = [];             // {n, x, y, vx, vy, in}
 let moving = false;
 let aimA = -Math.PI / 2, power = 0, pulling = false;
 let MODE = 'two';           // solo 单人清台 / ai 人机 / two 双人同屏
-let AI_ERR = 0.030;         // AI 瞄准误差（弧度），越大越菜
+
+// AI 三档。差别不只是手抖多少：
+// 远球和薄球会不会失手、会不会翻袋、没球可打时是乱推还是做安全球，各档都不一样。
+const AI_LEVELS = {
+  //                手抖   远球衰减 薄球衰减 力道飘  翻袋罚分 翻袋额外手抖 安全球  思考
+  easy:   { name:'轻松', err:.055, far:1.00, thin:.85, pw:.16, bankPen:2.2, bankErr:2.6, safe:false, think:650 },
+  normal: { name:'普通', err:.022, far:.55,  thin:.50, pw:.08, bankPen:1.5, bankErr:1.8, safe:true,  think:900 },
+  hard:   { name:'高手', err:.007, far:.20,  thin:.18, pw:.03, bankPen:1.0, bankErr:1.3, safe:true,  think:1100 },
+};
+let AI_LV = 'normal';
+const ai = () => AI_LEVELS[AI_LV];
 let aiTimer = 0, aiThinking = false;
 let shots = 0;              // 单人模式的杆数
 let turn = 0;               // 0 / 1
@@ -352,11 +362,43 @@ function legalTargets(who){
   return mine;
 }
 
-function aiPlan(who){
+// 把袋关于四面库各镜像一次。朝镜像袋打，球撞一次库正好进真袋。
+function mirrorPockets(){
+  const out = [];
+  for (const p of pockets){
+    out.push({ x: -p.x,          y: p.y,          real: p, wall: 'L' });
+    out.push({ x: 2 * TW - p.x,  y: p.y,          real: p, wall: 'R' });
+    out.push({ x: p.x,           y: -p.y,         real: p, wall: 'T' });
+    out.push({ x: p.x,           y: 2 * TH - p.y, real: p, wall: 'B' });
+  }
+  return out;
+}
+
+// 目标球打向镜像袋时，先算它在哪面库上反弹，再分两段查路
+function bankPathClear(t, mp){
+  const dx = mp.x - t.x, dy = mp.y - t.y;
+  if (!dx && !dy) return null;
+  let hit = null;
+  if (mp.wall === 'L' && dx < 0) hit = { x: R, y: t.y + dy * (R - t.x) / dx };
+  if (mp.wall === 'R' && dx > 0) hit = { x: TW - R, y: t.y + dy * (TW - R - t.x) / dx };
+  if (mp.wall === 'T' && dy < 0) hit = { x: t.x + dx * (R - t.y) / dy, y: R };
+  if (mp.wall === 'B' && dy > 0) hit = { x: t.x + dx * (TH - R - t.y) / dy, y: TH - R };
+  if (!hit) return null;
+  if (hit.x < R || hit.x > TW - R || hit.y < R || hit.y > TH - R) return null;
+  if (blocked(t.x, t.y, hit.x, hit.y, t)) return null;
+  if (blocked(hit.x, hit.y, mp.real.x, mp.real.y, t)) return null;
+  return hit;
+}
+
+function aiPlan(who, allowBank){
   const c = cue();
   let best = null;
+  const useBank = allowBank !== undefined ? allowBank : true;
+  const aims = pockets.map(p => ({ x: p.x, y: p.y, real: p, wall: null }));
+  if (useBank) aims.push(...mirrorPockets());
+
   for (const t of legalTargets(who)){
-    for (const p of pockets){
+    for (const p of aims){
       const dx = p.x - t.x, dy = p.y - t.y;
       const d = Math.hypot(dx, dy);
       if (d < 1) continue;
@@ -370,13 +412,41 @@ function aiPlan(who){
       const cut = (cdx / cd) * ux + (cdy / cd) * uy;            // cos(切角)
       if (cut < 0.22) continue;                                  // 切太薄，打不进
       if (blocked(c.x, c.y, gx, gy, t)) continue;                // 白球过不去
-      if (blocked(t.x, t.y, p.x, p.y, t)) continue;              // 目标球到袋被挡
 
-      const score = cut * 2.2 - (cd + d) / (TW + TH) - (t.n === 8 ? 0 : 0);
+      if (p.wall){
+        if (!bankPathClear(t, p)) continue;                      // 翻袋：两段都要通
+      } else {
+        if (blocked(t.x, t.y, p.x, p.y, t)) continue;
+      }
+
+      // 翻袋比直球难，同等条件下不优先选；越菜的档越不爱翻
+      const score = cut * 2.2 - (cd + d) / (TW + TH) - (p.wall ? ai().bankPen : 0);
       if (!best || score > best.score){
-        best = { score, aim: Math.atan2(cdy, cdx), cut, dist: cd + d };
+        best = { score, aim: Math.atan2(cdy, cdx), cut, dist: cd + d, bank: !!p.wall };
       }
     }
+  }
+  return best;
+}
+
+// 找不到进球机会时的退路：轻碰一颗自己的球，力道刚够碰库，
+// 尽量让白球停得离对方的球远一点，别直接送杆。
+function aiSafety(who){
+  const c = cue();
+  const mine = legalTargets(who);
+  if (!mine.length) return null;
+  const foes = balls.filter(b => !b.in && b.n !== 0 && !mine.includes(b));
+  let best = null;
+  for (const t of mine){
+    if (blocked(c.x, c.y, t.x, t.y, t)) continue;
+    const d = Math.hypot(t.x - c.x, t.y - c.y);
+    // 撞完之后白球大致停在哪（很粗的估计：沿着原方向再走一点）
+    const ux = (t.x - c.x) / d, uy = (t.y - c.y) / d;
+    const px = clamp(t.x - ux * R * 2.2, R, TW - R);
+    const py = clamp(t.y - uy * R * 2.2, R, TH - R);
+    const near = foes.length ? Math.min(...foes.map(f => Math.hypot(f.x - px, f.y - py))) : TW;
+    const score = near / R - d / (R * 12);
+    if (!best || score > best.score) best = { score, aim: Math.atan2(t.y - c.y, t.x - c.x), dist: d };
   }
   return best;
 }
@@ -407,13 +477,29 @@ function aiTurn(){
     aiThinking = false;
     if (phase === 'over') return;
     if (ballInHand) aiPlaceCue();
+    const L = ai();
     const plan = aiPlan(1);
     if (plan){
-      aimA = plan.aim + (Math.random() - .5) * AI_ERR * 2;
-      // 切得越薄越要用力，距离越远也越要用力
-      power = clamp(.26 + plan.dist / (TH * 1.5) + (1 - plan.cut) * .3, .22, .95);
+      // 手抖程度跟难度有关，也跟这一杆本身有多难有关：
+      // 球越远、切得越薄，越容易打偏。高手档这两项影响都很小。
+      const far = plan.dist / (R * 18);
+      const thin = 1 - plan.cut;
+      const err = L.err * (1 + far * L.far) * (1 + thin * L.thin * 2) * (plan.bank ? L.bankErr : 1);
+      aimA = plan.aim + (Math.random() - .5) * err * 2;
+      const base = clamp(.26 + plan.dist / (TH * 1.5) + thin * .3, .22, .95);
+      power = clamp(base * (1 + (Math.random() - .5) * L.pw * 2), .18, 1);
+    } else if (L.safe){
+      const sf = aiSafety(1);
+      const c = cue();
+      if (sf){
+        aimA = sf.aim + (Math.random() - .5) * L.err * 2;
+        power = clamp(.20 + sf.dist / (TH * 2.4), .18, .46);   // 刚够碰到并顶到库
+      } else {
+        aimA = -Math.PI / 2; power = .3;
+      }
+      toast('电脑做了个安全球');
     } else {
-      // 没球可打就轻轻推一杆，别乱轰
+      // 轻松档不会做安全球，找不到就随便推一杆
       const t = legalTargets(1)[0];
       const c = cue();
       aimA = t ? Math.atan2(t.y - c.y, t.x - c.x) : -Math.PI / 2;
@@ -421,7 +507,7 @@ function aiTurn(){
     }
     needsDraw = true;
     shoot();
-  }, 900);
+  }, ai().think);
 }
 
 // ── 出杆 ──
@@ -697,7 +783,7 @@ function syncHud(){
       el.classList.toggle('on', turn === i && phase !== 'over');
       const g = groups[i];
       const left = g ? myBalls(i).filter(b => !b.in).length : null;
-      $('p' + i + 'nm').textContent = who(i);
+      $('p' + i + 'nm').textContent = who(i) + (MODE === 'ai' && i === 1 ? ' · ' + ai().name : '');
       $('p' + i + 'g').textContent = !g ? '未定组' : (g === 'solid' ? '全色 1–7' : '花色 9–15');
       $('p' + i + 'n').textContent = left == null ? '—' : (cleared(i) ? '打 8 号' : left + ' 颗');
     }
@@ -803,6 +889,8 @@ function tick(now){
 
 function syncModes(){
   for (const b of document.querySelectorAll('.mbtn')) b.classList.toggle('on', b.dataset.m === MODE);
+  $('levels').hidden = MODE !== 'ai';
+  for (const b of document.querySelectorAll('#levels button')) b.classList.toggle('on', b.dataset.lv === AI_LV);
 }
 
 function init(){
@@ -810,6 +898,8 @@ function init(){
     muted = localStorage.getItem('pool.muted.v1') === '1';
     const m = localStorage.getItem('pool.mode.v1');
     if (m === 'solo' || m === 'ai' || m === 'two') MODE = m;
+    const l = localStorage.getItem('pool.ailv.v1');
+    if (l && AI_LEVELS[l]) AI_LV = l;
   } catch { /* 忽略 */ }
   layout();
   reset(true);
@@ -824,6 +914,16 @@ function init(){
     ov.classList.add('show');
     syncModes();
   });
+  $('levels').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    e.stopPropagation();
+    AI_LV = b.dataset.lv;
+    try { localStorage.setItem('pool.ailv.v1', AI_LV); } catch { /* 忽略 */ }
+    syncModes();
+    if (MODE !== 'ai'){ MODE = 'ai'; syncModes(); reset(false); }
+  });
+
   $('modes').addEventListener('click', (e) => {
     const b = e.target.closest('.mbtn');
     if (!b) return;
@@ -851,9 +951,12 @@ window.__pool = {
   get balls(){ return balls; },
   get state(){ return { turn, groups: groups.slice(), phase, ballInHand, winner, moving, R, TW, TH, power, aimA }; },
   reset, shoot, settle, aiPlan, aiTurn, legalTargets,
-  setGroups: (g) => { groups[0] = g; groups[1] = g === 'solid' ? 'stripe' : 'solid'; },
+  setGroups: (g) => { groups[0] = g; groups[1] = g ? (g === 'solid' ? 'stripe' : 'solid') : null; },
   setMode: (m) => { MODE = m; reset(); },
+  setLevel: (l) => { if (AI_LEVELS[l]) AI_LV = l; },
   get mode(){ return MODE; },
+  get level(){ return AI_LV; },
+  aiSafety,
   forceOpen: () => { phase = 'open'; },   // 测试用：跳过开球那一杆
   setAim: (a, p) => { aimA = a; power = p; needsDraw = true; },
   cue, cleared, pockets: () => pockets,
