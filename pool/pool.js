@@ -12,9 +12,9 @@ const MAX_POWER = 1450;     // 满力出杆速度 px/s，够打一个来回
 
 const BALLS = [
   null,
-  '#f7c948', '#2563eb', '#dc2626', '#7c3aed', '#ea580c', '#15803d', '#7f1d1d',  // 1-7 全色
-  '#15161a',                                                                     // 8 黑
-  '#f7c948', '#2563eb', '#dc2626', '#7c3aed', '#ea580c', '#15803d', '#7f1d1d',  // 9-15 花色
+  '#fbc02d', '#1d4ed8', '#d81f26', '#7b2ec8', '#ef6c1a', '#12803c', '#8e2433',  // 1-7 全色
+  '#17181c',                                                                     // 8 黑
+  '#fbc02d', '#1d4ed8', '#d81f26', '#7b2ec8', '#ef6c1a', '#12803c', '#8e2433',  // 9-15 花色
 ];
 const isSolid  = (n) => n >= 1 && n <= 7;
 const isStripe = (n) => n >= 9 && n <= 15;
@@ -335,39 +335,76 @@ function layout(){
   needsDraw = true;
 }
 
+// 画一颗球。
+// 花色球（9–15）是「白球体 + 中间一条彩带」，号码印在彩带上 —— 不是反过来。
+// 全色球（1–7）整颗都是彩色，中间一个白圆写号码。
 function drawBall(c, b){
   const col = BALLS[b.n] || '#f8fafc';
-  const g = c.createRadialGradient(b.x - R * .35, b.y - R * .4, R * .1, b.x, b.y, R);
-  if (b.n === 0){
-    g.addColorStop(0, '#ffffff'); g.addColorStop(.7, '#eef2f7'); g.addColorStop(1, '#9aa6b8');
-  } else {
-    g.addColorStop(0, mix(col, '#ffffff', .5));
-    g.addColorStop(.55, col);
-    g.addColorStop(1, mix(col, '#000000', .45));
-  }
-  c.fillStyle = g;
-  c.beginPath(); c.arc(b.x, b.y, R, 0, Math.PI * 2); c.fill();
+  const stripe = isStripe(b.n);
+  const white = '#f4f6f8';
 
-  // 花色球：中间一条白带
-  if (isStripe(b.n)){
+  c.save();
+  c.beginPath(); c.arc(b.x, b.y, R, 0, Math.PI * 2); c.clip();
+
+  // 球体底色：花色球和白球都是白的，全色球是它自己的颜色
+  const base = b.n === 0 ? '#fdfdfd' : (stripe ? white : col);
+  const g = c.createRadialGradient(b.x - R * .36, b.y - R * .42, R * .06, b.x, b.y, R * 1.06);
+  g.addColorStop(0, mix(base, '#ffffff', .62));
+  g.addColorStop(.45, base);
+  g.addColorStop(1, mix(base, '#000000', b.n === 0 ? .26 : .42));
+  c.fillStyle = g;
+  c.fillRect(b.x - R, b.y - R, R * 2, R * 2);
+
+  // 中间那条彩带，上下各留一截白
+  if (stripe){
+    const hh = R * .53;                        // 带子占球高一半上下，上下各留一截白
+    const bg = c.createLinearGradient(b.x - R * .4, b.y - hh, b.x + R * .5, b.y + hh);
+    bg.addColorStop(0, mix(col, '#ffffff', .48));
+    bg.addColorStop(.45, col);
+    bg.addColorStop(1, mix(col, '#000000', .40));
+    c.fillStyle = bg;
+    c.fillRect(b.x - R, b.y - hh, R * 2, hh * 2);
+  }
+  c.restore();
+
+  // 号码：白圆底 + 数字。6 和 9 底下加一横，倒过来不会认错
+  if (b.n > 0 && R > 8){
     c.save();
-    c.beginPath(); c.arc(b.x, b.y, R, 0, Math.PI * 2); c.clip();
-    c.fillStyle = 'rgba(248,250,252,.95)';
-    c.fillRect(b.x - R, b.y - R * .42, R * 2, R * .84);
+    c.fillStyle = '#fbfcfd';
+    c.beginPath(); c.arc(b.x, b.y, R * .43, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = 'rgba(0,0,0,.10)'; c.lineWidth = .8; c.stroke();
+
+    c.fillStyle = '#111827';
+    const fs = Math.round(R * (b.n > 9 ? .50 : .58));
+    c.font = `700 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(String(b.n), b.x, b.y + R * .02);
+    if (b.n === 6 || b.n === 9){
+      c.fillRect(b.x - fs * .28, b.y + R * .26, fs * .56, Math.max(1, R * .05));
+    }
     c.restore();
   }
-  // 号码
-  if (b.n > 0 && R > 9){
-    c.fillStyle = '#f8fafc';
-    c.beginPath(); c.arc(b.x, b.y, R * .46, 0, Math.PI * 2); c.fill();
-    c.fillStyle = '#0b1120';
-    c.font = `600 ${Math.round(R * .62)}px ${getComputedStyle(document.body).getPropertyValue('--mono') || 'monospace'}`;
-    c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(String(b.n), b.x, b.y + R * .03);
-  }
-  c.strokeStyle = 'rgba(0,0,0,.28)';
+
+  // 高光和底部的一点环境光，让球看着是圆的
+  c.save();
+  c.beginPath(); c.arc(b.x, b.y, R, 0, Math.PI * 2); c.clip();
+  const hi = c.createRadialGradient(b.x - R * .34, b.y - R * .40, 0, b.x - R * .34, b.y - R * .40, R * .55);
+  hi.addColorStop(0, 'rgba(255,255,255,.72)');
+  hi.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = hi;
+  c.fillRect(b.x - R, b.y - R, R * 2, R * 2);
+
+  const lo = c.createRadialGradient(b.x + R * .3, b.y + R * .46, 0, b.x + R * .3, b.y + R * .46, R * .5);
+  lo.addColorStop(0, 'rgba(255,255,255,.12)');
+  lo.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = lo;
+  c.fillRect(b.x - R, b.y - R, R * 2, R * 2);
+  c.restore();
+
+  // 边缘一圈暗，跟台呢分开
+  c.strokeStyle = 'rgba(0,0,0,.34)';
   c.lineWidth = 1;
-  c.beginPath(); c.arc(b.x, b.y, R, 0, Math.PI * 2); c.stroke();
+  c.beginPath(); c.arc(b.x, b.y, R - .5, 0, Math.PI * 2); c.stroke();
 }
 
 function draw(){
