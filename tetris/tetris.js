@@ -752,12 +752,21 @@ function draw(){
   if (!W || !H) return;
   ctx.clearRect(0, 0, W, H);
 
+  if (staticDirty) drawStatic();
+  ctx.drawImage(bgCv, 0, 0, W, H);
+
   if (clearing){
-    // 消行动画这 260ms 老实全画，闪白每帧都在变
-    drawBoardLive(W, H);
-  } else {
-    if (staticDirty) drawStatic();
-    ctx.drawImage(bgCv, 0, 0, W, H);
+    // 消行动画：不重画整盘，只在要消掉的那几行盖一层白光。
+    // 原来逐格混色，满盘时每帧一百多个圆角矩形，纯属浪费。
+    const flash = 1 - clearing.t / clearing.dur;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = `rgba(255,255,255,${(.06 + .26 * flash).toFixed(3)})`;
+    for (const y of clearing.rows){
+      if (y < BUFFER) continue;
+      ctx.fillRect(0, (y - BUFFER) * CELL, W, CELL);
+    }
+    ctx.restore();
   }
 
   // 落点虚影 + 当前方块
@@ -795,34 +804,6 @@ function draw(){
   }
 
   if (previewDirty){ drawPreview(); previewDirty = false; }
-}
-
-// 消行动画期间用的全量画法
-function drawBoardLive(W, H){
-  ctx.save();
-  ctx.strokeStyle = 'rgba(120,160,255,.09)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = 1; x < COLS; x++){ ctx.moveTo(x * CELL + .5, 0); ctx.lineTo(x * CELL + .5, H); }
-  for (let y = 1; y < ROWS; y++){ ctx.moveTo(0, y * CELL + .5); ctx.lineTo(W, y * CELL + .5); }
-  ctx.stroke();
-  ctx.restore();
-
-  const set = new Set(clearing.rows);
-  const flash = 1 - clearing.t / clearing.dur;
-  for (let y = BUFFER; y < TOTAL_ROWS; y++){
-    for (let x = 0; x < COLS; x++){
-      const t = game.board[y][x];
-      if (!t) continue;
-      const col = colorOf(t);
-      const py = (y - BUFFER) * CELL;
-      if (set.has(y)){
-        drawCell(ctx, x * CELL, py, CELL, mix(col, '#ffffff', .55 + .45 * flash), { alpha: .35 + .65 * flash });
-      } else {
-        drawCell(ctx, x * CELL, py, CELL, col, { garbage: t === GARBAGE });
-      }
-    }
-  }
 }
 
 function drawPreview(){
