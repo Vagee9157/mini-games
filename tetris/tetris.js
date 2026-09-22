@@ -278,6 +278,7 @@ let rafId = 0;
 let clearing = null;   // { rows:[], t:0, dur:260 }
 // 落地/消行时迸的粒子
 const particles = [];
+let hardLocking = false;   // 硬降那一下已经炸过粒子了，锁定时别再叠一层
 
 // ───────────────────────── 棋盘与方块 ─────────────────────────
 
@@ -391,7 +392,9 @@ function hardDrop(){
   game.score += d * 2;
   needsDraw = true;
   burst(p, 1.4);
+  hardLocking = true;
   lockPiece();
+  hardLocking = false;
   sfx('drop');
   buzz(14);
 }
@@ -461,6 +464,7 @@ function lockPiece(){
     const by = p.y + cy, bx = p.x + cx;
     if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
   }
+  if (!hardLocking) burstLand(p);
   stampToStatic(p);        // 只补这一块，不整盘重画
   game.piece = null;
   needsDraw = true;
@@ -644,7 +648,7 @@ function layout(){
 
 // 画一个方块格。具体长相由当前 skin.style 决定，见上面的 STYLES。
 function drawCell(c, px, py, size, color, opts = {}){
-  const { ghost = false, alpha = 1, garbage = false } = opts;
+  const { ghost = false, alpha = 1, garbage = false, glow = 0 } = opts;
   const v = STYLES[skin.style];
   const g = size * v.gap, x = px + g, y = py + g, d = size - g * 2;
   const R = v.rad * d;
@@ -703,6 +707,20 @@ function drawCell(c, px, py, size, color, opts = {}){
     c.lineWidth = lw;
     roundRect(c, x + o, y + o, d - o * 2, d - o * 2, Math.max(0, R - o));
     c.stroke();
+  }
+
+  // 贴底待锁定：沿边一圈同色光边 + 外扩辉光，越接近锁定越亮越粗。
+  // 不动填充色，方块是什么颜色一眼还是认得出来。
+  if (glow > 0){
+    const lw = Math.max(1.5, d * (.05 + .06 * glow));
+    c.globalAlpha = alpha * (.30 + .50 * glow);
+    c.strokeStyle = mix(color, '#ffffff', .38);
+    c.lineWidth = lw;
+    c.shadowColor = color;
+    c.shadowBlur = d * .45 * glow;
+    roundRect(c, x + lw / 2, y + lw / 2, d - lw, d - lw, Math.max(0, R - lw / 2));
+    c.stroke();
+    c.shadowBlur = 0;
   }
   c.restore();
 }
@@ -803,13 +821,12 @@ function draw(){
         drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, color, { ghost: true });
       }
     }
-    // 快锁定时轻微发白，提示「要定了」
+    // 快锁定的提示：以前是整块洗白，颜色全丢了，现在改成同色光边
     const lockPulse = grounded ? Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0) / 4 : 0;
-    const col = lockPulse ? mix(color, '#ffffff', lockPulse * .45) : color;
     for (const [cx, cy] of cellsOf(p.type, p.rot)){
       const by = p.y + cy;
       if (by < BUFFER) continue;
-      drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, col);
+      drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, color, { glow: lockPulse });
     }
   }
 
@@ -874,6 +891,28 @@ function burst(p, power){
         vx: (Math.random() - .5) * 90 * power,
         vy: (Math.random() * -60 - 20) * power,
         life: 1, color, size: CELL * .16,
+      });
+    }
+  }
+}
+
+// 自然落地的一点扬尘，只从方块每一列的最底下那格冒出来
+function burstLand(p){
+  const color = colorOf(p.type);
+  const bottom = new Map();
+  for (const [cx, cy] of cellsOf(p.type, p.rot)){
+    if (!bottom.has(cx) || cy > bottom.get(cx)) bottom.set(cx, cy);
+  }
+  for (const [cx, cy] of bottom){
+    const by = p.y + cy;
+    if (by < BUFFER) continue;
+    for (let i = 0; i < 2; i++){
+      particles.push({
+        x: (p.x + cx + .5 + (Math.random() - .5) * .7) * CELL,
+        y: (by - BUFFER + 1) * CELL,
+        vx: (Math.random() - .5) * 70,
+        vy: Math.random() * -55 - 15,
+        life: .55, color, size: CELL * .11,
       });
     }
   }
