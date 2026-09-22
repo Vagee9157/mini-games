@@ -62,33 +62,31 @@
 <div class="topline"></div>
 <div class="wrap">
 
-  <h1>第二轮</h1>
-  <p class="sub">方块按你说的两个方向细化，C 全改成实色填充；场景换成接近实战的密集堆叠，发光类的样式堆满时最容易糊，这样看得准。下面还有三版箭头图标，按钮已按你选的磨砂玻璃做好。</p>
+  <h1>第三轮 · 色块区分</h1>
+  <p class="sub">真正容易混的是 <b>青 / 蓝 / 紫</b> 和 <b>红 / 橙 / 黄</b> 这两组，所以除了描边，配色本身也调了。每张图最下面两行就是把这些颜色<b>故意排在一起</b>，专门看分不分得开。</p>
 
-  <h2>B 方向 · 扁平实色</h2>
-  <p class="h2note">不发光，靠明度和描边分层。堆满也不会互相干扰，颜色最准。</p>
-  <div class="grid2" id="setB"></div>
+  <h2>沿用现在的配色 · 只改样式</h2>
+  <p class="h2note">B1 和 B4 的延伸。主要靠<b>加宽方块之间的缝隙</b>来分离——比加亮描边更管用，而且不刺眼。</p>
+  <div class="grid2" id="setN"></div>
 
-  <h2>C 方向 · 实色 + 霓虹发光</h2>
-  <p class="h2note">实色填充，外圈带辉光。比 B 有空气感，但发光越强堆叠时越容易连成一片。</p>
-  <div class="grid2" id="setC"></div>
-
-  <h2>箭头图标 · 三版</h2>
-  <p class="h2note">按钮是你选的磨砂玻璃。现在线上用的是 ← → ↓ 这类文字符号，不同手机字体渲染不一样、粗细也不统一，换成自己画的 SVG 就能完全一致。</p>
-  <div id="icons"></div>
+  <h2>换一套配色 · 把明度拉开</h2>
+  <p class="h2note">青调亮、蓝压暗、紫偏红一点，三个蓝色系就不会挤在一起；红橙黄同理。整体饱和度略降，长时间看不累。</p>
+  <div class="grid2" id="setP"></div>
 
   <div class="note">
-    每块图里都有：底部密集堆叠、中间正在下落的方块、上方的<b>落点虚影</b>。<br>
-    定了告诉我编号就行，比如「B2」「C1」。<br>
-按钮已经定了磨砂玻璃那版，就差箭头选型。告诉我三个编号就行，比如「B2 + C1 + 图标 ii」。
+    已经定了：按钮<b>磨砂玻璃</b>、图标<b>iii 粗角括号</b>。<br>
+    方块选一个编号告诉我就行，比如「N2」「P3」。
   </div>
 
 </div>
 
 <script>
-const COLS=['#22d3ee','#fbbf24','#a855f7','#4ade80','#f43f5e','#3b82f6','#fb923c'];
+// 现有配色
+const P1=['#22d3ee','#fbbf24','#a855f7','#4ade80','#f43f5e','#3b82f6','#fb923c'];
+// 调过的：蓝色系明度拉开，红橙黄错开，整体饱和度略降
+const P2=['#5ee7f5','#f2c14e','#a463dd','#56c877','#e8546b','#3f6fd0','#ef8f4a'];
+
 const n=null, G=-1;
-// 接近实战：上面虚影、中间下落中、下面堆满
 const SCENE=[
   [n,n,n,n,n,n],
   [n,n,G,G,n,n],
@@ -98,8 +96,8 @@ const SCENE=[
   [0,0,n,n,4,4],
   [1,1,1,3,3,5],
   [6,1,5,5,3,5],
-  [2,6,0,4,1,3],
-  [5,3,2,6,0,4],
+  [0,5,2,0,5,2],   // 青 蓝 紫 —— 最容易混的一组
+  [4,6,1,4,6,1],   // 红 橙 黄
 ];
 
 function hx(h){ return h.length===4? h.slice(1).split('').map(x=>parseInt(x+x,16)) : [1,3,5].map(i=>parseInt(h.slice(i,i+2),16)); }
@@ -107,129 +105,81 @@ function mix(a,b,t){ const A=hx(a),B=hx(b); return `rgb(${A.map((v,i)=>Math.roun
 function rr(c,x,y,w,h,r){ c.beginPath(); if(r<=0){c.rect(x,y,w,h);return;} if(c.roundRect){c.roundRect(x,y,w,h,r);return;}
   c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 
-// 每个变体：{fill, edge, lw, radius, glow, inner}
-const V = {
-  B1:{ fill:.16, edge:.34, lw:.075, rad:.17, glow:0 },
-  B2:{ fill:.04, edge:.52, lw:.095, rad:.09, glow:0 },
-  B3:{ fill:.12, edge:.46, lw:.085, rad:0,   glow:0, dark:true },
-  B4:{ fill:.22, edge:.62, lw:.06,  rad:.24, glow:0 },
-  C1:{ fill:.16, edge:.42, lw:.08,  rad:.16, glow:.30 },
-  C2:{ fill:.10, edge:.60, lw:.10,  rad:.14, glow:.55 },
-  C3:{ fill:.20, edge:.38, lw:.07,  rad:.20, glow:.22, sheen:true },
-  C4:{ fill:.05, edge:.70, lw:.11,  rad:.05, glow:.42 },
+// gap 缝隙 / fill 填充压暗 / edge 描边提亮(0=不描边) / lw 线宽 / rad 圆角 / ring 暗外圈
+const V={
+  N1:{pal:P1, gap:.10, fill:.14, edge:.30, lw:.07,  rad:.20},
+  N2:{pal:P1, gap:.10, fill:.22, edge:.40, lw:.06,  rad:.26},
+  N3:{pal:P1, gap:.085,fill:.14, edge:.32, lw:.07,  rad:.20, ring:.40},
+  N4:{pal:P1, gap:.13, fill:.10, edge:0,   lw:0,    rad:.22},
+  P1v:{pal:P2, gap:.10, fill:.14, edge:.30, lw:.07, rad:.20},
+  P2v:{pal:P2, gap:.13, fill:.10, edge:0,   lw:0,   rad:.22},
+  P3v:{pal:P2, gap:.10, fill:.20, edge:.34, lw:.065,rad:.26},
+  P4v:{pal:P2, gap:.085,fill:.14, edge:.30, lw:.07, rad:.20, ring:.42},
 };
 
-function cell(c, v, px, py, s, color, ghost){
-  const g=s*.055, x=px+g, y=py+g, d=s-g*2;
-  const R=v.rad*d;
+function cell(c,v,px,py,s,color,ghost){
+  const g=s*v.gap, x=px+g, y=py+g, d=s-g*2, R=v.rad*d;
   c.save();
-  if (ghost){
-    c.globalAlpha=.42; c.strokeStyle=color; c.lineWidth=Math.max(1.5,d*.075);
+  if(ghost){
+    c.globalAlpha=.40; c.strokeStyle=color; c.lineWidth=Math.max(1.5,d*.075);
     rr(c,x+1,y+1,d-2,d-2,R); c.stroke();
-    c.globalAlpha=.08; c.fillStyle=color; c.fill();
-    c.restore(); return;
+    c.globalAlpha=.07; c.fillStyle=color; c.fill(); c.restore(); return;
   }
-  if (v.glow){ c.shadowColor=color; c.shadowBlur=d*v.glow; }
-  c.fillStyle = mix(color, '#0a1020', v.fill);
+  c.fillStyle=mix(color,'#0a1020',v.fill);
   rr(c,x,y,d,d,R); c.fill();
-  c.shadowBlur = 0;
-
-  if (v.dark){                       // 先压一圈暗边，再描亮边，层次更硬
-    c.strokeStyle = mix(color,'#03060e',.45); c.lineWidth = Math.max(1,d*.10);
-    rr(c, x+c.lineWidth/2, y+c.lineWidth/2, d-c.lineWidth, d-c.lineWidth, R); c.stroke();
+  let off=0;
+  if(v.ring){                       // 压一圈暗边，不靠亮度也能分开相邻方块
+    const lw=Math.max(1,d*.09);
+    c.strokeStyle=mix(color,'#050912',v.ring); c.lineWidth=lw;
+    rr(c,x+lw/2,y+lw/2,d-lw,d-lw,Math.max(0,R-lw/2)); c.stroke();
+    off=lw;
   }
-  const lw = Math.max(1, d*v.lw);
-  c.strokeStyle = mix(color,'#ffffff',v.edge); c.lineWidth = lw;
-  const off = (v.dark ? d*.10 : 0) + lw/2;
-  rr(c, x+off, y+off, d-off*2, d-off*2, Math.max(0,R-off)); c.stroke();
-
-  if (v.sheen){                      // 顶部一道很淡的光，留一点体积感
-    c.globalAlpha=.30; c.fillStyle=mix(color,'#ffffff',.75);
-    rr(c, x+d*.20, y+d*.14, d*.60, d*.10, d*.05); c.fill();
+  if(v.edge){
+    const lw=Math.max(1,d*v.lw); const o=off+lw/2;
+    c.strokeStyle=mix(color,'#ffffff',v.edge); c.lineWidth=lw;
+    rr(c,x+o,y+o,d-o*2,d-o*2,Math.max(0,R-o)); c.stroke();
   }
   c.restore();
 }
 
-function draw(cv, key){
+function draw(cv,key){
   const v=V[key], dpr=Math.min(devicePixelRatio||1,2);
   const w=cv.clientWidth, cs=w/6, h=cs*SCENE.length;
   cv.style.height=h+'px'; cv.width=w*dpr; cv.height=h*dpr;
   const c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
-  c.strokeStyle='rgba(120,160,255,.075)'; c.lineWidth=1;
+  c.strokeStyle='rgba(120,160,255,.07)'; c.lineWidth=1;
   for(let i=1;i<6;i++){ c.beginPath(); c.moveTo(i*cs+.5,0); c.lineTo(i*cs+.5,h); c.stroke(); }
   for(let i=1;i<SCENE.length;i++){ c.beginPath(); c.moveTo(0,i*cs+.5); c.lineTo(w,i*cs+.5); c.stroke(); }
   SCENE.forEach((row,yy)=>row.forEach((val,xx)=>{
     if(val===n) return;
-    cell(c, v, xx*cs, yy*cs, cs, val===G?'#a855f7':COLS[val], val===G);
+    cell(c,v,xx*cs,yy*cs,cs, val===G ? v.pal[2] : v.pal[val], val===G);
   }));
 }
 
 const META={
-  B1:['稳妥版','填充压暗一点，亮边中等。B 原版的调平衡。'],
-  B2:['高对比','填充接近原色，边更亮更粗，圆角收小，最清爽利落。'],
-  B3:['硬边双描','外暗内亮两圈描边，直角，界限最分明，堆叠时分得最开。'],
-  B4:['柔和版','填充更暗、边更亮、圆角更大，最柔，眼睛最不累。'],
-  C1:['柔光','实色加一层薄辉光，克制，堆满也不糊。'],
-  C2:['强霓虹','发光明显，边很亮，最像霓虹灯管，密集时会连片。'],
-  C3:['带光泽','柔光基础上顶部加一道淡高光，保留一点体积。'],
-  C4:['灯管','近乎直角、极亮的边配中等发光，硬朗的霓虹。'],
+  N1:['N1','缝隙版','B1 加宽缝隙、描边收柔。靠留白分离，不靠亮度。'],
+  N2:['N2','柔和版','B4 的调子但描边不再接近白，圆角更大，最不刺眼。'],
+  N3:['N3','暗圈版','每块先压一圈暗边再描柔亮边，相邻色自带分界，区分最强。'],
+  N4:['N4','纯色版','完全不描边，只靠宽缝隙和纯色。最干净，眼睛负担最小。'],
+  P1v:['P1','缝隙版 + 新配色','N1 的样式，换成拉开明度的配色。'],
+  P2v:['P2','纯色版 + 新配色','N4 的样式配新配色。最简洁，看最后两行。'],
+  P3v:['P3','柔和版 + 新配色','N2 的样式配新配色，整体最柔。'],
+  P4v:['P4','暗圈版 + 新配色','N3 的样式配新配色，区分度天花板。'],
 };
-function build(id, keys){
+function build(id,keys){
   const w=document.getElementById(id);
   keys.forEach(k=>{
     const d=document.createElement('div'); d.className='opt';
-    d.innerHTML=`<div class="tag"><span class="no">${k}</span><span class="nm">${META[k][0]}</span></div>
-                 <canvas></canvas><div class="ds">${META[k][1]}</div>`;
+    d.innerHTML=`<div class="tag"><span class="no">${META[k][0]}</span><span class="nm">${META[k][1]}</span></div>
+                 <canvas></canvas><div class="ds">${META[k][2]}</div>`;
     w.appendChild(d);
-    requestAnimationFrame(()=>draw(d.querySelector('canvas'), k));
+    requestAnimationFrame(()=>draw(d.querySelector('canvas'),k));
   });
 }
-
-// ── 三版箭头 ──
-const S=(inner,sw)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
-const F=(inner)=>`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none">${inner}</svg>`;
-const ICONS={
-  i:{  // 带杆的线性箭头，指示性最强
-    left : S('<path d="M16 12H7.4"/><path d="M11.6 7.6 7.2 12l4.4 4.4"/>', 2),
-    right: S('<path d="M8 12h8.6"/><path d="M12.4 7.6 16.8 12l-4.4 4.4"/>', 2),
-    down : S('<path d="M12 6.2v9.4"/><path d="M7.6 11.2 12 15.6l4.4-4.4"/>', 2),
-    rot  : S('<path d="M19.4 12a7.4 7.4 0 1 1-2.2-5.2"/><path d="M19.4 4.2v4.6h-4.6"/>', 2),
-    drop : S('<path d="M12 3.8v8.4"/><path d="M8 8.4 12 12.4l4-4"/><path d="M6.4 17.6h11.2"/>', 2),
-  },
-  ii:{ // 真·实心三角
-    left : F('<path d="M15.6 5.1c0-.9-1-1.4-1.7-.9l-7 6.9a1.2 1.2 0 0 0 0 1.8l7 6.9c.7.5 1.7 0 1.7-.9V5.1Z"/>'),
-    right: F('<path d="M8.4 5.1c0-.9 1-1.4 1.7-.9l7 6.9a1.2 1.2 0 0 1 0 1.8l-7 6.9c-.7.5-1.7 0-1.7-.9V5.1Z"/>'),
-    down : F('<path d="M5.1 8.4c-.9 0-1.4 1-.9 1.7l6.9 7a1.2 1.2 0 0 0 1.8 0l6.9-7c.5-.7 0-1.7-.9-1.7H5.1Z"/>'),
-    rot  : '<svg viewBox="0 0 24 24"><path d="M12 5.2a7.3 7.3 0 1 0 7.1 5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M11.4 1.6 16.4 5l-5 3.4a.6.6 0 0 1-1-.5V2.1a.6.6 0 0 1 1-.5Z" fill="currentColor"/></svg>',
-    drop : F('<rect x="10.7" y="3.2" width="2.6" height="6.6" rx="1.3"/><path d="M12.9 15.2a1.2 1.2 0 0 1-1.8 0L6.6 10c-.5-.7 0-1.6.9-1.6h9c.9 0 1.4.9.9 1.6l-4.5 5.2Z"/><rect x="5.4" y="17.4" width="13.2" height="2.4" rx="1.2"/>'),
-  },
-  iii:{ // 粗角括号，无杆，最简洁
-    left : S('<path d="M14.2 6.2 8.4 12l5.8 5.8"/>', 2.8),
-    right: S('<path d="M9.8 6.2 15.6 12l-5.8 5.8"/>', 2.8),
-    down : S('<path d="M6.2 8.2 12 14l5.8-5.8"/><path d="M6.2 14.6 12 20.4l5.8-5.8" opacity=".42"/>', 2.8),
-    rot  : S('<path d="M19.2 12a7.2 7.2 0 1 1-2.1-5.1"/><path d="M19.2 4.6v4.4h-4.4"/>', 2.8),
-    drop : S('<path d="M12 3.6v8.2"/><path d="M7.8 8 12 12.2 16.2 8"/><path d="M6.2 17.8h11.6"/>', 2.8),
-  },
-};
-const ILABEL={ i:['带杆箭头','有横杆，指示性最强，和界面其他线条一个粗细。'],
-               ii:['实心三角','填充的实体三角，最直白有力，游戏味最足。'],
-               iii:['粗角括号','没有横杆，线更粗，软落用双箭头表示「快」，最简洁。'] };
-const iWrap=document.getElementById('icons');
-Object.keys(ICONS).forEach(k=>{
-  const ic=ICONS[k], d=document.createElement('div'); d.className='opt iconset';
-  d.innerHTML=`<div class="tag"><span class="no">${k}</span><span class="nm">${ILABEL[k][0]}</span></div>
-    <div class="pads">
-      <div class="pad-g"><button class="k">${ic.left}<em>左移</em></button><button class="k">${ic.right}<em>右移</em></button></div>
-      <div class="pad-g"><button class="k">${ic.down}<em>软落</em></button><button class="k">${ic.rot}<em>变换</em></button>
-        <button class="k k-drop">${ic.drop}<em>落底</em></button></div>
-    </div><div class="ds">${ILABEL[k][1]}</div>`;
-  iWrap.appendChild(d);
-});
-
-build('setB',['B1','B2','B3','B4']);
-build('setC',['C1','C2','C3','C4']);
+build('setN',['N1','N2','N3','N4']);
+build('setP',['P1v','P2v','P3v','P4v']);
 addEventListener('resize',()=>{
-  [['setB',['B1','B2','B3','B4']],['setC',['C1','C2','C3','C4']]].forEach(([id,ks])=>
+  [['setN',['N1','N2','N3','N4']],['setP',['P1v','P2v','P3v','P4v']]].forEach(([id,ks])=>
     document.querySelectorAll('#'+id+' canvas').forEach((cv,i)=>draw(cv,ks[i])));
 });
 </script>
