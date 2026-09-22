@@ -27,7 +27,7 @@ const STYLES = {
 };
 
 const skin = { pal: 'clear', style: 'gap' };
-function colorOf(type){ return PALETTES[skin.pal][type]; }
+function colorOf(type){ return type === GARBAGE ? '#93a4c4' : PALETTES[skin.pal][type]; }
 
 // 每种方块的四个旋转态，坐标是它在自己 box 里的格子位置 [x, y]。
 // 直接写死每一态，比用旋转矩阵算更不容易在旋转中心上出错。
@@ -108,10 +108,14 @@ const DAS = 150;             // 按住方向键多久开始连发
 const ARR = 40;              // 连发间隔
 const SOFT_DROP_FACTOR = 20; // 软降速度倍率
 
-// 每级重力：秒/格，来自官方公式 (0.8 - (lvl-1)*0.007)^(lvl-1)
-function gravityFor(level){
-  const l = Math.min(level, 20);
-  return Math.pow(0.8 - (l - 1) * 0.007, l - 1) * 1000;
+// 下落速度全程不变。难度靠底部不断升起的灰线来加，
+// 不靠「越来越快」——那样后期只能拼手速。
+const GRAVITY = 800;
+
+// 垃圾行：一开始 30 秒一行，每升一级快 2.5 秒，最快 12 秒
+const GARBAGE = 'X';
+function garbagePeriod(){
+  return Math.max(12000, 30000 - (game.level - 1) * 2500);
 }
 
 const STORE_KEY = 'tetris.best.v1';
@@ -147,6 +151,7 @@ function saveGame(){
       level: game.level,
       combo: game.combo,
       b2b: game.b2b,
+      garbage: game.garbage,
       at: Date.now(),
     }));
   } catch { /* 存不下就算了，不影响玩 */ }
@@ -177,6 +182,8 @@ function restoreGame(d){
   game.level = d.level || 1;
   game.combo = typeof d.combo === 'number' ? d.combo : -1;
   game.b2b = !!d.b2b;
+  game.garbage = d.garbage || 0;
+  garbageTimer = 0;
   game.over = false;
   game.paused = false;
   game.frozen = false;
@@ -188,6 +195,9 @@ function restoreGame(d){
   dropTimer = lockTimer = 0;
   lockResets = 0;
   grounded = false;
+  staticDirty = true;
+  previewDirty = true;
+  needsDraw = true;
   fillQueue();
   if (!game.piece) spawnNext();
   $('overlay').classList.remove('show');
@@ -227,18 +237,22 @@ const game = {
   over: false,
   paused: false,
   frozen: false,      // 样式面板开着时暂停推进，但画面照常刷新
+  garbage: 0,         // 一共升起过几行
   started: false,
   lastRotKick: -1,    // 最近一次旋转用了第几个踢墙偏移，判 T-spin 用
   lastWasRot: false,
 };
 
-const dbg = { frames: 0 };
+const dbg = { frames: 0, layouts: 0 };
+let garbageTimer = 0;
+let lockStep = -1;          // 落地渐白只分几档，省掉大部分重绘
 let dropTimer = 0;
 let lockTimer = 0;
 let lockResets = 0;
 let grounded = false;
 let softDropping = false;
 let lastFrame = 0;
+let lastDrawAt = 0;
 let rafId = 0;
 
 // 消行动画：记下正在闪的行，动画走完才真正塌陷
@@ -285,6 +299,8 @@ function collides(type, x, y, rot){
 }
 
 function spawn(type){
+  previewDirty = true;
+  needsDraw = true;
   const def = PIECES[type];
   const p = { type, x: def.spawnX, y: 0, rot: 0 };
   game.piece = p;
@@ -313,6 +329,7 @@ function tryMove(dx, dy){
   if (collides(p.type, p.x + dx, p.y + dy, p.rot)) return false;
   p.x += dx; p.y += dy;
   game.lastWasRot = false;
+  needsDraw = true;
   if (dy === 0) touchGround(true);   // 横move 可以续 lock delay
   return true;
 }
@@ -329,6 +346,7 @@ function tryRotate(dir){
     if (!collides(p.type, p.x + kx, p.y + ky, to)){
       p.x += kx; p.y += ky; p.rot = to;
       game.lastWasRot = true;
+      needsDraw = true;
       game.lastRotKick = i;
       touchGround(true);
       sfx('rotate');
@@ -345,6 +363,7 @@ function hardDrop(){
   while (!collides(p.type, p.x, p.y + d + 1, p.rot)) d++;
   p.y += d;
   game.score += d * 2;
+  needsDraw = true;
   burst(p, 1.4);
   lockPiece();
   sfx('drop');
@@ -362,6 +381,8 @@ function holdPiece(){
     spawnNext();
   }
   game.holdUsed = true;   // spawn 会把它清掉，所以放在后面
+  previewDirty = true;
+  needsDraw = true;
   sfx('hold');
 }
 
@@ -414,6 +435,8 @@ function lockPiece(){
     if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
   }
   game.piece = null;
+  staticDirty = true;
+  needsDraw = true;
 
   // 找满行
   const full = [];
@@ -426,9 +449,7 @@ function lockPiece(){
   if (full.length){
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
-    if (spin)                    sfx('tspin', full.length);
-    else if (full.length === 4)  sfx('tetris', game.combo);
-    else                         sfx('clear', full.length, game.combo);
+    sfx(full.length === 4 ? 'tetris' : 'clear');
     flashBoard(full.length);
   } else {
     sfx('lock');
@@ -484,11 +505,34 @@ function applyClear(rows){
   for (let y = 0; y < TOTAL_ROWS; y++) if (!set.has(y)) kept.push(game.board[y]);
   while (kept.length < TOTAL_ROWS) kept.unshift(new Array(COLS).fill(null));
   game.board = kept;
+  staticDirty = true;
+  needsDraw = true;
+}
+
+// 底部塞一行带缺口的灰线，整盘往上顶一格
+function riseGarbage(){
+  if (game.board[0].some(Boolean)){ endGame(); return; }   // 顶出去了
+  game.board.shift();
+  const row = new Array(COLS).fill(GARBAGE);
+  row[(Math.random() * COLS) | 0] = null;                   // 留个缺口，不然没法消
+  game.board.push(row);
+  game.garbage++;
+
+  const p = game.piece;
+  if (p){
+    if (!collides(p.type, p.x, p.y - 1, p.rot)) p.y--;      // 方块跟着上移
+    else if (collides(p.type, p.x, p.y, p.rot)){ endGame(); return; }
+  }
+  staticDirty = true;
+  needsDraw = true;
+  sfx('lock');
 }
 
 function endGame(){
   game.over = true;
   game.piece = null;
+  staticDirty = true;
+  needsDraw = true;
   clearSave();
   cancelAnimationFrame(rafId);
   if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
@@ -513,8 +557,19 @@ const holdCtx = holdCv.getContext('2d');
 
 let CELL = 30;   // 实际由 layout() 按容器算
 
+// 已经落地的方块和格线画进这张离屏图，只有棋盘真的变了才重画。
+// 不这么做的话，每帧要画两百多个圆角矩形＋描边，手机会烫。
+const bgCv = document.createElement('canvas');
+const bgCtx = bgCv.getContext('2d');
+let staticDirty = true;     // 棋盘内容变了
+let previewDirty = true;    // NEXT / HOLD 变了
+let needsDraw = true;       // 这一帧到底要不要重画
+let hudCache = '';
+
 function layout(){
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  dbg.layouts++;
+  // 1.75 已经够锐，比 2 少三成像素，手机上省不少
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
   // 必须量 boardWrap（由 grid 定尺寸），不能量 canvas 的直接父元素
   // ——那层 .board-box 是贴着 canvas 的，拿它算会变成自己算自己。
   const wrap = $('boardWrap');
@@ -531,6 +586,13 @@ function layout(){
   canvas.height = Math.round(h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+  bgCv.width = canvas.width;
+  bgCv.height = canvas.height;
+  bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  staticDirty = true;
+  previewDirty = true;
+  needsDraw = true;
+
   for (const [cv, c] of [[nextCv, nextCtx], [holdCv, holdCtx]]){
     const r = cv.getBoundingClientRect();
     cv.width = Math.round(r.width * dpr);
@@ -542,7 +604,7 @@ function layout(){
 
 // 画一个方块格。具体长相由当前 skin.style 决定，见上面的 STYLES。
 function drawCell(c, px, py, size, color, opts = {}){
-  const { ghost = false, alpha = 1 } = opts;
+  const { ghost = false, alpha = 1, garbage = false } = opts;
   const v = STYLES[skin.style];
   const g = size * v.gap, x = px + g, y = py + g, d = size - g * 2;
   const R = v.rad * d;
@@ -559,6 +621,21 @@ function drawCell(c, px, py, size, color, opts = {}){
     c.globalAlpha = alpha * .07;
     c.fillStyle = color;
     c.fill();
+    c.restore();
+    return;
+  }
+
+  if (garbage){
+    // 底部顶上来的灰线：虚线框 + 很淡的填充，一眼能和自己的方块分开
+    c.fillStyle = 'rgba(150,170,205,.13)';
+    roundRect(c, x, y, d, d, R);
+    c.fill();
+    c.strokeStyle = 'rgba(200,215,240,.5)';
+    c.lineWidth = Math.max(1, d * .075);
+    c.setLineDash([Math.max(2.5, d * .22), Math.max(2, d * .16)]);
+    roundRect(c, x + c.lineWidth / 2, y + c.lineWidth / 2, d - c.lineWidth, d - c.lineWidth, Math.max(0, R - 1));
+    c.stroke();
+    c.setLineDash([]);
     c.restore();
     return;
   }
@@ -611,41 +688,45 @@ function hex(h){
   return v;
 }
 
-function draw(){
+// 格线 + 已落地的方块，画一次存着用
+function drawStatic(){
   const W = CELL * COLS, H = CELL * ROWS;
-  ctx.clearRect(0, 0, W, H);
+  bgCtx.clearRect(0, 0, W, H);
 
-  // 井底格线
-  ctx.save();
-  ctx.strokeStyle = 'rgba(120,160,255,.09)';
-  ctx.lineWidth = 1;
-  for (let x = 1; x < COLS; x++){
-    ctx.beginPath(); ctx.moveTo(x * CELL + .5, 0); ctx.lineTo(x * CELL + .5, H); ctx.stroke();
-  }
-  for (let y = 1; y < ROWS; y++){
-    ctx.beginPath(); ctx.moveTo(0, y * CELL + .5); ctx.lineTo(W, y * CELL + .5); ctx.stroke();
-  }
-  ctx.restore();
+  bgCtx.save();
+  bgCtx.strokeStyle = 'rgba(120,160,255,.09)';
+  bgCtx.lineWidth = 1;
+  bgCtx.beginPath();
+  for (let x = 1; x < COLS; x++){ bgCtx.moveTo(x * CELL + .5, 0); bgCtx.lineTo(x * CELL + .5, H); }
+  for (let y = 1; y < ROWS; y++){ bgCtx.moveTo(0, y * CELL + .5); bgCtx.lineTo(W, y * CELL + .5); }
+  bgCtx.stroke();
+  bgCtx.restore();
 
-  const clearingSet = clearing ? new Set(clearing.rows) : null;
-  const flash = clearing ? 1 - clearing.t / clearing.dur : 0;
-
-  // 已落地的块（BUFFER 以上不画，自然被裁掉）
   for (let y = BUFFER; y < TOTAL_ROWS; y++){
+    const row = game.board[y];
     for (let x = 0; x < COLS; x++){
-      const t = game.board[y][x];
+      const t = row[x];
       if (!t) continue;
-      const col = colorOf(t);
-      const py = (y - BUFFER) * CELL;
-      if (clearingSet && clearingSet.has(y)){
-        drawCell(ctx, x * CELL, py, CELL, mix(col, '#ffffff', .55 + .45 * flash), { alpha: .35 + .65 * flash });
-      } else {
-        drawCell(ctx, x * CELL, py, CELL, col);
-      }
+      drawCell(bgCtx, x * CELL, (y - BUFFER) * CELL, CELL, colorOf(t), { garbage: t === GARBAGE });
     }
   }
+  staticDirty = false;
+}
 
-  // 落点虚影 + 当前块
+function draw(){
+  const W = CELL * COLS, H = CELL * ROWS;
+  if (!W || !H) return;
+  ctx.clearRect(0, 0, W, H);
+
+  if (clearing){
+    // 消行动画这 260ms 老实全画，闪白每帧都在变
+    drawBoardLive(W, H);
+  } else {
+    if (staticDirty) drawStatic();
+    ctx.drawImage(bgCv, 0, 0, W, H);
+  }
+
+  // 落点虚影 + 当前方块
   const p = game.piece;
   if (p && !game.over){
     const color = colorOf(p.type);
@@ -659,17 +740,55 @@ function draw(){
       }
     }
     // 快锁定时轻微发白，提示「要定了」
-    const lockPulse = grounded ? clamp(lockTimer / LOCK_DELAY, 0, 1) : 0;
+    const lockPulse = grounded ? Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0) / 4 : 0;
+    const col = lockPulse ? mix(color, '#ffffff', lockPulse * .45) : color;
     for (const [cx, cy] of cellsOf(p.type, p.rot)){
       const by = p.y + cy;
       if (by < BUFFER) continue;
-      const col = lockPulse ? mix(color, '#ffffff', lockPulse * .45) : color;
       drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, col);
     }
   }
 
-  drawParticles();
-  drawPreview();
+  if (particles.length) drawParticles();
+
+  // 底边那道线：满了就从下面顶一行灰线上来
+  if (game.started && !game.over){
+    const prog = clamp(garbageTimer / garbagePeriod(), 0, 1);
+    if (prog > 0){
+      ctx.fillStyle = prog > .82 ? 'rgba(244,63,94,.75)' : 'rgba(150,175,215,.4)';
+      ctx.fillRect(0, H - 2, W * prog, 2);
+    }
+  }
+
+  if (previewDirty){ drawPreview(); previewDirty = false; }
+}
+
+// 消行动画期间用的全量画法
+function drawBoardLive(W, H){
+  ctx.save();
+  ctx.strokeStyle = 'rgba(120,160,255,.09)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 1; x < COLS; x++){ ctx.moveTo(x * CELL + .5, 0); ctx.lineTo(x * CELL + .5, H); }
+  for (let y = 1; y < ROWS; y++){ ctx.moveTo(0, y * CELL + .5); ctx.lineTo(W, y * CELL + .5); }
+  ctx.stroke();
+  ctx.restore();
+
+  const set = new Set(clearing.rows);
+  const flash = 1 - clearing.t / clearing.dur;
+  for (let y = BUFFER; y < TOTAL_ROWS; y++){
+    for (let x = 0; x < COLS; x++){
+      const t = game.board[y][x];
+      if (!t) continue;
+      const col = colorOf(t);
+      const py = (y - BUFFER) * CELL;
+      if (set.has(y)){
+        drawCell(ctx, x * CELL, py, CELL, mix(col, '#ffffff', .55 + .45 * flash), { alpha: .35 + .65 * flash });
+      } else {
+        drawCell(ctx, x * CELL, py, CELL, col, { garbage: t === GARBAGE });
+      }
+    }
+  }
 }
 
 function drawPreview(){
@@ -712,7 +831,7 @@ function burst(p, power){
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
     const by = p.y + cy;
     if (by < BUFFER) continue;
-    for (let i = 0; i < 3; i++){
+    for (let i = 0; i < 2; i++){
       particles.push({
         x: (p.x + cx + .5) * CELL,
         y: (by - BUFFER + .5) * CELL,
@@ -729,7 +848,7 @@ function burstRow(y){
   for (let x = 0; x < COLS; x++){
     const t = game.board[y][x];
     const color = t ? colorOf(t) : '#ffffff';
-    for (let i = 0; i < 3; i++){
+    for (let i = 0; i < 2; i++){
       particles.push({
         x: (x + .5) * CELL,
         y: (y - BUFFER + .5) * CELL,
@@ -744,13 +863,13 @@ function burstRow(y){
 function stepParticles(dt){
   for (let i = particles.length - 1; i >= 0; i--){
     const q = particles[i];
-    q.life -= dt / 620;
+    q.life -= dt / 460;
     if (q.life <= 0){ particles.splice(i, 1); continue; }
     q.x += q.vx * dt / 1000;
     q.y += q.vy * dt / 1000;
     q.vy += 520 * dt / 1000;
   }
-  if (particles.length > 400) particles.splice(0, particles.length - 400);
+  if (particles.length > 160) particles.splice(0, particles.length - 160);
 }
 
 function drawParticles(){
@@ -768,6 +887,9 @@ function drawParticles(){
 // ───────────────────────── HUD ─────────────────────────
 
 function syncHud(){
+  const key = game.score + '/' + game.lines + '/' + game.level + '/' + game.best;
+  if (key === hudCache) return;         // 每帧写 DOM 很浪费
+  hudCache = key;
   $('score').textContent = game.score.toLocaleString();
   $('lines').textContent = game.lines;
   $('level').textContent = game.level;
@@ -803,159 +925,42 @@ function flashLevel(){
 }
 
 // ───────────────────────── 音效 ─────────────────────────
-// 全部用 WebAudio 现合成，不背资源文件。
-// 消行走琶音：几行就多几个音，连击越多整体升得越高。
+// 回到最早那版：一次一个振荡器，简单干脆。
+// 音量整体压低、锯齿换三角波，存在感弱一点，也省电。
 
-let actx = null, master = null;
+let actx = null;
 let muted = false;
 
-function audio(){
-  try {
-    if (!actx){
-      actx = new (window.AudioContext || window.webkitAudioContext)();
-      master = actx.createGain();
-      master.gain.value = .9;
-      // 琶音和连续硬降会让好几个音叠在一起，挂个压限器兜底，免得爆音
-      const comp = actx.createDynamicsCompressor();
-      comp.threshold.value = -14;
-      comp.knee.value = 12;
-      comp.ratio.value = 6;
-      comp.attack.value = .003;
-      comp.release.value = .18;
-      master.connect(comp);
-      comp.connect(actx.destination);
-    }
-    if (actx.state === 'suspended') actx.resume();
-    return actx;
-  } catch { return null; }
-}
-
-// 一个带起落包络的音；filter 给它一点圆润度，别太刺
-function tone(o){
-  if (muted) return;
-  const c = audio(); if (!c) return;
-  const t0 = c.currentTime + (o.delay || 0);
-  const dur = o.dur || .15;
-  const vol = o.vol == null ? .07 : o.vol;
-  const osc = c.createOscillator();
-  const g = c.createGain();
-  osc.type = o.type || 'triangle';
-  osc.frequency.setValueAtTime(o.freq, t0);
-  if (o.to) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.to), t0 + dur);
-
-  g.gain.setValueAtTime(.0001, t0);
-  g.gain.exponentialRampToValueAtTime(vol, t0 + (o.atk || .008));
-  g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
-
-  if (o.filter){
-    const f = c.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = o.filter;
-    osc.connect(f); f.connect(g);
-  } else {
-    osc.connect(g);
-  }
-  g.connect(master);
-  osc.start(t0);
-  osc.stop(t0 + dur + .03);
-}
-
-// 一小段噪声，给落地和消行添点「实体」的冲击感
-function noise(o){
-  if (muted) return;
-  const c = audio(); if (!c) return;
-  const t0 = c.currentTime + (o.delay || 0);
-  const dur = o.dur || .1;
-  const len = Math.max(1, Math.ceil(c.sampleRate * dur));
-  const buf = c.createBuffer(1, len, c.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-  const src = c.createBufferSource();
-  src.buffer = buf;
-  const f = c.createBiquadFilter();
-  f.type = o.hp ? 'highpass' : 'lowpass';
-  f.frequency.setValueAtTime(o.filter || 1500, t0);
-  if (o.filterTo) f.frequency.exponentialRampToValueAtTime(Math.max(40, o.filterTo), t0 + dur);
-  const g = c.createGain();
-  g.gain.setValueAtTime(o.vol == null ? .08 : o.vol, t0);
-  g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
-  src.connect(f); f.connect(g); g.connect(master);
-  src.start(t0);
-}
-
-// C 大调往上爬的一串音，消几行就取前几个
-const LADDER = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
-const semitone = (n) => Math.pow(1.05946, n);
-
-const SFX = {
-  move(){ tone({ freq: 190, dur: .028, vol: .022, type: 'square', filter: 800 }); },
-
-  rotate(){
-    tone({ freq: 330, to: 430, dur: .05, vol: .042, type: 'square', filter: 1900 });
-  },
-
-  hold(){
-    tone({ freq: 392, dur: .07, vol: .045, type: 'sine' });
-    tone({ freq: 587, dur: .10, vol: .040, type: 'sine', delay: .05 });
-  },
-
-  // 硬降：噪声冲击 + 一记下沉的低音
-  drop(){
-    noise({ dur: .085, vol: .085, filter: 2600, filterTo: 300 });
-    tone({ freq: 150, to: 52, dur: .14, vol: .09, type: 'sine' });
-  },
-
-  lock(){ tone({ freq: 118, to: 84, dur: .055, vol: .04, type: 'triangle' }); },
-
-  // 消行：1~3 行走琶音，combo 越高整体越亮
-  clear(n, combo){
-    const up = semitone(Math.min(Math.max(combo, 0), 8));
-    const notes = LADDER.slice(0, Math.min(2 + n, LADDER.length));
-    notes.forEach((f, i) => {
-      tone({ freq: f * up, dur: .24, vol: .07, type: 'triangle', filter: 4200, delay: i * .055 });
-    });
-    tone({ freq: 130.81 * up, dur: .40, vol: .05, type: 'sine' });   // 垫底
-    noise({ dur: .16, vol: .045, filter: 5200, hp: true });          // 碎裂感
-  },
-
-  // 四行：整条梯子爬完，锯齿音色 + 低音垫，最爽的那一下
-  tetris(combo){
-    const up = semitone(Math.min(Math.max(combo, 0), 8));
-    LADDER.forEach((f, i) => {
-      tone({ freq: f * up, dur: .30, vol: .08, type: 'sawtooth', filter: 3200, delay: i * .05 });
-    });
-    tone({ freq: 65.41, to: 130.81, dur: .55, vol: .085, type: 'sine' });
-    noise({ dur: .3, vol: .06, filter: 6000, hp: true });
-    tone({ freq: 1046.5 * up, dur: .5, vol: .05, type: 'sine', delay: .3 });
-  },
-
-  // T-spin：换小调，听起来「不一样」
-  tspin(n){
-    [523.25, 622.25, 783.99, 1046.5].slice(0, 2 + n).forEach((f, i) => {
-      tone({ freq: f, dur: .26, vol: .07, type: 'square', filter: 2600, delay: i * .06 });
-    });
-    tone({ freq: 98, dur: .4, vol: .06, type: 'sine' });
-  },
-
-  level(){
-    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
-      tone({ freq: f, dur: .18, vol: .06, type: 'triangle', filter: 4000, delay: i * .07 });
-    });
-  },
-
-  over(){
-    [392, 330, 262, 196].forEach((f, i) => {
-      tone({ freq: f, to: f * .96, dur: .34, vol: .075, type: 'sawtooth', filter: 1600, delay: i * .13 });
-    });
-    tone({ freq: 110, to: 42, dur: .9, vol: .07, type: 'sine', delay: .5 });
-  },
+const SPECS = {
+  rotate: { f: 400, to: 470,  d: .04, v: .026, type: 'sine' },
+  lock:   { f: 150, to: 110,  d: .05, v: .022, type: 'sine' },
+  drop:   { f: 190, to: 85,   d: .09, v: .046, type: 'triangle' },
+  clear:  { f: 520, to: 760,  d: .15, v: .048, type: 'sine' },
+  tetris: { f: 440, to: 1040, d: .26, v: .068, type: 'triangle' },
+  level:  { f: 600, to: 900,  d: .16, v: .04,  type: 'sine' },
+  hold:   { f: 320, to: 380,  d: .05, v: .028, type: 'sine' },
+  over:   { f: 300, to: 70,   d: .60, v: .055, type: 'triangle' },
 };
 
-// 老的调用点统一走这里
-function sfx(kind, a, b){
+function sfx(kind){
   if (muted) return;
-  const fn = SFX[kind];
-  if (fn) { try { fn(a, b); } catch { /* 浏览器不给声音就静音运行 */ } }
+  const spec = SPECS[kind];
+  if (!spec) return;
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    const t = actx.currentTime;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.connect(g); g.connect(actx.destination);
+    o.type = spec.type;
+    o.frequency.setValueAtTime(spec.f, t);
+    o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
+    g.gain.setValueAtTime(spec.v, t);
+    g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
+    o.start(t);
+    o.stop(t + spec.d + .02);
+  } catch { /* 浏览器不给声音就静音运行 */ }
 }
 
 // ───────────────────────── 主循环 ─────────────────────────
@@ -965,10 +970,26 @@ function tick(now){
   dbg.frames++;
   const dt = Math.min(now - lastFrame, 100);   // 切后台回来不要瞬移
   lastFrame = now;
-  if (game.paused || game.over || game.frozen) { draw(); return; }
+  if (game.paused || game.over || game.frozen){
+    draw();
+    needsDraw = false;
+    cancelAnimationFrame(rafId);      // 停着就别空转了，恢复时再拉起来
+    rafId = 0;
+    return;
+  }
 
   stepParticles(dt);
   handleAutoRepeat(dt);
+
+  // 灰线倒计时（消行动画期间不推进，免得叠在一起）
+  if (!clearing && game.piece){
+    garbageTimer += dt;
+    const period = garbagePeriod();
+    if (garbageTimer >= period){
+      garbageTimer -= period;
+      riseGarbage();
+    }
+  }
 
   // 消行动画播完再塌陷
   if (clearing){
@@ -984,25 +1005,36 @@ function tick(now){
   }
 
   if (game.piece){
-    const speed = softDropping ? gravityFor(game.level) / SOFT_DROP_FACTOR : gravityFor(game.level);
+    const speed = softDropping ? GRAVITY / SOFT_DROP_FACTOR : GRAVITY;
     dropTimer += dt;
     while (dropTimer >= speed){
       dropTimer -= speed;
       if (!collides(game.piece.type, game.piece.x, game.piece.y + 1, game.piece.rot)){
         game.piece.y++;
         game.lastWasRot = false;
+        needsDraw = true;
         if (softDropping) game.score++;
       } else break;
     }
     touchGround(false);
     if (grounded){
       lockTimer += dt;
-      if (lockTimer >= LOCK_DELAY){ burst(game.piece, .7); lockPiece(); }
-    }
+      const step = Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0);
+      if (step !== lockStep){ lockStep = step; needsDraw = true; }
+      if (lockTimer >= LOCK_DELAY) lockPiece();
+    } else lockStep = -1;
   }
 
   syncHud();
-  draw();
+
+  // 方块匀速往下掉的时候，一秒里其实只有一帧画面变了。
+  // 没变就别画——这是手机发烫的主因。
+  // 逻辑跑满 60，画面限到 30——这个游戏看不出差别，功耗直接减半
+  if ((needsDraw || particles.length || clearing) && now - lastDrawAt >= 32){
+    draw();
+    lastDrawAt = now;
+    needsDraw = false;
+  }
 }
 
 // ───────────────────────── 输入 ─────────────────────────
@@ -1164,6 +1196,9 @@ function buildStylePanel(){
 function applySkin(){
   writeSkin();
   buildStylePanel();
+  staticDirty = true;
+  previewDirty = true;
+  needsDraw = true;
   draw();
 }
 
@@ -1178,7 +1213,8 @@ function toggleStylePanel(open){
     el.hidden = true;
   }
   game.frozen = show;        // 挑样式的时候方块别接着往下掉
-  if (!show) lastFrame = performance.now();
+  needsDraw = true;
+  if (!show) resumeLoop();
 }
 
 // ───────────────────────── 游戏模式 ─────────────────────────
@@ -1262,6 +1298,13 @@ function launchedAsApp(){
 
 // ───────────────────────── 开关局 ─────────────────────────
 
+// 循环停过之后重新拉起来
+function resumeLoop(){
+  lastFrame = performance.now();
+  lastDrawAt = 0;
+  if (!rafId) rafId = requestAnimationFrame(tick);
+}
+
 function restart(){
   clearSave();
   game.board = newBoard();
@@ -1278,6 +1321,11 @@ function restart(){
   game.paused = false;
   game.frozen = false;
   game.started = true;
+  game.garbage = 0;
+  garbageTimer = 0;
+  staticDirty = true;
+  previewDirty = true;
+  needsDraw = true;
   particles.length = 0;
   clearing = null;
   softDropping = false;
@@ -1301,9 +1349,10 @@ function togglePause(){
   if (game.paused){
     ov.dataset.mode = 'pause';
     ov.classList.add('show');
+    needsDraw = true;
   } else {
     ov.classList.remove('show');
-    lastFrame = performance.now();
+    resumeLoop();
   }
 }
 
@@ -1390,8 +1439,8 @@ function init(){
 }
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
-window.__tetris = { game, PIECES, cellsOf, collides, restart,
-  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames }) };
+window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage,
+  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();

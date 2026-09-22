@@ -67,9 +67,7 @@ body::after{
     linear-gradient(var(--line) 1px, transparent 1px),
     linear-gradient(90deg, var(--line) 1px, transparent 1px);
   background-size: 44px 44px;
-  opacity: .30;
-  mask-image: radial-gradient(75vw 75vh at 50% 40%, #000 30%, transparent 78%);
-  -webkit-mask-image: radial-gradient(75vw 75vh at 50% 40%, #000 30%, transparent 78%);
+  opacity: .18;
 }
 
 a{ color: inherit; text-decoration: none; }
@@ -93,8 +91,6 @@ a{ color: inherit; text-decoration: none; }
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-m);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 /* 小标签 */

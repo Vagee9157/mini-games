@@ -205,9 +205,7 @@ body{
   display: none;
   place-items: center;
   border-radius: 10px;
-  background: rgba(8, 11, 20, .86);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(8, 11, 20, .93);
   text-align: center;
   padding: 14px;
   line-height: 1.6;
@@ -319,11 +317,12 @@ body{
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  /* 磨砂玻璃：一层斜向高光渐变 + 顶部内高光 */
-  background: linear-gradient(150deg, rgba(255,255,255,.11), rgba(255,255,255,.03));
+  /* 磨砂玻璃的观感，但不用 backdrop-filter——那东西在手机上一直吃 GPU，
+     而按键底下本来就是纯色，模糊出来跟这层渐变看不出差别。 */
+  background:
+    linear-gradient(150deg, rgba(255,255,255,.115), rgba(255,255,255,.028)),
+    rgba(22, 30, 48, .82);
   border: 1px solid rgba(255,255,255,.14);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 6px 18px rgba(0,0,0,.30);
   transition: transform .08s, background .12s, border-color .12s;
 }
@@ -337,7 +336,9 @@ body{
 }
 .k-drop{
   min-height: 58px;
-  background: linear-gradient(150deg, rgba(34,211,238,.26), rgba(168,85,247,.12));
+  background:
+    linear-gradient(150deg, rgba(34,211,238,.28), rgba(168,85,247,.14)),
+    rgba(18, 34, 52, .86);
   border-color: rgba(120,235,255,.34);
 }
 .k-drop em{ color: #a5f2ff; opacity: 1; }
@@ -368,8 +369,6 @@ body{
   border-radius: 22px 22px 0 0;
   padding: 18px 18px calc(16px + env(safe-area-inset-bottom));
   box-shadow: 0 -18px 50px rgba(0,0,0,.6);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   animation: sheetUp .22s cubic-bezier(.2,.8,.3,1);
 }
 @keyframes sheetUp{ from{ transform: translateY(18px); opacity: .6; } to{ transform: none; opacity: 1; } }
