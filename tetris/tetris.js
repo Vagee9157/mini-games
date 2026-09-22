@@ -600,17 +600,17 @@ function draw(){
 }
 
 function drawPreview(){
-  // next
   const nw = nextCv.clientWidth, nh = nextCv.clientHeight;
   nextCtx.clearRect(0, 0, nw, nh);
-  // 槽明显偏宽才横排，否则竖排——横屏时槽是窄高的，能多摆几个
-  const horiz = nw > nh * 1.4;
-  const n = Math.min(game.queue.length, horiz ? 3 : 5);
-  for (let i = 0; i < n; i++){
-    const a = i === 0 ? 1 : .58 - i * .07;
-    if (horiz) drawMini(nextCtx, game.queue[i], i * (nw / n), 0, nw / n, nh, a);
-    else       drawMini(nextCtx, game.queue[i], 0, i * (nh / 5), nw, nh / 5, a);
-  }
+  if (!nw || !nh) return;
+
+  // 上面一整行放马上要来的那个，下面并排放之后的两个
+  const topH = Math.round(nh * 0.54);
+  const botH = nh - topH;
+  if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1);
+  if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62);
+  if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62);
+
   // hold
   const hw = holdCv.clientWidth, hh = holdCv.clientHeight;
   holdCtx.clearRect(0, 0, hw, hh);
@@ -624,7 +624,7 @@ function drawMini(c, type, ox, oy, w, h, alpha){
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const bw = maxX - minX + 1, bh = maxY - minY + 1;
-  const cell = Math.min(w / (bw + 1.4), h / (bh + 1.4));
+  const cell = Math.min(w / (bw + 1.1), h / (bh + 1.0));
   const px = ox + (w - bw * cell) / 2;
   const py = oy + (h - bh * cell) / 2;
   for (const [cx, cy] of cells){
@@ -869,7 +869,6 @@ function bindButtons(){
   const map = [
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
-    ['btnDown',  () => { softDropping = true; }, () => { softDropping = false; }],
     ['btnCw',    () => tryRotate(1),    null],
     ['btnDrop',  () => hardDrop(),      null],
   ];

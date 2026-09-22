@@ -39,23 +39,6 @@
       <button class="tbtn" id="restartBtn">重开</button>
     </header>
 
-    <div class="slot hold" id="holdSlot" role="button" tabindex="0" aria-label="暂存当前方块">
-      <span class="slot-label">HOLD</span>
-      <canvas id="holdCv"></canvas>
-    </div>
-
-    <div class="stats">
-      <div class="stat hi"><span>SCORE</span><b id="score">0</b></div>
-      <div class="stat"><span>LINES</span><b id="lines">0</b></div>
-      <div class="stat" id="levelBox"><span>LEVEL</span><b id="level">1</b></div>
-      <div class="stat"><span>BEST</span><b id="best">0</b></div>
-    </div>
-
-    <div class="slot next">
-      <span class="slot-label">NEXT</span>
-      <canvas id="nextCv"></canvas>
-    </div>
-
     <div class="board-wrap" id="boardWrap">
      <div class="board-box">
       <canvas id="board"></canvas>
@@ -66,7 +49,7 @@
           <div data-when="start">
             <h2>俄罗斯<span class="neon">方块</span></h2>
             <p>
-              下面的按键操作：左右移动、旋转、软降、落底，点 HOLD 框暂存。<br>
+              下面四个键：<b>左移 · 右移 · 落底 · 变换</b>，点右边 HOLD 框暂存。<br>
               手机建议先点右上角<b>「游戏模式」</b>，横过来也能玩。
             </p>
             <button class="pbtn" id="startBtn">开始</button>
@@ -96,16 +79,35 @@
      </div>
     </div>
 
-    <!-- 按键区：上排四个功能键，右下角单独一个落底 -->
+    <!-- 右侧：下一个 / 暂存 / 计分 -->
+    <aside class="side">
+      <div class="slot next">
+        <span class="slot-label">NEXT</span>
+        <canvas id="nextCv"></canvas>
+      </div>
+
+      <div class="slot hold" id="holdSlot" role="button" tabindex="0" aria-label="暂存当前方块">
+        <span class="slot-label">HOLD</span>
+        <canvas id="holdCv"></canvas>
+      </div>
+
+      <div class="stats">
+        <div class="stat hi"><span>SCORE</span><b id="score">0</b></div>
+        <div class="stat"><span>LINES</span><b id="lines">0</b></div>
+        <div class="stat" id="levelBox"><span>LEVEL</span><b id="level">1</b></div>
+        <div class="stat"><span>BEST</span><b id="best">0</b></div>
+      </div>
+    </aside>
+
+    <!-- 按键区：一排四个 -->
     <div class="pads">
       <div class="pad-g pad-l">
         <button class="k" id="btnLeft"  aria-label="左移"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 6.2 8.4 12l5.8 5.8"/></svg><em>左移</em></button>
         <button class="k" id="btnRight" aria-label="右移"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.8 6.2 15.6 12l-5.8 5.8"/></svg><em>右移</em></button>
       </div>
       <div class="pad-g pad-r">
-        <button class="k" id="btnDown" aria-label="软降"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 8.2 12 14l5.8-5.8"/><path d="M6.2 14.6 12 20.4l5.8-5.8" opacity=".42"/></svg><em>软落</em></button>
-        <button class="k" id="btnCw"   aria-label="旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.2 12a7.2 7.2 0 1 1-2.1-5.1"/><path d="M19.2 4.6v4.4h-4.4"/></svg><em>变换</em></button>
         <button class="k k-drop" id="btnDrop" aria-label="直接落底"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6v8.2"/><path d="M7.8 8 12 12.2 16.2 8"/><path d="M6.2 17.8h11.6"/></svg><em>落底</em></button>
+        <button class="k" id="btnCw" aria-label="旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.2 12a7.2 7.2 0 1 1-2.1-5.1"/><path d="M19.2 4.6v4.4h-4.4"/></svg><em>变换</em></button>
       </div>
     </div>
 
@@ -125,7 +127,7 @@
     </div>
   </div>
 
-  <div class="hint">点 HOLD 框暂存<span class="only-wide"> · 键盘 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>空格</kbd> 也能玩</span> · 分数只存在这台设备上</div>
+  <div class="hint">点 HOLD 框暂存<span class="only-wide"> · 键盘 <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>空格</kbd> 也能玩</span> · 分数只存在这台设备上</div>
 
 </div>
 
