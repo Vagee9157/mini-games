@@ -115,3 +115,24 @@
             grid-template-columns: 1fr; width: 116px; z-index: 2; }
   .boardwrap{ padding-left: 124px; }
 }
+
+/* 模式选择 */
+.modes{ display: grid; gap: 8px; margin-top: 4px; }
+.mbtn{
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 11px 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color .14s, background .14s;
+}
+.mbtn b{ font-size: 14px; color: var(--ink); font-weight: 600; }
+.mbtn em{ font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim); }
+.mbtn:hover, .mbtn.on{ border-color: var(--n-cyan); background: rgba(34,211,238,.10); }
+.mbtn.on b{ color: var(--n-cyan); }
+
+/* 单人模式下右边那格不是对手，是纪录 */
+body[data-mode="solo"] .pl:nth-child(2){ opacity: .78; }

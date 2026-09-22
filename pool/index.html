@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
 <link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
-<link rel="stylesheet" href="pool.css?v=35cf4d15">
+<link rel="stylesheet" href="pool.css?v=3af61306">
 </head>
 <body>
 <div class="topline"></div>
@@ -31,6 +31,7 @@
     <a class="back" href="../">← 合集</a>
     <h1>黑八<em>8-BALL</em></h1>
     <div class="sp"></div>
+    <button class="tbtn" id="modeBtn">模式</button>
     <button class="tbtn tbtn-sq" id="muteBtn" aria-label="音效开关">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M11 5 6.5 9H3v6h3.5L11 19z"/>
@@ -44,12 +45,12 @@
 
   <div class="players">
     <div class="pl" id="p0">
-      <div class="nm">玩家 1</div>
+      <div class="nm" id="p0nm">玩家 1</div>
       <div class="gp" id="p0g">未定组</div>
       <div class="lf" id="p0n">—</div>
     </div>
     <div class="pl" id="p1">
-      <div class="nm">玩家 2</div>
+      <div class="nm" id="p1nm">玩家 2</div>
       <div class="gp" id="p1g">未定组</div>
       <div class="lf" id="p1n">—</div>
     </div>
@@ -61,11 +62,21 @@
     <canvas id="board"></canvas>
     <div class="toast" id="toast"></div>
 
-    <div class="overlay" id="overlay" data-mode="over">
+    <div class="overlay" id="overlay" data-mode="start">
       <div class="card">
-        <h2 id="winTitle">玩家 1 赢</h2>
-        <p id="winWhy"></p>
-        <button class="pbtn" id="againBtn">再来一局</button>
+        <div data-when="start">
+          <h2>黑<span class="neon">八</span></h2>
+          <p>往后拉瞄准，拉得越长越用力，松手出杆。<br>辅助线会告诉你白球停哪、目标球往哪走。</p>
+        </div>
+        <div data-when="over">
+          <h2 id="winTitle">玩家 1 赢</h2>
+          <p id="winWhy"></p>
+        </div>
+        <div class="modes" id="modes">
+          <button class="mbtn" data-m="solo"><b>单人清台</b><em>一个人打，比谁杆数少</em></button>
+          <button class="mbtn" data-m="ai"><b>人机对战</b><em>跟电脑按黑八规矩来</em></button>
+          <button class="mbtn" data-m="two"><b>双人同屏</b><em>两个人轮流用一台手机</em></button>
+        </div>
       </div>
     </div>
   </div>
@@ -74,6 +85,6 @@
 
 </div>
 
-<script src="pool.js?v=ef25f74a"></script>
+<script src="pool.js?v=43eaa96b"></script>
 </body>
 </html>

@@ -29,6 +29,10 @@ let pockets = [];
 let balls = [];             // {n, x, y, vx, vy, in}
 let moving = false;
 let aimA = -Math.PI / 2, power = 0, pulling = false;
+let MODE = 'two';           // solo 单人清台 / ai 人机 / two 双人同屏
+let AI_ERR = 0.030;         // AI 瞄准误差（弧度），越大越菜
+let aiTimer = 0, aiThinking = false;
+let shots = 0;              // 单人模式的杆数
 let turn = 0;               // 0 / 1
 let groups = [null, null];  // 'solid' | 'stripe'
 let phase = 'break';        // break | open | play | over
@@ -72,13 +76,17 @@ function rack(){
   });
 }
 
-function reset(){
+function reset(showStart){
+  clearTimeout(aiTimer); aiThinking = false;
   rack();
+  shots = 0;
   turn = 0; groups = [null, null]; phase = 'break';
   ballInHand = false; winner = -1; moving = false;
   power = 0; aimA = -Math.PI / 2;
   msg = '';
-  $('overlay').classList.remove('show');
+  const ov = $('overlay');
+  if (showStart){ ov.dataset.mode = 'start'; ov.classList.add('show'); }
+  else ov.classList.remove('show');
   syncHud(); needsDraw = true;
   lastT = performance.now();
   if (!rafId) rafId = requestAnimationFrame(tick);
@@ -178,6 +186,7 @@ const myBalls = (who) => {
 const cleared = (who) => groups[who] && myBalls(who).every(b => b.in);
 
 function settle(){
+  if (MODE === 'solo'){ settleSolo(); return; }
   const me = turn;
   const wasBreak = phase === 'break';
   let foul = false, why = '';
@@ -235,9 +244,50 @@ function settle(){
 
   if (shotPotted.includes(0)) respotCue();
   syncHud(); needsDraw = true;
+  if (MODE === 'ai' && turn === 1 && phase !== 'over') aiTurn();
 }
 
-function who(i){ return i === 0 ? '玩家 1' : '玩家 2'; }
+// 单人清台：8 号留最后，白球进袋只是自己挪一下，不换人
+function settleSolo(){
+  if (shotPotted.includes(8)){
+    const rest = balls.filter(b => b.n !== 0 && b.n !== 8 && !b.in).length;
+    if (rest === 0) finishSolo(true);
+    else finishSolo(false, '8 号提前进袋');
+    return;
+  }
+  if (shotPotted.includes(0)){
+    respotCue();
+    ballInHand = true;
+    toast('白球进袋 · 可以拖到别处');
+    sfx('foul');
+  }
+  const rest = balls.filter(b => b.n !== 0 && b.n !== 8 && !b.in).length;
+  if (rest === 0) toast('就剩 8 号了');
+  syncHud(); needsDraw = true;
+}
+
+function finishSolo(win, why){
+  phase = 'over'; winner = win ? 0 : 1;
+  let extra = '';
+  if (win){
+    const best = +(localStorage.getItem('pool.solo.best.v1') || 0);
+    if (!best || shots < best){
+      try { localStorage.setItem('pool.solo.best.v1', String(shots)); } catch { /* 忽略 */ }
+      extra = ' · 新纪录';
+    }
+  }
+  $('overlay').dataset.mode = 'over';
+  $('winTitle').textContent = win ? `清台！${shots} 杆` : '没清成';
+  $('winWhy').textContent = win ? ('用了 ' + shots + ' 杆' + extra) : (why || '');
+  $('overlay').classList.add('show');
+  sfx(win ? 'win' : 'foul');
+  syncHud(); needsDraw = true;
+}
+
+function who(i){
+  if (MODE === 'ai') return i === 0 ? '你' : '电脑';
+  return i === 0 ? '玩家 1' : '玩家 2';
+}
 
 function respotCue(){
   const c = cue();
@@ -261,6 +311,119 @@ function finish(w, why){
   syncHud(); needsDraw = true;
 }
 
+// ── AI ──
+// 思路：对「我能打的每颗球 × 每个袋」算一遍。
+// 目标球要往袋走，就得从它背后某点撞它——那个点叫幽灵球位置，
+// 白球瞄它就行。再检查两段路上有没有别的球挡着，最后挑最直最近的。
+
+function segDist(x1, y1, x2, y2, px, py){
+  const dx = x2 - x1, dy = y2 - y1;
+  const L2 = dx * dx + dy * dy;
+  if (!L2) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * dx + (py - y1) * dy) / L2;
+  t = clamp(t, 0, 1);
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function blocked(x1, y1, x2, y2, skip){
+  for (const b of balls){
+    if (b.in || b === skip || b.n === 0) continue;
+    if (segDist(x1, y1, x2, y2, b.x, b.y) < R * 1.92) return true;
+  }
+  return false;
+}
+
+// 这一杆合法的目标球有哪些
+function legalTargets(who){
+  const g = groups[who];
+  const mine = balls.filter(b => !b.in && b.n !== 0 && b.n !== 8 &&
+    (!g || (g === 'solid' ? isSolid(b.n) : isStripe(b.n))));
+  if (g && cleared(who)){
+    const eight = balls.find(b => b.n === 8 && !b.in);
+    return eight ? [eight] : [];
+  }
+  if (MODE === 'solo'){
+    // 单人：8 号留到最后
+    const others = balls.filter(b => !b.in && b.n !== 0 && b.n !== 8);
+    if (others.length) return others;
+    const eight = balls.find(b => b.n === 8 && !b.in);
+    return eight ? [eight] : [];
+  }
+  return mine;
+}
+
+function aiPlan(who){
+  const c = cue();
+  let best = null;
+  for (const t of legalTargets(who)){
+    for (const p of pockets){
+      const dx = p.x - t.x, dy = p.y - t.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 1) continue;
+      const ux = dx / d, uy = dy / d;
+      const gx = t.x - ux * R * 2, gy = t.y - uy * R * 2;      // 幽灵球
+      if (gx < R * .4 || gx > TW - R * .4 || gy < R * .4 || gy > TH - R * .4) continue;
+
+      const cdx = gx - c.x, cdy = gy - c.y;
+      const cd = Math.hypot(cdx, cdy);
+      if (cd < R * .8) continue;
+      const cut = (cdx / cd) * ux + (cdy / cd) * uy;            // cos(切角)
+      if (cut < 0.22) continue;                                  // 切太薄，打不进
+      if (blocked(c.x, c.y, gx, gy, t)) continue;                // 白球过不去
+      if (blocked(t.x, t.y, p.x, p.y, t)) continue;              // 目标球到袋被挡
+
+      const score = cut * 2.2 - (cd + d) / (TW + TH) - (t.n === 8 ? 0 : 0);
+      if (!best || score > best.score){
+        best = { score, aim: Math.atan2(cdy, cdx), cut, dist: cd + d };
+      }
+    }
+  }
+  return best;
+}
+
+function aiPlaceCue(){
+  // 自由球：把白球挪到能打上球的地方，试几个点挑最好的
+  const c = cue();
+  let bestSpot = null;
+  for (let i = 0; i < 40; i++){
+    const x = R * 2 + Math.random() * (TW - R * 4);
+    const y = R * 2 + Math.random() * (TH - R * 4);
+    if (balls.some(b => b !== c && !b.in && Math.hypot(b.x - x, b.y - y) < R * 2.4)) continue;
+    c.x = x; c.y = y;
+    const plan = aiPlan(turn);
+    if (plan && (!bestSpot || plan.score > bestSpot.score)) bestSpot = { x, y, score: plan.score };
+  }
+  if (bestSpot){ c.x = bestSpot.x; c.y = bestSpot.y; }
+  else { c.x = TW * .5; c.y = TH * .76; }
+  ballInHand = false;
+}
+
+function aiTurn(){
+  if (MODE !== 'ai' || turn !== 1 || moving || phase === 'over' || aiThinking) return;
+  aiThinking = true;
+  toast('电脑思考中…');
+  clearTimeout(aiTimer);
+  aiTimer = setTimeout(() => {
+    aiThinking = false;
+    if (phase === 'over') return;
+    if (ballInHand) aiPlaceCue();
+    const plan = aiPlan(1);
+    if (plan){
+      aimA = plan.aim + (Math.random() - .5) * AI_ERR * 2;
+      // 切得越薄越要用力，距离越远也越要用力
+      power = clamp(.26 + plan.dist / (TH * 1.5) + (1 - plan.cut) * .3, .22, .95);
+    } else {
+      // 没球可打就轻轻推一杆，别乱轰
+      const t = legalTargets(1)[0];
+      const c = cue();
+      aimA = t ? Math.atan2(t.y - c.y, t.x - c.x) : -Math.PI / 2;
+      power = .3;
+    }
+    needsDraw = true;
+    shoot();
+  }, 900);
+}
+
 // ── 出杆 ──
 function shoot(){
   if (moving || phase === 'over' || power < .05) return;
@@ -269,6 +432,7 @@ function shoot(){
   c.vy = Math.sin(aimA) * MAX_POWER * power;
   shotFirstHit = 0; shotPotted = []; shotCushion = false;
   moving = true; ballInHand = false;
+  shots++;
   power = 0;
   sfx('hit');
   needsDraw = true;
@@ -515,15 +679,30 @@ function hex(h){
 
 // ── HUD ──
 function syncHud(){
-  for (const i of [0, 1]){
-    const el = $('p' + i);
-    el.classList.toggle('on', turn === i && phase !== 'over');
-    const g = groups[i];
-    const left = g ? myBalls(i).filter(b => !b.in).length : null;
-    $('p' + i + 'g').textContent = !g ? '未定组' : (g === 'solid' ? '全色 1–7' : '花色 9–15');
-    $('p' + i + 'n').textContent = left == null ? '—' : (cleared(i) ? '打 8 号' : left + ' 颗');
+  document.body.dataset.mode = MODE;
+  if (MODE === 'solo'){
+    const rest = balls.filter(b => b.n !== 0 && b.n !== 8 && !b.in).length;
+    const best = +(localStorage.getItem('pool.solo.best.v1') || 0);
+    $('p0').classList.add('on');
+    $('p0nm').textContent = '单人清台';
+    $('p0g').textContent = rest ? `还剩 ${rest} 颗` : '就剩 8 号';
+    $('p0n').textContent = `第 ${shots} 杆`;
+    $('p1nm').textContent = '最少杆数';
+    $('p1g').textContent = best ? best + ' 杆' : '—';
+    $('p1n').textContent = best ? '上次最好' : '还没清过台';
+    $('p1').classList.remove('on');
+  } else {
+    for (const i of [0, 1]){
+      const el = $('p' + i);
+      el.classList.toggle('on', turn === i && phase !== 'over');
+      const g = groups[i];
+      const left = g ? myBalls(i).filter(b => !b.in).length : null;
+      $('p' + i + 'nm').textContent = who(i);
+      $('p' + i + 'g').textContent = !g ? '未定组' : (g === 'solid' ? '全色 1–7' : '花色 9–15');
+      $('p' + i + 'n').textContent = left == null ? '—' : (cleared(i) ? '打 8 号' : left + ' 颗');
+    }
   }
-  $('hand').hidden = !ballInHand;
+  $('hand').hidden = !ballInHand || (MODE === 'ai' && turn === 1);
 }
 
 let toastT = 0;
@@ -547,6 +726,7 @@ function bindAim(){
 
   const down = (e) => {
     if (moving || phase === 'over') return;
+    if (MODE === 'ai' && turn === 1) return;      // 电脑回合，别抢杆
     const p = pt(e), c = cue();
     if (ballInHand && Math.hypot(p.x - c.x, p.y - c.y) < R * 3){ grabCue = true; return; }
     pulling = true;
@@ -621,15 +801,38 @@ function tick(now){
   if (needsDraw || moving){ draw(); needsDraw = false; }
 }
 
+function syncModes(){
+  for (const b of document.querySelectorAll('.mbtn')) b.classList.toggle('on', b.dataset.m === MODE);
+}
+
 function init(){
-  try { muted = localStorage.getItem('pool.muted.v1') === '1'; } catch { /* 忽略 */ }
+  try {
+    muted = localStorage.getItem('pool.muted.v1') === '1';
+    const m = localStorage.getItem('pool.mode.v1');
+    if (m === 'solo' || m === 'ai' || m === 'two') MODE = m;
+  } catch { /* 忽略 */ }
   layout();
-  reset();
+  reset(true);
+  syncModes();
   bindAim();
   syncMute();
 
-  $('againBtn').addEventListener('click', reset);
-  $('restartBtn').addEventListener('click', reset);
+  $('restartBtn').addEventListener('click', () => reset(true));
+  $('modeBtn').addEventListener('click', () => {
+    const ov = $('overlay');
+    ov.dataset.mode = 'start';
+    ov.classList.add('show');
+    syncModes();
+  });
+  $('modes').addEventListener('click', (e) => {
+    const b = e.target.closest('.mbtn');
+    if (!b) return;
+    MODE = b.dataset.m;
+    try { localStorage.setItem('pool.mode.v1', MODE); } catch { /* 忽略 */ }
+    syncModes();
+    reset(false);
+    if (MODE === 'ai' && turn === 1) aiTurn();
+  });
   $('muteBtn').addEventListener('click', () => {
     muted = !muted;
     try { localStorage.setItem('pool.muted.v1', muted ? '1' : '0'); } catch { /* 忽略 */ }
@@ -647,7 +850,10 @@ function syncMute(){
 window.__pool = {
   get balls(){ return balls; },
   get state(){ return { turn, groups: groups.slice(), phase, ballInHand, winner, moving, R, TW, TH, power, aimA }; },
-  reset, shoot, settle,
+  reset, shoot, settle, aiPlan, aiTurn, legalTargets,
+  setGroups: (g) => { groups[0] = g; groups[1] = g === 'solid' ? 'stripe' : 'solid'; },
+  setMode: (m) => { MODE = m; reset(); },
+  get mode(){ return MODE; },
   forceOpen: () => { phase = 'open'; },   // 测试用：跳过开球那一杆
   setAim: (a, p) => { aimA = a; power = p; needsDraw = true; },
   cue, cleared, pockets: () => pockets,
