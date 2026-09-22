@@ -4,105 +4,56 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#080b14">
-<title>选样式 · 俄罗斯方块</title>
+<title>方块样式 · 第二轮</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css">
 <style>
-  body{ padding-bottom: 60px; }
-  .wrap{ max-width: 460px; }
-  h1{ font-size: 22px; margin: 26px 0 4px; letter-spacing: .02em; }
-  .sub{ color: var(--ink-soft); font-size: 13px; line-height: 1.7; margin: 0 0 8px; }
+  body{ padding-bottom: 56px; }
+  .wrap{ max-width: 480px; }
+  h1{ font-size: 22px; margin: 26px 0 4px; }
+  .sub{ color: var(--ink-soft); font-size: 13px; line-height: 1.75; margin: 0 0 6px; }
   h2{
-    font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
-    color: var(--ink-dim); text-transform: uppercase;
-    margin: 34px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--ink-dim);
+    margin: 32px 0 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line);
   }
+  .h2note{ font-size: 12px; color: var(--ink-dim); line-height: 1.7; margin: 0 0 14px; }
   .grid2{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .opt{
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 16px; padding: 12px 12px 14px;
-  }
-  .opt .tag{
-    display: flex; align-items: baseline; gap: 7px; margin-bottom: 9px;
-  }
-  .opt .no{
-    font-family: var(--mono); font-size: 15px; font-weight: 500;
-    color: var(--n-cyan); letter-spacing: .04em;
-  }
-  .opt .nm{ font-size: 13px; font-weight: 500; }
-  .opt .ds{ font-size: 11px; color: var(--ink-dim); line-height: 1.6; margin-top: 8px; }
-  .opt canvas{ display: block; width: 100%; height: auto; border-radius: 8px; background: rgba(6,10,20,.66); }
-
-  /* ── 按钮四版 ── */
-  .btnset{ margin-bottom: 14px; }
-  .pads{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
-  .pad-g{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .opt{ background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 11px 11px 13px; }
+  .opt.pick{ border-color: rgba(34,211,238,.5); box-shadow: 0 0 22px rgba(34,211,238,.12); }
+  .tag{ display: flex; align-items: baseline; gap: 6px; margin-bottom: 9px; }
+  .no{ font-family: var(--mono); font-size: 14px; color: var(--n-cyan); }
+  .nm{ font-size: 12.5px; font-weight: 500; }
+  .ds{ font-size: 11px; color: var(--ink-dim); line-height: 1.65; margin-top: 9px; }
+  canvas{ display: block; width: 100%; height: auto; border-radius: 8px; background: rgba(6,10,20,.7); }
+  /* 磨砂玻璃按钮（你选的那版） */
+  .pads{ display: grid; grid-template-columns: 1fr 1fr; gap: 9px; align-items: start; }
+  .pad-g{ display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
   .k{
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 2px; min-height: 58px; border-radius: 16px; cursor: pointer;
-    font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
-    color: var(--ink-soft); border: 1px solid var(--line); background: var(--panel);
-    -webkit-tap-highlight-color: transparent; user-select: none;
-    transition: transform .08s, filter .12s;
-  }
-  .k .ico{ font-size: 20px; line-height: 1; color: var(--ink); }
-  .k em{ font-style: normal; opacity: .78; }
-  .k-drop{ grid-column: span 2; min-height: 50px; }
-  .k:active{ transform: translateY(1px); }
-
-  /* B1 微立体：像实体键帽 */
-  .s1 .k{
-    background: linear-gradient(180deg, #1b2740, #121a2c);
-    border: 1px solid rgba(140,175,255,.16);
-    box-shadow: inset 0 1px 0 rgba(170,200,255,.16), 0 2px 0 rgba(0,0,0,.45), 0 5px 12px rgba(0,0,0,.36);
-  }
-  .s1 .k:active{ transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(170,200,255,.10), 0 0 0 rgba(0,0,0,.4); }
-  .s1 .k-drop{
-    background: linear-gradient(180deg, #14505f, #0d3242);
-    border-color: rgba(34,211,238,.42);
-    box-shadow: inset 0 1px 0 rgba(120,235,255,.26), 0 2px 0 rgba(0,0,0,.45), 0 5px 16px rgba(34,211,238,.20);
-  }
-  .s1 .k-drop .ico, .s1 .k-drop em{ color: #7ee9fb; opacity: 1; }
-
-  /* B2 扁平描边：最干净 */
-  .s2 .k{ background: rgba(255,255,255,.028); border: 1px solid rgba(150,180,255,.20); border-radius: 14px; box-shadow: none; }
-  .s2 .k:active{ background: rgba(34,211,238,.14); border-color: var(--n-cyan); }
-  .s2 .k-drop{ background: rgba(34,211,238,.10); border-color: rgba(34,211,238,.44); }
-  .s2 .k-drop .ico{ color: var(--n-cyan); }
-
-  /* B3 玻璃：磨砂半透 */
-  .s3 .k{
+    gap: 3px; min-height: 58px; border-radius: 18px; cursor: pointer;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; color: var(--ink-soft);
     background: linear-gradient(150deg, rgba(255,255,255,.11), rgba(255,255,255,.03));
     border: 1px solid rgba(255,255,255,.14);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 6px 18px rgba(0,0,0,.30);
-    border-radius: 18px;
+    -webkit-tap-highlight-color: transparent; user-select: none;
+    transition: transform .08s, background .12s;
   }
-  .s3 .k:active{ background: linear-gradient(150deg, rgba(34,211,238,.26), rgba(34,211,238,.08)); }
-  .s3 .k-drop{
+  .k svg{ width: 24px; height: 24px; display: block; }
+  .k em{ font-style: normal; opacity: .8; }
+  .k:active{ transform: translateY(1px); background: linear-gradient(150deg, rgba(34,211,238,.26), rgba(34,211,238,.08)); }
+  .k-drop{
+    grid-column: span 2; min-height: 50px;
     background: linear-gradient(150deg, rgba(34,211,238,.26), rgba(168,85,247,.12));
     border-color: rgba(120,235,255,.34);
   }
-  .s3 .k-drop .ico, .s3 .k-drop em{ color: #a5f2ff; opacity: 1; }
-
-  /* B4 霓虹描边：边框发光 */
-  .s4 .k{
-    background: rgba(10,16,30,.72);
-    border: 1.5px solid rgba(90,130,200,.34);
-    border-radius: 14px;
-    box-shadow: 0 0 0 1px rgba(10,16,30,.8), 0 0 14px rgba(60,120,220,.10) inset;
-  }
-  .s4 .k .ico{ text-shadow: 0 0 10px rgba(150,200,255,.5); }
-  .s4 .k:active{ border-color: var(--n-cyan); box-shadow: 0 0 18px rgba(34,211,238,.42), inset 0 0 18px rgba(34,211,238,.16); }
-  .s4 .k-drop{
-    border-color: rgba(34,211,238,.72);
-    box-shadow: 0 0 16px rgba(34,211,238,.28), inset 0 0 16px rgba(34,211,238,.10);
-  }
-  .s4 .k-drop .ico, .s4 .k-drop em{ color: #7ee9fb; opacity: 1; text-shadow: 0 0 12px rgba(34,211,238,.8); }
+  .k-drop em{ color: #a5f2ff; opacity: 1; }
+  .k-drop svg{ color: #a5f2ff; }
+  .iconset{ margin-bottom: 14px; }
 
   .note{
-    margin-top: 34px; padding: 14px 16px; border: 1px dashed var(--line-2);
-    border-radius: 14px; color: var(--ink-soft); font-size: 12.5px; line-height: 1.8;
+    margin-top: 30px; padding: 14px 16px; border: 1px dashed var(--line-2);
+    border-radius: 14px; color: var(--ink-soft); font-size: 12.5px; line-height: 1.85;
   }
   .note b{ color: var(--ink); }
 </style>
@@ -111,136 +62,176 @@
 <div class="topline"></div>
 <div class="wrap">
 
-  <h1>挑一版</h1>
-  <p class="sub">方块和按钮各选一个，告诉我编号就行（比如「A3」「方块 C、按钮 2」）。按钮可以直接按按看手感。</p>
+  <h1>第二轮</h1>
+  <p class="sub">方块按你说的两个方向细化，C 全改成实色填充；场景换成接近实战的密集堆叠，发光类的样式堆满时最容易糊，这样看得准。下面还有三版箭头图标，按钮已按你选的磨砂玻璃做好。</p>
 
-  <h2>方块样式</h2>
-  <div class="grid2" id="skins"></div>
+  <h2>B 方向 · 扁平实色</h2>
+  <p class="h2note">不发光，靠明度和描边分层。堆满也不会互相干扰，颜色最准。</p>
+  <div class="grid2" id="setB"></div>
 
-  <h2>按钮样式</h2>
-  <div id="btns"></div>
+  <h2>C 方向 · 实色 + 霓虹发光</h2>
+  <p class="h2note">实色填充，外圈带辉光。比 B 有空气感，但发光越强堆叠时越容易连成一片。</p>
+  <div class="grid2" id="setC"></div>
+
+  <h2>箭头图标 · 三版</h2>
+  <p class="h2note">按钮是你选的磨砂玻璃。现在线上用的是 ← → ↓ 这类文字符号，不同手机字体渲染不一样、粗细也不统一，换成自己画的 SVG 就能完全一致。</p>
+  <div id="icons"></div>
 
   <div class="note">
-    现在线上用的是 <b>方块 E + 按钮接近 2</b>。<br>
-    按键布局已经按你说的改成：上排 <b>左移 / 右移 / 软落 / 变换</b> 四个，左下留空、右下 <b>落底</b>。
+    每块图里都有：底部密集堆叠、中间正在下落的方块、上方的<b>落点虚影</b>。<br>
+    定了告诉我编号就行，比如「B2」「C1」。<br>
+按钮已经定了磨砂玻璃那版，就差箭头选型。告诉我三个编号就行，比如「B2 + C1 + 图标 ii」。
   </div>
 
 </div>
 
 <script>
-const SKINS = [
-  ['A', '立体斜面', '左上亮、右下暗，硬朗清楚，最像街机厅那版。'],
-  ['B', '扁平实色', '一块纯色加一圈内描边，干净，颜色最准。'],
-  ['C', '霓虹空心', '只有边框发光，中间透出底色，最赛博。'],
-  ['D', '磨砂玻璃', '半透明加高光，轻，偏现代 App 的感觉。'],
-  ['E', '现在这版', '圆角＋渐变＋外发光，偏糖果塑料。'],
-  ['F', '像素描边', '粗描边加纯色，像素游戏的味道，边界最分明。'],
-];
-const COLS = ['#22d3ee','#fbbf24','#a855f7','#4ade80','#f43f5e','#3b82f6','#fb923c'];
-// 一小块示意棋盘：null 是空，数字是颜色下标，-1 是落点虚影
-const SCENE = [
-  [null,null,null,null,null,null],
-  [null,null,  -1,  -1,null,null],
-  [null,null,null,null,null,null],
-  [null,   2,   2,null,null,null],
-  [null,null,   2,   2,null,null],
-  [   0,   0,null,   4,   4,null],
-  [   1,   1,   1,   3,   3,   5],
-  [   6,   1,   5,   5,   3,   5],
+const COLS=['#22d3ee','#fbbf24','#a855f7','#4ade80','#f43f5e','#3b82f6','#fb923c'];
+const n=null, G=-1;
+// 接近实战：上面虚影、中间下落中、下面堆满
+const SCENE=[
+  [n,n,n,n,n,n],
+  [n,n,G,G,n,n],
+  [n,n,n,n,n,n],
+  [n,n,2,2,n,n],
+  [n,n,n,2,2,n],
+  [0,0,n,n,4,4],
+  [1,1,1,3,3,5],
+  [6,1,5,5,3,5],
+  [2,6,0,4,1,3],
+  [5,3,2,6,0,4],
 ];
 
-function hex(h){ return h.length===4 ? h.slice(1).split('').map(x=>parseInt(x+x,16)) : [1,3,5].map(i=>parseInt(h.slice(i,i+2),16)); }
-function mix(a,b,t){ const pa=hex(a),pb=hex(b); return `rgb(${pa.map((v,i)=>Math.round(v+(pb[i]-v)*t)).join(',')})`; }
-function rr(c,x,y,w,h,r){ c.beginPath(); if(c.roundRect){c.roundRect(x,y,w,h,r);return;} c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+function hx(h){ return h.length===4? h.slice(1).split('').map(x=>parseInt(x+x,16)) : [1,3,5].map(i=>parseInt(h.slice(i,i+2),16)); }
+function mix(a,b,t){ const A=hx(a),B=hx(b); return `rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*t)).join(',')})`; }
+function rr(c,x,y,w,h,r){ c.beginPath(); if(r<=0){c.rect(x,y,w,h);return;} if(c.roundRect){c.roundRect(x,y,w,h,r);return;}
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 
-function cell(c, skin, px, py, s, color, ghost){
-  if (ghost){
-    const pad=s*.06, x=px+pad, y=py+pad, d=s-pad*2;
-    c.save(); c.globalAlpha=.4; c.strokeStyle=color; c.lineWidth=Math.max(1.5,d*.08);
-    rr(c,x,y,d,d,skin==='A'||skin==='F'?2:d*.18); c.stroke();
-    c.globalAlpha=.09; c.fillStyle=color; c.fill(); c.restore(); return;
-  }
+// 每个变体：{fill, edge, lw, radius, glow, inner}
+const V = {
+  B1:{ fill:.16, edge:.34, lw:.075, rad:.17, glow:0 },
+  B2:{ fill:.04, edge:.52, lw:.095, rad:.09, glow:0 },
+  B3:{ fill:.12, edge:.46, lw:.085, rad:0,   glow:0, dark:true },
+  B4:{ fill:.22, edge:.62, lw:.06,  rad:.24, glow:0 },
+  C1:{ fill:.16, edge:.42, lw:.08,  rad:.16, glow:.30 },
+  C2:{ fill:.10, edge:.60, lw:.10,  rad:.14, glow:.55 },
+  C3:{ fill:.20, edge:.38, lw:.07,  rad:.20, glow:.22, sheen:true },
+  C4:{ fill:.05, edge:.70, lw:.11,  rad:.05, glow:.42 },
+};
+
+function cell(c, v, px, py, s, color, ghost){
   const g=s*.055, x=px+g, y=py+g, d=s-g*2;
+  const R=v.rad*d;
   c.save();
-  if (skin==='A'){                                   // 立体斜面
-    const b=d*.17;
-    c.fillStyle=color; c.fillRect(x,y,d,d);
-    c.fillStyle=mix(color,'#ffffff',.46);
-    c.beginPath(); c.moveTo(x,y); c.lineTo(x+d,y); c.lineTo(x+d-b,y+b); c.lineTo(x+b,y+b); c.lineTo(x+b,y+d-b); c.lineTo(x,y+d); c.closePath(); c.fill();
-    c.fillStyle=mix(color,'#000814',.42);
-    c.beginPath(); c.moveTo(x+d,y); c.lineTo(x+d,y+d); c.lineTo(x,y+d); c.lineTo(x+b,y+d-b); c.lineTo(x+d-b,y+d-b); c.lineTo(x+d-b,y+b); c.closePath(); c.fill();
-  } else if (skin==='B'){                            // 扁平实色
-    c.fillStyle=mix(color,'#0a0f1c',.14); rr(c,x,y,d,d,d*.16); c.fill();
-    c.strokeStyle=mix(color,'#ffffff',.34); c.lineWidth=Math.max(1,d*.07);
-    rr(c,x+d*.045,y+d*.045,d*.91,d*.91,d*.13); c.stroke();
-  } else if (skin==='C'){                            // 霓虹空心
-    c.fillStyle=color; c.globalAlpha=.16; rr(c,x,y,d,d,d*.16); c.fill();
-    c.globalAlpha=1; c.shadowColor=color; c.shadowBlur=d*.5;
-    c.strokeStyle=color; c.lineWidth=Math.max(1.4,d*.09);
-    rr(c,x+d*.06,y+d*.06,d*.88,d*.88,d*.14); c.stroke();
-  } else if (skin==='D'){                            // 磨砂玻璃
-    const lg=c.createLinearGradient(x,y,x+d,y+d);
-    lg.addColorStop(0, mix(color,'#ffffff',.36)); lg.addColorStop(1, mix(color,'#060b16',.30));
-    c.globalAlpha=.86; c.fillStyle=lg; rr(c,x,y,d,d,d*.22); c.fill();
-    c.globalAlpha=1; c.strokeStyle='rgba(255,255,255,.42)'; c.lineWidth=1; rr(c,x+.5,y+.5,d-1,d-1,d*.21); c.stroke();
-    c.globalAlpha=.5; c.fillStyle='rgba(255,255,255,.7)'; rr(c,x+d*.15,y+d*.12,d*.7,d*.13,d*.06); c.fill();
-  } else if (skin==='E'){                            // 现在这版
-    c.shadowColor=color; c.shadowBlur=s*.45;
-    const lg=c.createLinearGradient(x,y,x,y+d);
-    lg.addColorStop(0,mix(color,'#ffffff',.30)); lg.addColorStop(.52,color); lg.addColorStop(1,mix(color,'#000010',.34));
-    c.fillStyle=lg; rr(c,x,y,d,d,d*.18); c.fill();
-    c.shadowBlur=0; c.globalAlpha=.55; c.fillStyle=mix(color,'#ffffff',.62);
-    rr(c,x+d*.16,y+d*.12,d*.68,d*.16,d*.07); c.fill();
-  } else {                                           // F 像素描边
-    c.fillStyle=mix(color,'#060a14',.06); c.fillRect(x,y,d,d);
-    c.strokeStyle=mix(color,'#ffffff',.55); c.lineWidth=Math.max(2,d*.12);
-    c.strokeRect(x+c.lineWidth/2, y+c.lineWidth/2, d-c.lineWidth, d-c.lineWidth);
-    c.fillStyle=mix(color,'#ffffff',.55);
-    c.fillRect(x+d*.30, y+d*.30, d*.40, d*.40);
+  if (ghost){
+    c.globalAlpha=.42; c.strokeStyle=color; c.lineWidth=Math.max(1.5,d*.075);
+    rr(c,x+1,y+1,d-2,d-2,R); c.stroke();
+    c.globalAlpha=.08; c.fillStyle=color; c.fill();
+    c.restore(); return;
+  }
+  if (v.glow){ c.shadowColor=color; c.shadowBlur=d*v.glow; }
+  c.fillStyle = mix(color, '#0a1020', v.fill);
+  rr(c,x,y,d,d,R); c.fill();
+  c.shadowBlur = 0;
+
+  if (v.dark){                       // 先压一圈暗边，再描亮边，层次更硬
+    c.strokeStyle = mix(color,'#03060e',.45); c.lineWidth = Math.max(1,d*.10);
+    rr(c, x+c.lineWidth/2, y+c.lineWidth/2, d-c.lineWidth, d-c.lineWidth, R); c.stroke();
+  }
+  const lw = Math.max(1, d*v.lw);
+  c.strokeStyle = mix(color,'#ffffff',v.edge); c.lineWidth = lw;
+  const off = (v.dark ? d*.10 : 0) + lw/2;
+  rr(c, x+off, y+off, d-off*2, d-off*2, Math.max(0,R-off)); c.stroke();
+
+  if (v.sheen){                      // 顶部一道很淡的光，留一点体积感
+    c.globalAlpha=.30; c.fillStyle=mix(color,'#ffffff',.75);
+    rr(c, x+d*.20, y+d*.14, d*.60, d*.10, d*.05); c.fill();
   }
   c.restore();
 }
 
-function drawSkin(cv, skin){
-  const dpr=Math.min(devicePixelRatio||1,2);
-  const w=cv.clientWidth, cs=w/6, h=cs*8;
-  cv.style.height=h+'px';
-  cv.width=w*dpr; cv.height=h*dpr;
+function draw(cv, key){
+  const v=V[key], dpr=Math.min(devicePixelRatio||1,2);
+  const w=cv.clientWidth, cs=w/6, h=cs*SCENE.length;
+  cv.style.height=h+'px'; cv.width=w*dpr; cv.height=h*dpr;
   const c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
-  c.strokeStyle='rgba(120,160,255,.08)'; c.lineWidth=1;
+  c.strokeStyle='rgba(120,160,255,.075)'; c.lineWidth=1;
   for(let i=1;i<6;i++){ c.beginPath(); c.moveTo(i*cs+.5,0); c.lineTo(i*cs+.5,h); c.stroke(); }
-  for(let i=1;i<8;i++){ c.beginPath(); c.moveTo(0,i*cs+.5); c.lineTo(w,i*cs+.5); c.stroke(); }
-  SCENE.forEach((row,y)=>row.forEach((v,x)=>{
-    if(v===null) return;
-    cell(c, skin, x*cs, y*cs, cs, v===-1?'#a855f7':COLS[v], v===-1);
+  for(let i=1;i<SCENE.length;i++){ c.beginPath(); c.moveTo(0,i*cs+.5); c.lineTo(w,i*cs+.5); c.stroke(); }
+  SCENE.forEach((row,yy)=>row.forEach((val,xx)=>{
+    if(val===n) return;
+    cell(c, v, xx*cs, yy*cs, cs, val===G?'#a855f7':COLS[val], val===G);
   }));
 }
 
-const wrapEl=document.getElementById('skins');
-SKINS.forEach(([id,name,desc])=>{
-  const d=document.createElement('div'); d.className='opt';
-  d.innerHTML=`<div class="tag"><span class="no">${id}</span><span class="nm">${name}</span></div>
-               <canvas></canvas><div class="ds">${desc}</div>`;
-  wrapEl.appendChild(d);
-  requestAnimationFrame(()=>drawSkin(d.querySelector('canvas'), id));
+const META={
+  B1:['稳妥版','填充压暗一点，亮边中等。B 原版的调平衡。'],
+  B2:['高对比','填充接近原色，边更亮更粗，圆角收小，最清爽利落。'],
+  B3:['硬边双描','外暗内亮两圈描边，直角，界限最分明，堆叠时分得最开。'],
+  B4:['柔和版','填充更暗、边更亮、圆角更大，最柔，眼睛最不累。'],
+  C1:['柔光','实色加一层薄辉光，克制，堆满也不糊。'],
+  C2:['强霓虹','发光明显，边很亮，最像霓虹灯管，密集时会连片。'],
+  C3:['带光泽','柔光基础上顶部加一道淡高光，保留一点体积。'],
+  C4:['灯管','近乎直角、极亮的边配中等发光，硬朗的霓虹。'],
+};
+function build(id, keys){
+  const w=document.getElementById(id);
+  keys.forEach(k=>{
+    const d=document.createElement('div'); d.className='opt';
+    d.innerHTML=`<div class="tag"><span class="no">${k}</span><span class="nm">${META[k][0]}</span></div>
+                 <canvas></canvas><div class="ds">${META[k][1]}</div>`;
+    w.appendChild(d);
+    requestAnimationFrame(()=>draw(d.querySelector('canvas'), k));
+  });
+}
+
+// ── 三版箭头 ──
+const S=(inner,sw)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const F=(inner)=>`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none">${inner}</svg>`;
+const ICONS={
+  i:{  // 带杆的线性箭头，指示性最强
+    left : S('<path d="M16 12H7.4"/><path d="M11.6 7.6 7.2 12l4.4 4.4"/>', 2),
+    right: S('<path d="M8 12h8.6"/><path d="M12.4 7.6 16.8 12l-4.4 4.4"/>', 2),
+    down : S('<path d="M12 6.2v9.4"/><path d="M7.6 11.2 12 15.6l4.4-4.4"/>', 2),
+    rot  : S('<path d="M19.4 12a7.4 7.4 0 1 1-2.2-5.2"/><path d="M19.4 4.2v4.6h-4.6"/>', 2),
+    drop : S('<path d="M12 3.8v8.4"/><path d="M8 8.4 12 12.4l4-4"/><path d="M6.4 17.6h11.2"/>', 2),
+  },
+  ii:{ // 真·实心三角
+    left : F('<path d="M15.6 5.1c0-.9-1-1.4-1.7-.9l-7 6.9a1.2 1.2 0 0 0 0 1.8l7 6.9c.7.5 1.7 0 1.7-.9V5.1Z"/>'),
+    right: F('<path d="M8.4 5.1c0-.9 1-1.4 1.7-.9l7 6.9a1.2 1.2 0 0 1 0 1.8l-7 6.9c-.7.5-1.7 0-1.7-.9V5.1Z"/>'),
+    down : F('<path d="M5.1 8.4c-.9 0-1.4 1-.9 1.7l6.9 7a1.2 1.2 0 0 0 1.8 0l6.9-7c.5-.7 0-1.7-.9-1.7H5.1Z"/>'),
+    rot  : '<svg viewBox="0 0 24 24"><path d="M12 5.2a7.3 7.3 0 1 0 7.1 5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M11.4 1.6 16.4 5l-5 3.4a.6.6 0 0 1-1-.5V2.1a.6.6 0 0 1 1-.5Z" fill="currentColor"/></svg>',
+    drop : F('<rect x="10.7" y="3.2" width="2.6" height="6.6" rx="1.3"/><path d="M12.9 15.2a1.2 1.2 0 0 1-1.8 0L6.6 10c-.5-.7 0-1.6.9-1.6h9c.9 0 1.4.9.9 1.6l-4.5 5.2Z"/><rect x="5.4" y="17.4" width="13.2" height="2.4" rx="1.2"/>'),
+  },
+  iii:{ // 粗角括号，无杆，最简洁
+    left : S('<path d="M14.2 6.2 8.4 12l5.8 5.8"/>', 2.8),
+    right: S('<path d="M9.8 6.2 15.6 12l-5.8 5.8"/>', 2.8),
+    down : S('<path d="M6.2 8.2 12 14l5.8-5.8"/><path d="M6.2 14.6 12 20.4l5.8-5.8" opacity=".42"/>', 2.8),
+    rot  : S('<path d="M19.2 12a7.2 7.2 0 1 1-2.1-5.1"/><path d="M19.2 4.6v4.4h-4.4"/>', 2.8),
+    drop : S('<path d="M12 3.6v8.2"/><path d="M7.8 8 12 12.2 16.2 8"/><path d="M6.2 17.8h11.6"/>', 2.8),
+  },
+};
+const ILABEL={ i:['带杆箭头','有横杆，指示性最强，和界面其他线条一个粗细。'],
+               ii:['实心三角','填充的实体三角，最直白有力，游戏味最足。'],
+               iii:['粗角括号','没有横杆，线更粗，软落用双箭头表示「快」，最简洁。'] };
+const iWrap=document.getElementById('icons');
+Object.keys(ICONS).forEach(k=>{
+  const ic=ICONS[k], d=document.createElement('div'); d.className='opt iconset';
+  d.innerHTML=`<div class="tag"><span class="no">${k}</span><span class="nm">${ILABEL[k][0]}</span></div>
+    <div class="pads">
+      <div class="pad-g"><button class="k">${ic.left}<em>左移</em></button><button class="k">${ic.right}<em>右移</em></button></div>
+      <div class="pad-g"><button class="k">${ic.down}<em>软落</em></button><button class="k">${ic.rot}<em>变换</em></button>
+        <button class="k k-drop">${ic.drop}<em>落底</em></button></div>
+    </div><div class="ds">${ILABEL[k][1]}</div>`;
+  iWrap.appendChild(d);
 });
 
-const BTN=[['1','微立体','像实体键帽，按下去有下沉感'],
-           ['2','扁平描边','最轻，干净，不抢棋盘的眼'],
-           ['3','磨砂玻璃','半透明加高光，偏现代 App'],
-           ['4','霓虹描边','边框发光，和棋盘一个调子']];
-const bWrap=document.getElementById('btns');
-BTN.forEach(([id,name,desc])=>{
-  const d=document.createElement('div'); d.className='opt btnset';
-  d.innerHTML=`<div class="tag"><span class="no">${id}</span><span class="nm">${name}</span></div>
-    <div class="pads s${id}">
-      <div class="pad-g"><button class="k"><span class="ico">←</span><em>左移</em></button><button class="k"><span class="ico">→</span><em>右移</em></button></div>
-      <div class="pad-g"><button class="k"><span class="ico">↓</span><em>软落</em></button><button class="k"><span class="ico">↻</span><em>变换</em></button>
-      <button class="k k-drop"><span class="ico">⤓</span><em>落底</em></button></div>
-    </div><div class="ds">${desc}</div>`;
-  bWrap.appendChild(d);
+build('setB',['B1','B2','B3','B4']);
+build('setC',['C1','C2','C3','C4']);
+addEventListener('resize',()=>{
+  [['setB',['B1','B2','B3','B4']],['setC',['C1','C2','C3','C4']]].forEach(([id,ks])=>
+    document.querySelectorAll('#'+id+' canvas').forEach((cv,i)=>draw(cv,ks[i])));
 });
-addEventListener('resize', ()=>document.querySelectorAll('#skins .opt').forEach((d,i)=>drawSkin(d.querySelector('canvas'), SKINS[i][0])));
 </script>
 </body>
 </html>
