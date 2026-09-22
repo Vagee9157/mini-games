@@ -837,7 +837,6 @@ function bindButtons(){
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
     ['btnDown',  () => { softDropping = true; }, () => { softDropping = false; }],
-    ['btnCcw',   () => tryRotate(-1),   null],
     ['btnCw',    () => tryRotate(1),    null],
     ['btnDrop',  () => hardDrop(),      null],
   ];

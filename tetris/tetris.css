@@ -263,13 +263,15 @@ body{
   grid-area: pads;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px;               /* 左右手分开，别看成一排六个 */
+  gap: 9px;
+  align-items: start;
 }
-.pad{
+/* 左组两个（左移右移）、右组三个（软落 变换 / 落底跨两格）。
+   合起来上排正好四个等宽键，左下空着，右下是落底。 */
+.pad-g{
   display: grid;
-  gap: 7px;
+  gap: 9px;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto auto;
 }
 .k{
   display: flex;
@@ -294,16 +296,15 @@ body{
 }
 .k .ico{ font-size: 21px; line-height: 1; color: var(--ink); }
 .k em{ font-style: normal; opacity: .75; }
-.k-wide{ grid-column: span 2; min-height: 48px; }
-.k-wide .ico{ font-size: 18px; }
-.k-accent .ico{ color: var(--n-cyan); }
+.k-drop{ grid-column: span 2; min-height: 50px; }
+.k-drop .ico{ font-size: 19px; }
 .k.active, .k:active{
   background: rgba(34,211,238,.17);
   border-color: var(--n-cyan);
   color: var(--ink);
   transform: translateY(1px);
 }
-.k-accent.active, .k-accent:active{ background: rgba(34,211,238,.26); }
+.k-drop.active, .k-drop:active{ background: rgba(34,211,238,.26); }
 
 .only-wide{ display: none; }
 @media (min-width: 620px){ .only-wide{ display: inline; } }
@@ -350,10 +351,10 @@ body{
   .pads{ display: contents; }
   .pad-l{ grid-area: padl; align-self: end; }
   .pad-r{ grid-area: padr; align-self: end; }
-  .pad{ gap: 6px; }
+  .pad-g{ gap: 7px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
-  .k-wide{ min-height: 42px; }
+  .k-drop{ min-height: 44px; }
 
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 4px 4px; text-align: left; }
