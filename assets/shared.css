@@ -1,0 +1,136 @@
+/* 小游戏合集 · 公共样式
+   霓虹暗色街机风。新游戏只要 link 这个文件就能继承整套配色和排版。 */
+
+:root{
+  /* 底色：深蓝黑，不是纯黑，纯黑在 OLED 上和发光块对比过硬 */
+  --bg:        #080b14;
+  --bg-2:      #0d1220;
+  --panel:     rgba(18, 26, 44, .72);
+  --panel-2:   rgba(12, 18, 32, .86);
+  --line:      rgba(120, 160, 255, .14);
+  --line-2:    rgba(120, 160, 255, .28);
+
+  --ink:       #e8eeff;
+  --ink-soft:  #8a9ac0;
+  --ink-dim:   #566a92;
+
+  /* 霓虹主色板：七块方块各一色，UI 从中取用 */
+  --n-cyan:    #22d3ee;
+  --n-blue:    #3b82f6;
+  --n-purple:  #a855f7;
+  --n-pink:    #ec4899;
+  --n-green:   #4ade80;
+  --n-amber:   #fbbf24;
+  --n-orange:  #fb923c;
+  --n-red:     #f43f5e;
+
+  --accent:    var(--n-cyan);
+
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif;
+
+  --r-s: 8px;
+  --r-m: 14px;
+  --r-l: 20px;
+}
+
+*{ box-sizing: border-box; }
+
+html, body{
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 背景：两团远处的辉光 + 极淡网格，让纯色底不死板 */
+body::before{
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(60vw 50vh at 12% -8%,  rgba(34,211,238,.10), transparent 62%),
+    radial-gradient(55vw 45vh at 92% 108%, rgba(168, 85,247,.10), transparent 62%),
+    var(--bg);
+}
+body::after{
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 44px 44px;
+  opacity: .30;
+  mask-image: radial-gradient(75vw 75vh at 50% 40%, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(75vw 75vh at 50% 40%, #000 30%, transparent 78%);
+}
+
+a{ color: inherit; text-decoration: none; }
+
+/* 顶部细霓虹线，所有页面共用 */
+.topline{
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent, var(--n-cyan), var(--n-purple), var(--n-pink), transparent);
+  opacity: .85;
+}
+
+.wrap{
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* 面板：磨砂深色卡 */
+.panel{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* 小标签 */
+.chip{
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+/* 返回链接 */
+.back{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  color: var(--ink-soft);
+  padding: 6px 12px 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition: color .16s, border-color .16s, background .16s;
+}
+.back:hover{
+  color: var(--ink);
+  border-color: var(--line-2);
+  background: rgba(120,160,255,.06);
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

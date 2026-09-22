@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#080b14">
+<title>俄罗斯方块 · 小游戏合集</title>
+<meta name="description" content="浏览器里的俄罗斯方块，支持 SRS 旋转、hold、落点预览，手机和键盘都能玩。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/shared.css">
+<link rel="stylesheet" href="tetris.css">
+</head>
+<body>
+<div class="topline"></div>
+
+<div class="game">
+
+  <header class="bar">
+    <a class="back" href="../">← 合集</a>
+    <h1>俄罗斯方块<em>TETRIS</em></h1>
+    <div class="sp"></div>
+    <button class="tbtn" id="muteBtn">静音</button>
+    <button class="tbtn" id="pauseBtn">暂停</button>
+    <button class="tbtn" id="restartBtn">重开</button>
+  </header>
+
+  <div class="stage">
+
+    <div class="slot hold" id="holdSlot" role="button" tabindex="0" aria-label="暂存当前方块">
+      <span class="slot-label">HOLD</span>
+      <canvas id="holdCv"></canvas>
+    </div>
+
+    <div class="stats">
+      <div class="stat hi"><span>SCORE</span><b id="score">0</b></div>
+      <div class="stat"><span>LINES</span><b id="lines">0</b></div>
+      <div class="stat" id="levelBox"><span>LEVEL</span><b id="level">1</b></div>
+      <div class="stat"><span>BEST</span><b id="best">0</b></div>
+    </div>
+
+    <div class="slot next">
+      <span class="slot-label">NEXT</span>
+      <canvas id="nextCv"></canvas>
+    </div>
+
+    <div class="board-wrap" id="boardWrap">
+     <div class="board-box">
+      <canvas id="board"></canvas>
+
+      <div class="overlay" id="overlay" data-mode="start">
+        <div class="card">
+
+          <div data-when="start">
+            <h2>俄罗斯<span class="neon">方块</span></h2>
+            <p>
+              手机：左右滑移动，轻点旋转，快速下扫直接落底，下面也有按钮。<br>
+              键盘：<kbd>←</kbd><kbd>→</kbd> 移动，<kbd>↑</kbd> 旋转，<kbd>空格</kbd> 硬降，<kbd>C</kbd> 暂存，<kbd>P</kbd> 暂停。
+            </p>
+            <button class="pbtn" id="startBtn">开始</button>
+          </div>
+
+          <div data-when="pause">
+            <h2>已暂停</h2>
+            <p>喘口气。回来继续。</p>
+            <button class="pbtn" id="resumeBtn">继续</button>
+          </div>
+
+          <div data-when="over">
+            <h2>堆到顶了</h2>
+            <div class="final">
+              <div><span>SCORE</span><b id="overScore">0</b></div>
+              <div><span>BEST</span><b id="overBest">0</b></div>
+              <div><span>LINES</span><b id="overLines">0</b></div>
+              <div><span>LEVEL</span><b id="overLevel">1</b></div>
+            </div>
+            <button class="pbtn" id="againBtn">再来一局</button>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="toast" id="toast"></div>
+     </div>
+    </div>
+
+  </div>
+
+  <div class="pad">
+    <button id="btnLeft"  aria-label="左移"><span class="ico">←</span>移动</button>
+    <button id="btnRight" aria-label="右移"><span class="ico">→</span>移动</button>
+    <button id="btnCcw"   aria-label="逆时针旋转"><span class="ico">↺</span>逆转</button>
+    <button id="btnCw"    aria-label="顺时针旋转"><span class="ico">↻</span>顺转</button>
+    <button id="btnDown"  aria-label="软降"><span class="ico">↓</span>软降</button>
+    <button id="btnDrop"  class="drop" aria-label="硬降"><span class="ico">⤓</span>落底</button>
+  </div>
+
+  <div class="hint">按住左右可以连发 · 点 HOLD 框暂存（键盘 <kbd>C</kbd>）· 分数只存在这台设备上</div>
+
+</div>
+
+<script src="tetris.js"></script>
+</body>
+</html>
