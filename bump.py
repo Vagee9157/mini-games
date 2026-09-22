@@ -19,6 +19,7 @@ TARGETS = [
     ('tetris/index.html', ['../assets/shared.css', 'tetris.css', 'tetris.js']),
     ('minesweeper/index.html', ['../assets/shared.css', '../assets/ui.css', 'mine.css', 'mine.js']),
     ('bubble/index.html', ['../assets/shared.css', '../assets/ui.css', 'bubble.css', 'bubble.js']),
+    ('pool/index.html', ['../assets/shared.css', '../assets/ui.css', 'pool.css', 'pool.js']),
 ]
 
 changed = []

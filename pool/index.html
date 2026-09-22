@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
+<meta name="theme-color" content="#080b14">
+<title>黑八 · 小游戏合集</title>
+<meta name="description" content="浏览器里的黑八台球，两人轮流打，拉杆瞄准松手出杆。">
+
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="黑八">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/icons/favicon-32.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
+<link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
+<link rel="stylesheet" href="pool.css?v=35cf4d15">
+</head>
+<body>
+<div class="topline"></div>
+
+<div class="game">
+
+  <header class="bar">
+    <a class="back" href="../">← 合集</a>
+    <h1>黑八<em>8-BALL</em></h1>
+    <div class="sp"></div>
+    <button class="tbtn tbtn-sq" id="muteBtn" aria-label="音效开关">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 5 6.5 9H3v6h3.5L11 19z"/>
+        <path class="wave" d="M15.6 8.6a5 5 0 0 1 0 6.8"/>
+        <path class="wave" d="M18.4 5.8a9 9 0 0 1 0 12.4"/>
+        <path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/>
+      </svg>
+    </button>
+    <button class="tbtn" id="restartBtn">重开</button>
+  </header>
+
+  <div class="players">
+    <div class="pl" id="p0">
+      <div class="nm">玩家 1</div>
+      <div class="gp" id="p0g">未定组</div>
+      <div class="lf" id="p0n">—</div>
+    </div>
+    <div class="pl" id="p1">
+      <div class="nm">玩家 2</div>
+      <div class="gp" id="p1g">未定组</div>
+      <div class="lf" id="p1n">—</div>
+    </div>
+  </div>
+
+  <div id="hand" hidden>自由球 · 可以把白球拖到任意位置</div>
+
+  <div class="boardwrap" id="boardWrap">
+    <canvas id="board"></canvas>
+    <div class="toast" id="toast"></div>
+
+    <div class="overlay" id="overlay" data-mode="over">
+      <div class="card">
+        <h2 id="winTitle">玩家 1 赢</h2>
+        <p id="winWhy"></p>
+        <button class="pbtn" id="againBtn">再来一局</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hint">往后拉瞄准 · 拉得越长越用力 · 松手出杆</div>
+
+</div>
+
+<script src="pool.js?v=a735f0a2"></script>
+</body>
+</html>
