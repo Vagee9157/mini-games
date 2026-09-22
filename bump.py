@@ -17,7 +17,6 @@ def digest(path):
 TARGETS = [
     ('index.html',        ['assets/shared.css']),
     ('tetris/index.html', ['../assets/shared.css', 'tetris.css', 'tetris.js']),
-    ('lab/index.html',    ['../assets/shared.css']),
 ]
 
 changed = []
