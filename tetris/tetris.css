@@ -20,7 +20,7 @@ body{
   padding:
     env(safe-area-inset-top) 
     max(10px, env(safe-area-inset-right))
-    max(18px, calc(env(safe-area-inset-bottom) + 10px))
+    max(34px, calc(env(safe-area-inset-bottom) + 30px))
     max(10px, env(safe-area-inset-left));
 }
 
@@ -568,7 +568,7 @@ body{
 body.immersive .bar .back,
 body.immersive .bar h1{ display: none; }
 body.immersive .bar{ justify-content: flex-end; gap: 6px; padding: 2px 0 0; }
-body.immersive .game{ gap: 6px; padding-top: max(4px, env(safe-area-inset-top)); }
+body.immersive .game{ gap: 6px; padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(34px, calc(env(safe-area-inset-bottom) + 30px)); }
 body.immersive .stage{ gap: 7px; }
 body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 /* 桌面进游戏模式时也把侧栏压扁，棋盘优先 */
