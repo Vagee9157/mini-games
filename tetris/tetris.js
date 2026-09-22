@@ -426,8 +426,12 @@ function lockPiece(){
   if (full.length){
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
-    sfx(full.length === 4 ? 'tetris' : 'clear');
+    if (spin)                    sfx('tspin', full.length);
+    else if (full.length === 4)  sfx('tetris', game.combo);
+    else                         sfx('clear', full.length, game.combo);
+    flashBoard(full.length);
   } else {
+    sfx('lock');
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
     if (topOut) endGame(); else { spawnNext(); saveGame(); }
@@ -770,6 +774,14 @@ function syncHud(){
   $('best').textContent  = game.best.toLocaleString();
 }
 
+// 消行时让棋盘边框闪一下，四行给更重的那一版
+function flashBoard(n){
+  const el = canvas;
+  el.classList.remove('flash', 'flash-big');
+  void el.offsetWidth;                 // 强制重排，动画才会重新播
+  el.classList.add(n >= 4 ? 'flash-big' : 'flash');
+}
+
 let toastTimer = 0;
 function showToast(text){
   const el = $('toast');
@@ -782,6 +794,7 @@ function showToast(text){
 }
 
 function flashLevel(){
+  sfx('level');
   const el = $('levelBox');
   el.classList.remove('flash');
   void el.offsetWidth;
@@ -790,35 +803,159 @@ function flashLevel(){
 }
 
 // ───────────────────────── 音效 ─────────────────────────
-// 用 WebAudio 现合成，免得为几个音效去背资源文件
+// 全部用 WebAudio 现合成，不背资源文件。
+// 消行走琶音：几行就多几个音，连击越多整体升得越高。
 
-let actx = null;
+let actx = null, master = null;
 let muted = false;
-function sfx(kind){
-  if (muted) return;
+
+function audio(){
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (!actx){
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain();
+      master.gain.value = .9;
+      // 琶音和连续硬降会让好几个音叠在一起，挂个压限器兜底，免得爆音
+      const comp = actx.createDynamicsCompressor();
+      comp.threshold.value = -14;
+      comp.knee.value = 12;
+      comp.ratio.value = 6;
+      comp.attack.value = .003;
+      comp.release.value = .18;
+      master.connect(comp);
+      comp.connect(actx.destination);
+    }
     if (actx.state === 'suspended') actx.resume();
-    const t = actx.currentTime;
-    const o = actx.createOscillator();
-    const g = actx.createGain();
-    o.connect(g); g.connect(actx.destination);
-    const spec = {
-      rotate: { f: 420, to: 520, d: .05, v: .05, type: 'square' },
-      drop:   { f: 200, to: 90,  d: .10, v: .09, type: 'triangle' },
-      clear:  { f: 520, to: 780, d: .16, v: .09, type: 'sine' },
-      tetris: { f: 440, to: 1180,d: .32, v: .13, type: 'sawtooth' },
-      hold:   { f: 320, to: 380, d: .06, v: .05, type: 'sine' },
-      over:   { f: 320, to: 70,  d: .70, v: .12, type: 'sawtooth' },
-    }[kind];
-    if (!spec) return;
-    o.type = spec.type;
-    o.frequency.setValueAtTime(spec.f, t);
-    o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
-    g.gain.setValueAtTime(spec.v, t);
-    g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
-    o.start(t); o.stop(t + spec.d + .02);
-  } catch { /* 浏览器不给声音就静音运行 */ }
+    return actx;
+  } catch { return null; }
+}
+
+// 一个带起落包络的音；filter 给它一点圆润度，别太刺
+function tone(o){
+  if (muted) return;
+  const c = audio(); if (!c) return;
+  const t0 = c.currentTime + (o.delay || 0);
+  const dur = o.dur || .15;
+  const vol = o.vol == null ? .07 : o.vol;
+  const osc = c.createOscillator();
+  const g = c.createGain();
+  osc.type = o.type || 'triangle';
+  osc.frequency.setValueAtTime(o.freq, t0);
+  if (o.to) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.to), t0 + dur);
+
+  g.gain.setValueAtTime(.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + (o.atk || .008));
+  g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+
+  if (o.filter){
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = o.filter;
+    osc.connect(f); f.connect(g);
+  } else {
+    osc.connect(g);
+  }
+  g.connect(master);
+  osc.start(t0);
+  osc.stop(t0 + dur + .03);
+}
+
+// 一小段噪声，给落地和消行添点「实体」的冲击感
+function noise(o){
+  if (muted) return;
+  const c = audio(); if (!c) return;
+  const t0 = c.currentTime + (o.delay || 0);
+  const dur = o.dur || .1;
+  const len = Math.max(1, Math.ceil(c.sampleRate * dur));
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const f = c.createBiquadFilter();
+  f.type = o.hp ? 'highpass' : 'lowpass';
+  f.frequency.setValueAtTime(o.filter || 1500, t0);
+  if (o.filterTo) f.frequency.exponentialRampToValueAtTime(Math.max(40, o.filterTo), t0 + dur);
+  const g = c.createGain();
+  g.gain.setValueAtTime(o.vol == null ? .08 : o.vol, t0);
+  g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+  src.connect(f); f.connect(g); g.connect(master);
+  src.start(t0);
+}
+
+// C 大调往上爬的一串音，消几行就取前几个
+const LADDER = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
+const semitone = (n) => Math.pow(1.05946, n);
+
+const SFX = {
+  move(){ tone({ freq: 190, dur: .028, vol: .022, type: 'square', filter: 800 }); },
+
+  rotate(){
+    tone({ freq: 330, to: 430, dur: .05, vol: .042, type: 'square', filter: 1900 });
+  },
+
+  hold(){
+    tone({ freq: 392, dur: .07, vol: .045, type: 'sine' });
+    tone({ freq: 587, dur: .10, vol: .040, type: 'sine', delay: .05 });
+  },
+
+  // 硬降：噪声冲击 + 一记下沉的低音
+  drop(){
+    noise({ dur: .085, vol: .085, filter: 2600, filterTo: 300 });
+    tone({ freq: 150, to: 52, dur: .14, vol: .09, type: 'sine' });
+  },
+
+  lock(){ tone({ freq: 118, to: 84, dur: .055, vol: .04, type: 'triangle' }); },
+
+  // 消行：1~3 行走琶音，combo 越高整体越亮
+  clear(n, combo){
+    const up = semitone(Math.min(Math.max(combo, 0), 8));
+    const notes = LADDER.slice(0, Math.min(2 + n, LADDER.length));
+    notes.forEach((f, i) => {
+      tone({ freq: f * up, dur: .24, vol: .07, type: 'triangle', filter: 4200, delay: i * .055 });
+    });
+    tone({ freq: 130.81 * up, dur: .40, vol: .05, type: 'sine' });   // 垫底
+    noise({ dur: .16, vol: .045, filter: 5200, hp: true });          // 碎裂感
+  },
+
+  // 四行：整条梯子爬完，锯齿音色 + 低音垫，最爽的那一下
+  tetris(combo){
+    const up = semitone(Math.min(Math.max(combo, 0), 8));
+    LADDER.forEach((f, i) => {
+      tone({ freq: f * up, dur: .30, vol: .08, type: 'sawtooth', filter: 3200, delay: i * .05 });
+    });
+    tone({ freq: 65.41, to: 130.81, dur: .55, vol: .085, type: 'sine' });
+    noise({ dur: .3, vol: .06, filter: 6000, hp: true });
+    tone({ freq: 1046.5 * up, dur: .5, vol: .05, type: 'sine', delay: .3 });
+  },
+
+  // T-spin：换小调，听起来「不一样」
+  tspin(n){
+    [523.25, 622.25, 783.99, 1046.5].slice(0, 2 + n).forEach((f, i) => {
+      tone({ freq: f, dur: .26, vol: .07, type: 'square', filter: 2600, delay: i * .06 });
+    });
+    tone({ freq: 98, dur: .4, vol: .06, type: 'sine' });
+  },
+
+  level(){
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+      tone({ freq: f, dur: .18, vol: .06, type: 'triangle', filter: 4000, delay: i * .07 });
+    });
+  },
+
+  over(){
+    [392, 330, 262, 196].forEach((f, i) => {
+      tone({ freq: f, to: f * .96, dur: .34, vol: .075, type: 'sawtooth', filter: 1600, delay: i * .13 });
+    });
+    tone({ freq: 110, to: 42, dur: .9, vol: .07, type: 'sine', delay: .5 });
+  },
+};
+
+// 老的调用点统一走这里
+function sfx(kind, a, b){
+  if (muted) return;
+  const fn = SFX[kind];
+  if (fn) { try { fn(a, b); } catch { /* 浏览器不给声音就静音运行 */ } }
 }
 
 // ───────────────────────── 主循环 ─────────────────────────
