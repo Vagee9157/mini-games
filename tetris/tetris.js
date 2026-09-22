@@ -132,6 +132,7 @@ function garbagePeriod(){
 }
 
 const STORE_KEY = 'tetris.best.v1';
+const BUZZ_KEY  = 'tetris.buzz.v1';
 const SKIN_KEY  = 'tetris.skin.v1';
 const SAVE_KEY  = 'tetris.save.v1';
 
@@ -330,7 +331,14 @@ function spawn(type){
   lockResets = 0;
   grounded = false;
   // 出生位置就被占 → 结束
-  if (collides(p.type, p.x, p.y, p.rot)) endGame();
+  if (collides(p.type, p.x, p.y, p.rot)){ endGame(); return; }
+
+  // IHS 优先于 IRS：按住暂存键就先换块，否则按住旋转键就先转好
+  if (!armPre) return;
+  armPre = false;
+  if (preHeld.hold && !game.holdUsed){ holdPiece(); return; }
+  if (preHeld.cw) tryRotate(1);
+  else if (preHeld.ccw) tryRotate(-1);
 }
 
 function spawnNext(){
@@ -385,6 +393,7 @@ function hardDrop(){
   burst(p, 1.4);
   lockPiece();
   sfx('drop');
+  buzz(14);
 }
 
 function holdPiece(){
@@ -462,22 +471,26 @@ function lockPiece(){
     if (game.board[y].every(c => c)) full.push(y);
   }
 
-  scoreFor(full.length, spin);
+  // 消完这几行之后整个盘就空了 = 全消，Guideline 里给大额奖励
+  const perfect = full.length > 0 &&
+    game.board.every((row, y) => full.includes(y) || row.every(c => !c));
+  scoreFor(full.length, spin, perfect);
 
   if (full.length){
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
     sfx(full.length === 4 ? 'tetris' : 'clear');
     flashBoard(full.length);
+    buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
   } else {
     sfx('lock');
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
-    if (topOut) endGame(); else { spawnNext(); saveGame(); }
+    if (topOut) endGame(); else { armPre = true; spawnNext(); saveGame(); }
   }
 }
 
-function scoreFor(n, spin){
+function scoreFor(n, spin, perfect){
   const lvl = game.level;
   let base = 0, label = '';
 
@@ -504,6 +517,13 @@ function scoreFor(n, spin){
     }
   } else {
     game.combo = -1;
+  }
+
+  // 全消：Guideline 给的分比一次 Tetris 还高，而且很难碰上，值得给个大的
+  if (perfect){
+    base += [0, 800, 1200, 1800, 2000][n] || 800;
+    label = '全消 PERFECT CLEAR';
+    buzz([40, 50, 60, 50, 90]);
   }
 
   game.score += base * lvl;
@@ -563,6 +583,7 @@ function endGame(){
   $('overlay').dataset.mode = 'over';
   syncHud();
   sfx('over');
+  buzz([90, 60, 90, 60, 160]);
 }
 
 // ───────────────────────── 画面 ─────────────────────────
@@ -945,6 +966,13 @@ function flashLevel(){
 
 let actx = null;
 let muted = false;
+let buzzOn = true;
+
+// 手机上的触感反馈。桌面浏览器没有 vibrate，静默跳过。
+function buzz(pattern){
+  if (!buzzOn) return;
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch { /* 忽略 */ }
+}
 
 const SPECS = {
   rotate: { f: 400, to: 470,  d: .04, v: .026, type: 'sine' },
@@ -1012,6 +1040,7 @@ function tick(now){
     if (clearing.t >= clearing.dur){
       applyClear(clearing.rows);
       clearing = null;
+      armPre = true;
       spawnNext();
       saveGame();
     }
@@ -1055,6 +1084,10 @@ function tick(now){
 // ───────────────────────── 输入 ─────────────────────────
 
 const held = { left: false, right: false };
+// 按住旋转 / 暂存键的时候下一块正好出来，就让它带着这个动作出场（IRS / IHS）。
+// 连着摆块的时候手感顺很多，标准实现都有。
+const preHeld = { cw: false, ccw: false, hold: false };
+let armPre = false;    // 只有「锁定后自动出的那一块」才吃 IRS/IHS
 const repeat = { left: 0, right: 0, started: { left: false, right: false } };
 
 function handleAutoRepeat(dt){
@@ -1104,10 +1137,10 @@ window.addEventListener('keydown', (e) => {
     case 'left':  press('left'); break;
     case 'right': press('right'); break;
     case 'soft':  softDropping = true; break;
-    case 'cw':    tryRotate(1); break;
-    case 'ccw':   tryRotate(-1); break;
+    case 'cw':    preHeld.cw = true;  tryRotate(1); break;
+    case 'ccw':   preHeld.ccw = true; tryRotate(-1); break;
     case 'hard':  hardDrop(); break;
-    case 'hold':  holdPiece(); break;
+    case 'hold':  preHeld.hold = true; holdPiece(); break;
   }
 }, { passive: false });
 
@@ -1117,6 +1150,9 @@ window.addEventListener('keyup', (e) => {
   if (act === 'left')  release('left');
   if (act === 'right') release('right');
   if (act === 'soft')  softDropping = false;
+  if (act === 'cw')    preHeld.cw = false;
+  if (act === 'ccw')   preHeld.ccw = false;
+  if (act === 'hold')  preHeld.hold = false;
 });
 
 // 底部按钮：按住能连发
@@ -1124,7 +1160,7 @@ function bindButtons(){
   const map = [
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
-    ['btnCw',    () => tryRotate(1),    null],
+    ['btnCw',    () => { preHeld.cw = true; tryRotate(1); }, () => { preHeld.cw = false; }],
     ['btnDrop',  () => hardDrop(),      null],
   ];
   for (const [id, down, up] of map){
@@ -1390,7 +1426,10 @@ function syncMuteBtn(){
 function init(){
   const savedSkin = readSkin();
   if (savedSkin) { skin.pal = savedSkin.pal; skin.style = savedSkin.style; }
-  try { muted = localStorage.getItem('tetris.muted.v1') === '1'; } catch { /* 忽略 */ }
+  try {
+    muted = localStorage.getItem('tetris.muted.v1') === '1';
+    buzzOn = localStorage.getItem(BUZZ_KEY) !== '0';
+  } catch { /* 忽略 */ }
   game.board = newBoard();
   game.best = readBest();
   syncHud();
@@ -1411,6 +1450,22 @@ function init(){
   document.addEventListener('fullscreenchange', onFsChange);
   document.addEventListener('webkitfullscreenchange', onFsChange);
   // HOLD 框本身就是暂存按钮，手机上没地方再塞一个键
+  const bz = $('buzzBtn');
+  if (bz){
+    const syncBuzz = () => {
+      bz.textContent = buzzOn ? '震动：开' : '震动：关';
+      bz.classList.toggle('off', !buzzOn);
+      bz.hidden = !('vibrate' in navigator);     // 电脑上没这功能，直接不显示
+    };
+    bz.addEventListener('click', () => {
+      buzzOn = !buzzOn;
+      try { localStorage.setItem(BUZZ_KEY, buzzOn ? '1' : '0'); } catch { /* 忽略 */ }
+      syncBuzz();
+      if (buzzOn) buzz(20);
+    });
+    syncBuzz();
+  }
+
   const hs = $('holdSlot');
   hs.addEventListener('click', () => {
     if (game.started && !game.over && !game.paused) holdPiece();
