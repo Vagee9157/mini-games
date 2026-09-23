@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
 <link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
-<link rel="stylesheet" href="bubble.css?v=4ff7cd54">
+<link rel="stylesheet" href="bubble.css?v=2e6531ed">
 </head>
 <body>
 <div class="topline"></div>
@@ -39,13 +39,15 @@
         <path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/>
       </svg>
     </button>
+    <button class="tbtn" id="lvBtn">选关</button>
     <button class="tbtn" id="restartBtn">重开</button>
   </header>
 
   <div class="hud">
-    <div class="cell hi"><span>得分</span><b id="score">0</b></div>
-    <div class="cell"><span>最高</span><b id="best">0</b></div>
-    <div class="cell" id="rowsCell"><span>离底线</span><b id="rows">0</b></div>
+    <div class="cell hi"><span>关卡</span><b id="lvName">1</b></div>
+    <div class="cell" id="goalCell"><span>目标</span><b id="goal">清空</b></div>
+    <div class="cell" id="shotsCell"><span>剩余</span><b id="shots">0</b></div>
+    <div class="cell"><span>得分</span><b id="score">0</b></div>
     <div class="cell next"><span>下一颗</span><canvas id="nextCv"></canvas></div>
   </div>
 
@@ -58,29 +60,34 @@
         <div data-when="start">
           <h2>泡泡<span class="neon">龙</span></h2>
           <p>
-            在棋盘上<b>拖着瞄准，松手就发</b>，瞄准线会把撞墙反弹算进去。<br>
-            三个同色连上就消，<b>被打断的一串会整片掉下来</b>，掉落的更值分。<br>
-            手里这颗不合适？<b>点小恐龙旁边那颗就换手</b>。
+            <b>拖着瞄准，松手就发</b>，瞄准线把撞墙反弹算进去了。<br>
+            三个同色连上就消，<b>被打断的一串会整片掉下来</b>。<br>
+            一杆消掉五颗以上会掉<b>道具</b>：炸弹、彩虹、激光。<br>
+            <b>石头</b>打不消，只能靠断开让它掉；<b>冰冻泡</b>要在旁边消两次才化。
           </p>
-          <button class="pbtn" id="startBtn">开始</button>
+          <div class="prog">已解锁 <b id="startLv">1 / 20</b></div>
+          <button class="pbtn" id="startBtn">继续闯关</button>
+          <button class="pbtn ghost" id="pickBtn">选关</button>
         </div>
         <div data-when="win">
-          <h2>全<span class="neon">清</span></h2>
-          <p>一颗不剩。</p>
+          <h2>过<span class="neon">关</span></h2>
         </div>
         <div data-when="lose">
-          <h2>压<span class="warn">到底线了</span></h2>
+          <h2>没<span class="warn">过</span></h2>
+          <p id="endWhy"></p>
         </div>
+        <div class="stars" id="endStars" data-when="win lose"></div>
         <div class="final" data-when="win lose">
+          <div><span>关卡</span><b id="endLv">1</b></div>
           <div><span>得分</span><b id="endScore">0</b></div>
-          <div><span>最高</span><b id="endBest">0</b></div>
         </div>
-        <button class="pbtn" id="againBtn" data-when="win lose">再来一局</button>
-      </div>
+        <button class="pbtn" id="nextBtn" data-when="win">下一关</button>
+        <button class="pbtn ghost" id="againBtn" data-when="win lose">再来一次</button>
     </div>
   </div>
 
   <div class="pad">
+    <div class="powerbar" id="powerBar"></div>
     <button class="k hot" id="fireBtn" aria-label="发射">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 20V6"/><path d="M6.5 11.5 12 6l5.5 5.5"/>
@@ -88,12 +95,23 @@
       <em>发射</em>
     </button>
   </div>
+  <div class="hint">拖着瞄准 · 松手发射 · 点旁边那颗换手 · 道具点一下装上 · 键盘 ←→ 空格 Shift 1/2/3</div>
 
-  <div class="hint">拖着瞄准 · 松手发射 · 点旁边那颗换手 · 键盘 ←→ 空格 Shift</div>
+
+  <div class="lvsheet" id="lvSheet" hidden>
+    <div class="lvbox">
+      <div class="lvtop">
+        <h3>选关</h3>
+        <span class="lvstars">★ <b id="lvStars">0 / 60</b></span>
+        <button class="row-btn" id="lvClose">关闭</button>
+      </div>
+      <div class="lvgrid" id="lvGrid"></div>
+    </div>
+  </div>
 
 </div>
 
-<script src="bubble.js?v=9c2f84f2"></script>
+<script src="bubble.js?v=4c882dbd"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

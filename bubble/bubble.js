@@ -1,50 +1,129 @@
-/* 泡泡龙 —— 六边形交错网格、瞄准发射、同色三连消、悬空整串掉落。
-   渲染沿用俄罗斯方块那套：固定的泡泡画进离屏层，每帧只画飞行中的那颗和准星。 */
+/* 泡泡龙 —— 关卡制。
+   六边形交错网格、瞄准发射、同色三连消、悬空整串掉落；
+   在这之上是关卡布局、石头/冰冻障碍、救援目标、三种道具、连击倍数。
+   渲染沿用俄罗斯方块那套：固定的泡泡画进离屏层，每帧只画飞行的那颗和准星。 */
 (() => {
 'use strict';
 
 const COLS = 8;            // 偶数行的列数，奇数行少一列（往右错半格）
 const ROWS = 13;           // 逻辑总行数
-const DEAD_ROW = 11;       // 碰到这行就输
-const START_ROWS = 5;
-const DROP_EVERY = 6;      // 发射几次整体压下来一行
+const DEAD_ROW = 11;       // 压到这行就输
 const SPEED = 1050;        // 泡泡飞行速度 px/秒
 const SQ3 = Math.sqrt(3);
 
-const COLORS = ['#22d3ee', '#fbbf24', '#a855f7', '#f43f5e'];   // 四色，小盘子上五色太难凑三连
-const BEST_KEY = 'bubble.best.v1';
+const COLORS = ['#22d3ee', '#fbbf24', '#a855f7', '#f43f5e', '#4ade80'];
+const PROG_KEY = 'bubble.prog.v2';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
-let grid = [];             // grid[row][col] = 颜色下标 or null
-let R = 24;                // 泡泡半径（layout 算）
-let W = 0, H = 0;
-let cur = 0, next = 0;     // 当前 / 下一颗的颜色
-let shot = null;           // 飞行中的泡泡 {x,y,vx,vy,c}
-let aim = -Math.PI / 2;    // 瞄准角度，-90° 是正上
-let aiming = false;
-let score = 0, best = 0, shots = 0, rows = 0;
+// 每关一张手工布局 + 一个目标。地图用字符画，一行一个字符串：
+//   .  空       a~e  普通泡（颜色 0~4）      A~E  冰冻泡（要震两次才化）
+//   #  石头泡（打不消，只能靠断开掉下去）     *  目标物（救出去才算数）
+// 偶数行 8 格、奇数行 7 格，解析时会自己对齐，不用数得很准。
+//
+// colors  这关用几种颜色（发射器只会发盘面上还存在的颜色）
+// shots   发射次数预算，剩得越多星越高
+// push    每几发整体压下来一行，0 = 不压
+// goal    'clear' 清空所有能消的 / 'rescue' 把目标物全救下来
+const LEVELS = [
+  // ── 1-4 入门：三色，纯消除 ──
+  { name:'开场', colors:3, shots:26, push:0, goal:'clear', rows:[
+    'aabbccaa','abbccaa','bbccaabb','bccaabb' ]},
+  { name:'吊桥', colors:3, shots:26, push:0, goal:'clear', rows:[
+    'aa.bb.cc','a..b..c','aa.bb.cc','.a.b.c.','..abc..' ]},
+  { name:'阶梯', colors:3, shots:28, push:0, goal:'clear', rows:[
+    'aaaabbbb','.aabbcc','..abcc.','...bc..','...c...' ]},
+  { name:'蜂巢', colors:3, shots:30, push:10, goal:'clear', rows:[
+    'abcabcab','bcabcab','cabcabca','abcabca','bcabcabc' ]},
+
+  // ── 5-8 石头登场 ──
+  { name:'石门', colors:3, shots:28, push:0, goal:'clear', rows:[
+    '##aabb##','#abbcc#','aabbccaa','abbccaa','.bbcc..' ]},
+  { name:'夹心', colors:4, shots:30, push:0, goal:'clear', rows:[
+    'aabbccdd','#######','abcdabcd','.......','..abcd..' ]},
+  { name:'柱廊', colors:3, shots:30, push:12, goal:'clear', rows:[
+    'a#b#c#a#','abcabca','a#b#c#a#','abcabca','.#b#c#.' ]},
+  { name:'碉堡', colors:4, shots:32, push:0, goal:'clear', rows:[
+    '#aabbcc#','#abbcc#','##abcd##','.#abc#.','..abc..' ]},
+
+  // ── 9-12 冰冻登场 ──
+  { name:'初霜', colors:3, shots:30, push:0, goal:'clear', rows:[
+    'AABBCCAA','abbccaa','aabbccaa','.bbcc..' ]},
+  { name:'冰层', colors:4, shots:32, push:0, goal:'clear', rows:[
+    'ABCDABCD','abcdabc','ABCDABCD','abcdabc','..abcd..' ]},
+  { name:'寒潮', colors:4, shots:34, push:12, goal:'clear', rows:[
+    'A#B#C#D#','abcdabc','A#B#C#D#','abcdabc','.#bc#..' ]},
+  { name:'冰封', colors:4, shots:34, push:0, goal:'clear', rows:[
+    '##AABB##','#ABBCC#','AABBCCDD','ABBCCDD','.BBCC..' ]},
+
+  // ── 13-16 救援：把目标物打下来 ──
+  { name:'吊笼', colors:3, shots:24, push:0, goal:'rescue', rows:[
+    'aabbccaa','abbccaa','a.*..*.a','.a.bb.c','..abc..' ]},
+  { name:'鸟巢', colors:3, shots:26, push:0, goal:'rescue', rows:[
+    '#aabbcc#','abcabca','a.*.*.a','.abcab.','...*...' ]},
+  { name:'深井', colors:4, shots:28, push:10, goal:'rescue', rows:[
+    'aabbccdd','abcdabc','a#*#*#a','.abcab.','..*.*..' ]},
+  { name:'冰窟', colors:4, shots:30, push:0, goal:'rescue', rows:[
+    'AABBCCDD','abcdabc','A.*..*.A','.abcab.','..*.*..' ]},
+
+  // ── 17-20 收官：五色、混合障碍 ──
+  { name:'万花筒', colors:5, shots:34, push:10, goal:'clear', rows:[
+    'abcdeabc','bcdeabc','cdeabcde','deabcde','eabcdeab' ]},
+  { name:'迷宫', colors:4, shots:34, push:0, goal:'clear', rows:[
+    '#abc#abc','A#bc#ab','#abc#abc','a#bc#ab','.abc#a.' ]},
+  { name:'囚笼', colors:4, shots:32, push:12, goal:'rescue', rows:[
+    '########','ABCDABC','#a*bc*d#','.ABCDA.','..*.*..' ]},
+  { name:'终局', colors:5, shots:36, push:10, goal:'clear', rows:[
+    'ABCDEABC','#bcdeab#','ABCDEABC','#bcdeab#','.ABCDE.' ]},
+];
+
+// ── 格子 ──
+// null 或 { t, c, hp }
+//   t 'n' 普通 / 's' 石头 / 'i' 冰冻 / 'g' 目标物
+//   c 颜色下标（石头和目标物是 -1）
+const isPop  = (b) => !!b && b.t === 'n';          // 能参与同色消除的
+const isHard = (b) => !!b && (b.t === 's' || b.t === 'g');
+
+function parseChar(ch){
+  if (ch === '.' || ch === ' ') return null;
+  if (ch === '#') return { t:'s', c:-1 };
+  if (ch === '*') return { t:'g', c:-1 };
+  const lo = 'abcde'.indexOf(ch);
+  if (lo >= 0) return { t:'n', c:lo };
+  const hi = 'ABCDE'.indexOf(ch);
+  if (hi >= 0) return { t:'i', c:hi, hp:2 };
+  return null;
+}
+
+// ── 状态 ──
+let grid = [];
+let R = 24, W = 0, H = 0;
+let lvIdx = 0, lv = null;
+let cur = null, next = null;        // { c } 或 { power:'bomb'|'rainbow'|'laser' }
+let shot = null;
+let aim = -Math.PI / 2, aiming = false;
+let score = 0, shotsLeft = 0, fired = 0, combo = 0, rescued = 0, needRescue = 0;
+let powers = [];                    // 手上的道具，最多 3 个
 let over = false, won = false, started = false;
-let pops = [];             // 消除动画
+let pops = [], floats = [];         // 消除动画 / 飘字
 let staticDirty = true, needsDraw = true;
-let aimPath = [];          // 瞄准轨迹，含反弹，setAim 时算一次
+let aimPath = [];
 let rafId = 0, lastT = 0;
+let prog = { unlocked: 1, stars: {} };
 
 const canvas = $('board');
 const ctx = canvas.getContext('2d');
 const bg = document.createElement('canvas');
 const bgCtx = bg.getContext('2d');
 
-// 泡泡从小恐龙嘴里吐出来的位置
 function muzzleY(){ return H - R * 3.55; }
 
-// ── 网格坐标 ──
+// ── 网格坐标（沿用原来那套，已经验过是精确贴合的）──
 const colsIn = (r) => r % 2 ? COLS - 1 : COLS;
 function cellX(r, c){ return R + c * R * 2 + (r % 2 ? R : 0); }
 function cellY(r){ return R + r * R * SQ3; }
 
-// 交错网格的六个邻居，奇偶行偏移不一样
 function neighbours(r, c){
   const odd = r % 2;
   const d = odd
@@ -58,61 +137,114 @@ function neighbours(r, c){
   return out;
 }
 
-// ── 开局 ──
-function newGrid(){
+// 以某格为中心、半径 n 圈内的所有格（炸弹用）
+function ring(r0, c0, n){
+  const seen = new Set([r0 + ',' + c0]);
+  let front = [[r0, c0]];
+  for (let i = 0; i < n; i++){
+    const nxt = [];
+    for (const [r, c] of front)
+      for (const [nr, nc] of neighbours(r, c)){
+        const k = nr + ',' + nc;
+        if (seen.has(k)) continue;
+        seen.add(k); nxt.push([nr, nc]);
+      }
+    front = nxt;
+  }
+  return [...seen].map(k => k.split(',').map(Number));
+}
+
+// ── 进度存档 ──
+function readProg(){
+  try {
+    const d = JSON.parse(localStorage.getItem(PROG_KEY) || 'null');
+    if (d && typeof d.unlocked === 'number') return { unlocked: d.unlocked, stars: d.stars || {} };
+  } catch { /* 坏数据就从头来 */ }
+  return { unlocked: 1, stars: {} };
+}
+function writeProg(){
+  try { localStorage.setItem(PROG_KEY, JSON.stringify(prog)); } catch { /* 忽略 */ }
+}
+const starsOf = (i) => prog.stars[i] || 0;
+const totalStars = () => LEVELS.reduce((s, _, i) => s + starsOf(i), 0);
+
+// ── 装关卡 ──
+function loadLevel(i){
+  lvIdx = clamp(i, 0, LEVELS.length - 1);
+  lv = LEVELS[lvIdx];
   grid = [];
   for (let r = 0; r < ROWS; r++) grid.push(new Array(colsIn(r)).fill(null));
-}
-
-function fillStart(){
-  for (let r = 0; r < START_ROWS; r++)
-    for (let c = 0; c < colsIn(r); c++)
-      grid[r][c] = (Math.random() * COLORS.length) | 0;
-}
-
-// 只在还剩的颜色里抽，免得发一颗盘面上根本没有的
-function pickColor(){
-  const live = new Set();
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < colsIn(r); c++)
-    if (grid[r][c] != null) live.add(grid[r][c]);
-  const pool = live.size ? [...live] : COLORS.map((_, i) => i);
-  return pool[(Math.random() * pool.length) | 0];
-}
-
-function restart(){
-  newGrid();
-  fillStart();
-  score = 0; shots = 0; rows = 0;
+  needRescue = 0;
+  lv.rows.forEach((line, r) => {
+    if (r >= ROWS) return;
+    for (let c = 0; c < colsIn(r); c++){
+      const b = parseChar(line[c] || '.');
+      if (!b) continue;
+      if (b.c >= lv.colors) b.c = b.c % lv.colors;   // 布局里写超色号就绕回来
+      grid[r][c] = b;
+      if (b.t === 'g') needRescue++;
+    }
+  });
+  score = 0; fired = 0; combo = 0; rescued = 0;
+  shotsLeft = lv.shots;
+  powers = [];
   over = false; won = false; started = true;
-  shot = null; pops = [];
-  cur = pickColor(); next = pickColor();
+  shot = null; pops = []; floats = [];
+  cur = { c: pickColor() }; next = { c: pickColor() };
   $('overlay').classList.remove('show');
   staticDirty = true; needsDraw = true;
-  traceAim();
-  syncHud();
+  traceAim(); syncHud();
   lastT = performance.now();
   if (!rafId) rafId = requestAnimationFrame(tick);
 }
 
+// 只发盘面上还有的颜色，免得给一颗根本凑不出三连的死球
+function pickColor(){
+  const live = new Set();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < colsIn(r); c++){
+    const b = grid[r][c];
+    if (b && (b.t === 'n' || b.t === 'i')) live.add(b.c);
+  }
+  const pool = live.size ? [...live] : Array.from({ length: lv.colors }, (_, i) => i);
+  return pool[(Math.random() * pool.length) | 0];
+}
+
 // ── 发射 ──
 function fire(){
-  if (over || shot || !started) return;
+  if (over || shot || !started || shotsLeft <= 0) return;
   const a = clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06);
-  shot = { x: W / 2, y: muzzleY(), vx: Math.cos(a) * SPEED, vy: Math.sin(a) * SPEED, c: cur };
-  cur = next; next = pickColor();
-  shots++;
-  sfx('shoot');
+  shot = { x: W / 2, y: muzzleY(), vx: Math.cos(a) * SPEED, vy: Math.sin(a) * SPEED,
+           c: cur.c, power: cur.power || null };
+  cur = next; next = { c: pickColor() };
+  shotsLeft--; fired++;
+  sfx(shot.power ? 'power' : 'shoot');
+  syncHud();
   needsDraw = true;
 }
 
-// 手里这颗和下一颗对调。盘面不合适时这一下很救命。
 function swap(){
   if (over || shot || !started) return;
   const t = cur; cur = next; next = t;
-  traceAim();
-  sfx('swap');
+  traceAim(); sfx('swap'); syncHud(); needsDraw = true;
+}
+
+// 点道具栏：把道具装到手上（原来手里那颗退回去当下一颗）
+function armPower(i){
+  if (over || shot || !started) return;
+  const p = powers[i];
+  if (!p) return;
+  powers.splice(i, 1);
+  if (!cur.power) next = cur;
+  cur = { c: -1, power: p };
+  traceAim(); sfx('swap'); syncHud(); needsDraw = true;
+}
+
+function grantPower(){
+  if (powers.length >= 3) return;
+  const pool = ['bomb', 'rainbow', 'laser'];
+  powers.push(pool[(Math.random() * pool.length) | 0]);
+  sfx('grant');
   syncHud();
-  needsDraw = true;
 }
 
 function step(dt){
@@ -128,72 +260,148 @@ function substep(s){
   shot.x += shot.vx * s;
   shot.y += shot.vy * s;
 
-  // 撞左右墙就反弹
   if (shot.x < R){ shot.x = R; shot.vx = Math.abs(shot.vx); }
   if (shot.x > W - R){ shot.x = W - R; shot.vx = -Math.abs(shot.vx); }
 
-  // 撞顶
+  // 激光：不落地，一路穿过去，碰到什么消什么
+  if (shot.power === 'laser'){
+    const rr = (R * 1.55) ** 2;
+    let hit = 0;
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < colsIn(r); c++){
+        if (!grid[r][c]) continue;
+        const dx = shot.x - cellX(r, c), dy = shot.y - cellY(r);
+        if (dx * dx + dy * dy < rr){ killCell(r, c); hit++; }
+      }
+    if (hit){ score += hit * 15; staticDirty = true; }
+    if (shot.y <= R){ shot = null; afterShot(hit, 0); }
+    return;
+  }
+
   if (shot.y <= R){ land(); return; }
 
-  // 撞到已有的泡泡
   const rr = (R * 1.86) ** 2;
   for (let r = 0; r < ROWS; r++){
     for (let c = 0; c < colsIn(r); c++){
-      if (grid[r][c] == null) continue;
+      if (!grid[r][c]) continue;
       const dx = shot.x - cellX(r, c), dy = shot.y - cellY(r);
       if (dx * dx + dy * dy < rr){ land(); return; }
     }
   }
 }
 
-// 落到最近的空格上（必须挨着已有泡泡或在第一行，不然会浮着）
+function killCell(r, c, fall){
+  const b = grid[r][c];
+  if (!b) return;
+  addPop(r, c, colorOf(b), fall, b.t);
+  if (b.t === 'g'){ rescued++; score += 300; addFloat(r, c, '救出!'); }
+  grid[r][c] = null;
+}
+const colorOf = (b) => b.t === 's' ? '#8a97ad' : b.t === 'g' ? '#facc15' : COLORS[b.c];
+
+// 落到最近的空格（必须挨着已有泡泡或在第一行，不然会浮着）
 function land(){
   const b = { r: -1, c: -1, d: Infinity };
   for (let r = 0; r < ROWS; r++){
     for (let c = 0; c < colsIn(r); c++){
-      if (grid[r][c] != null) continue;
-      if (r > 0 && !neighbours(r, c).some(([nr, nc]) => grid[nr][nc] != null)) continue;
+      if (grid[r][c]) continue;
+      if (r > 0 && !neighbours(r, c).some(([nr, nc]) => grid[nr][nc])) continue;
       const dx = cellX(r, c) - shot.x, dy = cellY(r) - shot.y;
       const d = dx * dx + dy * dy;
       if (d < b.d){ b.d = d; b.r = r; b.c = c; }
     }
   }
-  const color = shot.c;
+  const sh = shot;
   shot = null;
-  if (b.r < 0) return;
-  grid[b.r][b.c] = color;
+  if (b.r < 0){ afterShot(0, 0); return; }
+
+  // 炸弹：不留在盘上，直接把周围两圈端掉
+  if (sh.power === 'bomb'){
+    let n = 0;
+    for (const [r, c] of ring(b.r, b.c, 2)) if (grid[r][c]){ killCell(r, c); n++; }
+    score += n * 20;
+    staticDirty = true;
+    sfx('boom');
+    const loose = dropFloating();
+    afterShot(n, loose);
+    return;
+  }
+
+  // 彩虹：落点周围哪种颜色多就变成哪种
+  let color = sh.c;
+  if (sh.power === 'rainbow'){
+    const cnt = {};
+    for (const [nr, nc] of neighbours(b.r, b.c)){
+      const nb = grid[nr][nc];
+      if (nb && nb.t === 'n') cnt[nb.c] = (cnt[nb.c] || 0) + 1;
+    }
+    const keys = Object.keys(cnt);
+    color = keys.length ? +keys.sort((x, y) => cnt[y] - cnt[x])[0] : pickColor();
+  }
+
+  grid[b.r][b.c] = { t:'n', c: color };
   staticDirty = true;
 
   const same = sameGroup(b.r, b.c);
+  let popped = 0, loose = 0;
   if (same.length >= 3){
-    same.forEach(([r, c]) => { addPop(r, c, grid[r][c]); grid[r][c] = null; });
-    score += same.length * 10;
-    const loose = dropFloating();
-    if (loose) score += loose * 20;      // 连带掉下来的更值钱
-    sfx(same.length >= 5 ? 'big' : 'pop');
-    const total = same.length + loose;
-    if (loose >= 3) toast(`掉了 ${loose} 颗！`);
-    else if (total >= 6) toast(`${total} 连！`);
+    crackAround(same);                       // 先震裂贴着的冰
+    same.forEach(([r, c]) => killCell(r, c));
+    popped = same.length;
+    loose = dropFloating();
+    sfx(popped >= 5 ? 'big' : 'pop');
   } else {
     sfx('stick');
   }
-
-  if (shots % DROP_EVERY === 0) pushDown();
-  checkEnd();
-  traceAim();
-  syncHud();
+  afterShot(popped, loose);
 }
 
-// 同色连通块
+// 消除会震裂紧挨着的冰冻泡，两次就化开
+function crackAround(group){
+  const seen = new Set();
+  for (const [r, c] of group)
+    for (const [nr, nc] of neighbours(r, c)){
+      const k = nr + ',' + nc;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const b = grid[nr][nc];
+      if (!b || b.t !== 'i') continue;
+      b.hp--;
+      if (b.hp <= 0) grid[nr][nc] = { t:'n', c: b.c };
+      staticDirty = true;
+    }
+}
+
+// 一杆打完的结算：连击、计分、压行、胜负
+function afterShot(popped, loose){
+  if (popped > 0){
+    combo++;
+    const mul = Math.min(5, combo);
+    const gain = (popped * 10 + loose * 25) * mul;
+    score += gain;
+    if (popped >= 5) grantPower();
+    if (combo >= 2) toast(`${combo} 连击 ×${mul}`);
+    else if (loose >= 3) toast(`掉了 ${loose} 颗！`);
+  } else {
+    combo = 0;
+  }
+  if (lv.push && fired % lv.push === 0) pushDown();
+  checkEnd();
+  traceAim(); syncHud();
+}
+
+// 同色连通块（只算普通泡，石头/冰/目标不参与）
 function sameGroup(r0, c0){
-  const color = grid[r0][c0];
+  const base = grid[r0][c0];
+  if (!isPop(base)) return [];
   const seen = new Set([r0 + ',' + c0]);
   const out = [[r0, c0]], q = [[r0, c0]];
   while (q.length){
     const [r, c] = q.pop();
     for (const [nr, nc] of neighbours(r, c)){
       const k = nr + ',' + nc;
-      if (seen.has(k) || grid[nr][nc] !== color) continue;
+      const nb = grid[nr][nc];
+      if (seen.has(k) || !isPop(nb) || nb.c !== base.c) continue;
       seen.add(k); out.push([nr, nc]); q.push([nr, nc]);
     }
   }
@@ -202,24 +410,20 @@ function sameGroup(r0, c0){
 
 // 从顶行灌一遍，灌不到的就是悬空的，整串掉下来
 function dropFloating(){
-  const safe = new Set();
-  const q = [];
-  for (let c = 0; c < colsIn(0); c++) if (grid[0][c] != null){ safe.add('0,' + c); q.push([0, c]); }
+  const safe = new Set(), q = [];
+  for (let c = 0; c < colsIn(0); c++) if (grid[0][c]){ safe.add('0,' + c); q.push([0, c]); }
   while (q.length){
     const [r, c] = q.pop();
     for (const [nr, nc] of neighbours(r, c)){
       const k = nr + ',' + nc;
-      if (safe.has(k) || grid[nr][nc] == null) continue;
+      if (safe.has(k) || !grid[nr][nc]) continue;
       safe.add(k); q.push([nr, nc]);
     }
   }
   let n = 0;
   for (let r = 0; r < ROWS; r++)
     for (let c = 0; c < colsIn(r); c++)
-      if (grid[r][c] != null && !safe.has(r + ',' + c)){
-        addPop(r, c, grid[r][c], true);
-        grid[r][c] = null; n++;
-      }
+      if (grid[r][c] && !safe.has(r + ',' + c)){ killCell(r, c, true); n++; }
   if (n) staticDirty = true;
   return n;
 }
@@ -228,72 +432,117 @@ function dropFloating(){
 // 奇偶行列数不一样（8 / 7），下移时最右那颗装不下会被丢掉，
 // 原本挂在它下面的可能就断了 —— 所以压完必须再跑一次悬空检查。
 function pushDown(){
-  for (let r = ROWS - 1; r > 0; r--) {
+  for (let r = ROWS - 1; r > 0; r--){
     const src = grid[r - 1], dst = grid[r];
     for (let c = 0; c < dst.length; c++) dst[c] = c < src.length ? src[c] : null;
   }
   grid[0] = new Array(colsIn(0)).fill(null);
-  for (let c = 0; c < colsIn(0); c++) grid[0][c] = (Math.random() * COLORS.length) | 0;
-  rows++;
-  const loose = dropFloating();
-  if (loose) score += loose * 20;
+  for (let c = 0; c < colsIn(0); c++) grid[0][c] = { t:'n', c: pickColor() };
+  dropFloating();
   staticDirty = true;
+  toast('压下来一行');
 }
 
+// ── 胜负 ──
 function checkEnd(){
-  let any = false, deep = false;
+  if (over) return;
+  let anyPop = false, deep = false;
   for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < colsIn(r); c++)
-      if (grid[r][c] != null){ any = true; if (r >= DEAD_ROW) deep = true; }
-  if (!any){ finish(true); return; }
-  if (deep){ finish(false); return; }
+    for (let c = 0; c < colsIn(r); c++){
+      const b = grid[r][c];
+      if (!b) continue;
+      if (b.t === 'n' || b.t === 'i') anyPop = true;
+      if (r >= DEAD_ROW) deep = true;
+    }
+  if (lv.goal === 'rescue'){
+    if (rescued >= needRescue){ finish(true); return; }
+  } else if (!anyPop){ finish(true); return; }
+  if (deep){ finish(false, '压到底线了'); return; }
+  if (shotsLeft <= 0 && !shot){ finish(false, '泡泡用完了'); return; }
 }
 
-function finish(win){
+function starsFor(){
+  const keep = shotsLeft / lv.shots;
+  return keep >= .45 ? 3 : keep >= .2 ? 2 : 1;
+}
+
+function finish(win, why){
   over = true; won = win;
-  if (score > best){ best = score; try { localStorage.setItem(BEST_KEY, String(best)); } catch { /* 忽略 */ } }
+  let st = 0;
+  if (win){
+    st = starsFor();
+    if (st > starsOf(lvIdx)) prog.stars[lvIdx] = st;
+    if (lvIdx + 1 >= prog.unlocked) prog.unlocked = Math.min(LEVELS.length, lvIdx + 2);
+    writeProg();
+  }
   $('overlay').dataset.mode = win ? 'win' : 'lose';
+  $('endLv').textContent = `第 ${lvIdx + 1} 关 · ${lv.name}`;
   $('endScore').textContent = score.toLocaleString();
-  $('endBest').textContent = best.toLocaleString();
+  $('endWhy').textContent = why || '';
+  renderStars($('endStars'), st);
+  $('nextBtn').hidden = !win || lvIdx + 1 >= LEVELS.length;
   $('overlay').classList.add('show');
   sfx(win ? 'win' : 'over');
-  syncHud();
-  needsDraw = true;
+  syncHud(); needsDraw = true;
 }
 
+function renderStars(el, n){
+  el.innerHTML = '';
+  for (let i = 0; i < 3; i++){
+    const s = document.createElement('span');
+    s.className = 'star' + (i < n ? ' on' : '');
+    s.textContent = '★';
+    el.appendChild(s);
+  }
+}
+
+// ── 飘字 / 消除动画 ──
 let toastT = 0;
 function toast(text){
   const el = $('toast');
   el.textContent = text;
-  el.classList.remove('show');
-  void el.offsetWidth;
-  el.classList.add('show');
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
   clearTimeout(toastT);
   toastT = setTimeout(() => el.classList.remove('show'), 1000);
 }
-
-// ── 消除动画 ──
-function addPop(r, c, color, fall){
-  pops.push({ x: cellX(r, c), y: cellY(r), c: color, t: 0, fall: !!fall, vy: fall ? 60 + Math.random() * 90 : 0 });
+function addFloat(r, c, text){
+  floats.push({ x: cellX(r, c), y: cellY(r), text, t: 0 });
+}
+function addPop(r, c, color, fall, type){
+  pops.push({
+    x: cellX(r, c), y: cellY(r), color, t: 0, fall: !!fall, type,
+    vx: fall ? (Math.random() - .5) * 120 : 0,
+    vy: fall ? 40 + Math.random() * 80 : 0,
+  });
 }
 function stepPops(dt){
+  const s = dt / 1000;
   for (let i = pops.length - 1; i >= 0; i--){
     const p = pops[i];
     p.t += dt;
-    if (p.fall){ p.vy += 900 * dt / 1000; p.y += p.vy * dt / 1000; }
-    if (p.t > (p.fall ? 900 : 260) || p.y > H + R) pops.splice(i, 1);
+    if (p.fall){
+      p.vy += 1500 * s;
+      p.x += p.vx * s; p.y += p.vy * s;
+      // 撞到边就弹回来，比直上直下的掉落有质感
+      if (p.x < R){ p.x = R; p.vx = Math.abs(p.vx) * .7; }
+      if (p.x > W - R){ p.x = W - R; p.vx = -Math.abs(p.vx) * .7; }
+    }
+    if (p.t > (p.fall ? 1100 : 260) || p.y > H + R) pops.splice(i, 1);
   }
-  if (pops.length) needsDraw = true;
+  for (let i = floats.length - 1; i >= 0; i--){
+    const f = floats[i];
+    f.t += dt; f.y -= 34 * s;
+    if (f.t > 900) floats.splice(i, 1);
+  }
+  if (pops.length || floats.length) needsDraw = true;
 }
 
-// 把瞄准线走一遍，撞墙折回来，碰到泡泡或顶就停。
-// 只在角度变了的时候算，不是每帧。
+// 瞄准线走一遍，撞墙折回来，碰到泡泡或顶就停。只在角度变了时算，不是每帧。
 function traceAim(){
   const a = clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06);
   const pts = [{ x: W / 2, y: muzzleY() }];
   let x = W / 2, y = muzzleY();
-  const vx0 = Math.cos(a), vy0 = Math.sin(a);
-  let vx = vx0, vy = vy0;
+  let vx = Math.cos(a), vy = Math.sin(a);
   const stepLen = R * .55, hitR2 = (R * 1.86) ** 2;
   let bounces = 0;
   for (let i = 0; i < 260; i++){
@@ -302,14 +551,12 @@ function traceAim(){
     else if (x > W - R){ x = W - R; vx = -vx; pts.push({ x, y }); if (++bounces > 2) break; }
     if (y <= R){ pts.push({ x, y }); break; }
     let hit = false;
-    for (let r = 0; r < ROWS && !hit; r++){
-      const row = grid[r];
-      for (let c = 0; c < row.length; c++){
-        if (row[c] == null) continue;
+    for (let r = 0; r < ROWS && !hit; r++)
+      for (let c = 0; c < grid[r].length; c++){
+        if (!grid[r][c]) continue;
         const dx = x - cellX(r, c), dy = y - cellY(r);
         if (dx * dx + dy * dy < hitR2){ hit = true; break; }
       }
-    }
     if (hit) break;
   }
   pts.push({ x, y });
@@ -322,14 +569,12 @@ function layout(){
   const availW = wrap.clientWidth, availH = wrap.clientHeight;
   if (!availW || !availH) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
-  // 宽度决定半径；高度不够就再收一点
   let r = availW / (COLS * 2);
-  const needH = R_needH(r);
-  if (needH > availH) r *= availH / needH;
+  const needH = (rr) => rr + (DEAD_ROW + 0.6) * rr * SQ3 + rr * 4.0;
+  if (needH(r) > availH) r *= availH / needH(r);
   R = Math.floor(r);
   W = R * COLS * 2;
-  H = Math.round(R + (DEAD_ROW + 0.6) * R * SQ3 + R * 4.0);   // 底下那截留给小恐龙
-
+  H = Math.round(needH(R));
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
   canvas.width = Math.round(W * dpr);
@@ -340,7 +585,6 @@ function layout(){
   staticDirty = true; needsDraw = true;
   traceAim();
 }
-function R_needH(r){ return r + (DEAD_ROW + 0.6) * r * SQ3 + r * 4.0; }
 
 function ball(c, x, y, color, scale = 1, alpha = 1){
   const rr = R * scale;
@@ -356,6 +600,74 @@ function ball(c, x, y, color, scale = 1, alpha = 1){
   c.lineWidth = Math.max(1, rr * .07);
   c.stroke();
   c.restore();
+}
+
+// 石头：灰麻面 + 几道裂纹，一眼看出打不动
+function stoneBall(c, x, y, scale = 1, alpha = 1){
+  const rr = R * scale;
+  c.save();
+  c.globalAlpha = alpha;
+  const g = c.createRadialGradient(x - rr * .3, y - rr * .35, rr * .1, x, y, rr);
+  g.addColorStop(0, '#9aa7bd'); g.addColorStop(.6, '#67738a'); g.addColorStop(1, '#3b4557');
+  c.fillStyle = g;
+  c.beginPath(); c.arc(x, y, rr * .94, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(20,26,38,.7)'; c.lineWidth = Math.max(1, rr * .08); c.stroke();
+  c.strokeStyle = 'rgba(30,38,54,.55)'; c.lineWidth = Math.max(1, rr * .09);
+  c.beginPath();
+  c.moveTo(x - rr * .5, y - rr * .12); c.lineTo(x - rr * .06, y + rr * .16); c.lineTo(x + rr * .42, y - rr * .3);
+  c.stroke();
+  c.restore();
+}
+
+// 冰冻：底下那颗颜色透出来，外面罩一层带棱的冰壳；裂了一次的冰壳更薄
+function iceBall(c, x, y, color, hp, scale = 1, alpha = 1){
+  ball(c, x, y, color, scale, alpha * (hp >= 2 ? .5 : .75));
+  const rr = R * scale;
+  c.save();
+  c.globalAlpha = alpha * (hp >= 2 ? .92 : .6);
+  const g = c.createRadialGradient(x - rr * .3, y - rr * .4, rr * .1, x, y, rr);
+  g.addColorStop(0, 'rgba(235,250,255,.85)');
+  g.addColorStop(.6, 'rgba(150,215,240,.45)');
+  g.addColorStop(1, 'rgba(90,150,190,.55)');
+  c.fillStyle = g;
+  c.beginPath(); c.arc(x, y, rr * .94, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(225,248,255,.9)'; c.lineWidth = Math.max(1, rr * .09); c.stroke();
+  c.strokeStyle = 'rgba(255,255,255,.8)'; c.lineWidth = Math.max(1, rr * .07);
+  c.beginPath();
+  if (hp >= 2){ c.moveTo(x - rr * .45, y - rr * .2); c.lineTo(x + rr * .1, y + rr * .45); }
+  c.moveTo(x + rr * .12, y - rr * .5); c.lineTo(x - rr * .2, y + rr * .1); c.lineTo(x + rr * .45, y + rr * .35);
+  c.stroke();
+  c.restore();
+}
+
+// 目标物：一颗要救出去的星星
+function goalBall(c, x, y, scale = 1, alpha = 1){
+  const rr = R * scale;
+  c.save();
+  c.globalAlpha = alpha;
+  const g = c.createRadialGradient(x - rr * .3, y - rr * .35, rr * .1, x, y, rr);
+  g.addColorStop(0, '#fff6cc'); g.addColorStop(.6, '#facc15'); g.addColorStop(1, '#b45309');
+  c.fillStyle = g;
+  c.beginPath(); c.arc(x, y, rr * .94, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(120,70,10,.7)'; c.lineWidth = Math.max(1, rr * .08); c.stroke();
+  c.fillStyle = '#7c4a03';
+  c.beginPath();
+  for (let i = 0; i < 10; i++){
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    const k = i % 2 ? rr * .26 : rr * .58;
+    const px = x + Math.cos(a) * k, py = y + Math.sin(a) * k;
+    i ? c.lineTo(px, py) : c.moveTo(px, py);
+  }
+  c.closePath(); c.fill();
+  c.restore();
+}
+
+function drawCell(c, r, col, b, scale = 1, alpha = 1){
+  const x = cellX(r, col), y = cellY(r);
+  if (b.t === 's') stoneBall(c, x, y, scale, alpha);
+  else if (b.t === 'i') iceBall(c, x, y, COLORS[b.c], b.hp, scale, alpha);
+  else if (b.t === 'g') goalBall(c, x, y, scale, alpha);
+  else ball(c, x, y, COLORS[b.c], scale, alpha);
 }
 
 // 泡泡龙的发射器本来就是只小恐龙（Bub），把它画出来：
@@ -434,7 +746,6 @@ function drawDino(c, cx, cy, a){
 
 function drawStatic(){
   bgCtx.clearRect(0, 0, W, H);
-  // 死亡线；还剩两行以内就烧红加粗，提前给个警告
   const near = DEAD_ROW - topRow();
   const hot = near <= 2;
   const dy = cellY(DEAD_ROW) - R * .9;
@@ -451,11 +762,41 @@ function drawStatic(){
     bgCtx.fillRect(0, dy - R * 2.2, W, R * 2.2);
   }
   bgCtx.restore();
-
   for (let r = 0; r < ROWS; r++)
     for (let c = 0; c < colsIn(r); c++)
-      if (grid[r][c] != null) ball(bgCtx, cellX(r, c), cellY(r), COLORS[grid[r][c]]);
+      if (grid[r][c]) drawCell(bgCtx, r, c, grid[r][c]);
   staticDirty = false;
+}
+
+// 手里/下一颗的画法：道具有自己的样子
+function handBall(c, x, y, item, rr){
+  const keep = R; R = rr;
+  if (item && item.power) powerBall(c, x, y, item.power, 1);
+  else ball(c, x, y, COLORS[item && item.c >= 0 ? item.c : 0]);
+  R = keep;
+}
+function powerBall(c, x, y, kind, scale = 1){
+  const rr = R * scale;
+  const tint = kind === 'bomb' ? '#f97316' : kind === 'laser' ? '#38bdf8' : '#e879f9';
+  ball(c, x, y, tint, scale);
+  c.save();
+  c.translate(x, y);
+  c.strokeStyle = '#fff'; c.fillStyle = '#fff';
+  c.lineWidth = Math.max(1.5, rr * .12);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  if (kind === 'bomb'){
+    c.beginPath(); c.arc(0, rr * .1, rr * .36, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.moveTo(rr * .2, -rr * .26); c.quadraticCurveTo(rr * .55, -rr * .6, rr * .3, -rr * .72); c.stroke();
+  } else if (kind === 'laser'){
+    c.beginPath(); c.moveTo(0, -rr * .55); c.lineTo(0, rr * .55); c.stroke();
+    c.beginPath(); c.moveTo(-rr * .28, -rr * .2); c.lineTo(0, -rr * .55); c.lineTo(rr * .28, -rr * .2); c.stroke();
+  } else {
+    for (let i = 0; i < 3; i++){
+      c.globalAlpha = .55 + i * .15;
+      c.beginPath(); c.arc(0, rr * .35, rr * (.28 + i * .17), Math.PI * 1.08, Math.PI * 1.92); c.stroke();
+    }
+  }
+  c.restore();
 }
 
 function draw(){
@@ -464,61 +805,71 @@ function draw(){
   if (staticDirty) drawStatic();
   ctx.drawImage(bg, 0, 0, W, H);
 
-  // 消除 / 掉落动画
   for (const p of pops){
-    if (p.fall) ball(ctx, p.x, p.y, COLORS[p.c], 1, Math.max(0, 1 - p.t / 900));
-    else {
-      const k = p.t / 260;
-      ball(ctx, p.x, p.y, COLORS[p.c], 1 + k * .5, Math.max(0, 1 - k));
-    }
+    const a = p.fall ? Math.max(0, 1 - p.t / 1100) : Math.max(0, 1 - p.t / 260);
+    const sc = p.fall ? 1 : 1 + (p.t / 260) * .5;
+    const keep = R;
+    ctx.save(); ctx.globalAlpha = a;
+    if (p.type === 's') stoneBall(ctx, p.x, p.y, sc, 1);
+    else if (p.type === 'g') goalBall(ctx, p.x, p.y, sc, 1);
+    else ball(ctx, p.x, p.y, p.color, sc, 1);
+    ctx.restore();
+    R = keep;
   }
 
-  // 瞄准线（含撞墙反弹），末端画个落点圈
+  for (const f of floats){
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, 1 - f.t / 900);
+    ctx.fillStyle = '#facc15';
+    ctx.font = `600 ${Math.round(R * .78)}px "Noto Sans SC", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.restore();
+  }
+
   if (!over && !shot && started && aimPath.length > 1){
     ctx.save();
     ctx.strokeStyle = 'rgba(190,220,255,.32)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 8]);
+    ctx.lineWidth = 2; ctx.setLineDash([5, 8]);
     ctx.beginPath();
     ctx.moveTo(aimPath[0].x, aimPath[0].y);
     for (let i = 1; i < aimPath.length; i++) ctx.lineTo(aimPath[i].x, aimPath[i].y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.stroke(); ctx.setLineDash([]);
     const e = aimPath[aimPath.length - 1];
     ctx.globalAlpha = .5;
-    ctx.strokeStyle = COLORS[cur];
+    ctx.strokeStyle = cur.power ? '#e879f9' : COLORS[cur.c];
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(e.x, e.y, R * .9, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
 
-  // 飞行中的
-  if (shot) ball(ctx, shot.x, shot.y, COLORS[shot.c]);
+  if (shot){
+    if (shot.power === 'laser'){
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120,210,255,.75)';
+      ctx.lineWidth = R * .5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(shot.x, shot.y); ctx.lineTo(shot.x - shot.vx * .05, shot.y - shot.vy * .05);
+      ctx.stroke(); ctx.restore();
+    }
+    if (shot.power) powerBall(ctx, shot.x, shot.y, shot.power);
+    else ball(ctx, shot.x, shot.y, COLORS[shot.c]);
+  }
 
-  // 小恐龙 + 它嘴上叼着的那颗
   if (!over){
     drawDino(ctx, W / 2, muzzleY(), clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06));
-    if (!shot) ball(ctx, W / 2, muzzleY(), COLORS[cur]);
-
-    // 旁边的「下一颗」，点它就换手
+    if (!shot) handBall(ctx, W / 2, muzzleY(), cur, R);
     const n = nextSpot();
     ctx.save();
     ctx.globalAlpha = .9;
     ctx.strokeStyle = 'rgba(150,180,230,.30)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([3, 4]);
+    ctx.lineWidth = 1.5; ctx.setLineDash([3, 4]);
     ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 1.35, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
-    const keep = R; R = n.r;
-    ball(ctx, n.x, n.y, COLORS[next]);
-    R = keep;
+    handBall(ctx, n.x, n.y, next, n.r);
   }
 }
 
-// 「下一颗」摆在小恐龙右手边
-function nextSpot(){
-  return { x: W / 2 + R * 2.6, y: muzzleY() + R * 2.1, r: R * .62 };
-}
+function nextSpot(){ return { x: W / 2 + R * 2.6, y: muzzleY() + R * 2.1, r: R * .62 }; }
 
 function mix(a, b, t){
   const A = hex(a), B = hex(b);
@@ -528,33 +879,80 @@ function hex(h){
   return h.length === 4 ? h.slice(1).split('').map(x => parseInt(x + x, 16))
                         : [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 }
+function topRow(){
+  for (let r = ROWS - 1; r >= 0; r--)
+    for (let c = 0; c < colsIn(r); c++) if (grid[r][c]) return r;
+  return 0;
+}
 
-function drawNext(){
+// ── HUD / 选关 ──
+function syncHud(){
+  $('lvName').textContent = `${lvIdx + 1} · ${lv ? lv.name : ''}`;
+  $('score').textContent = score.toLocaleString();
+  $('shots').textContent = shotsLeft;
+  $('shotsCell').classList.toggle('warn', shotsLeft <= 5);
+  const goalCell = $('goalCell');
+  if (lv && lv.goal === 'rescue'){
+    goalCell.querySelector('span').textContent = '救出';
+    $('goal').textContent = `${rescued}/${needRescue}`;
+  } else {
+    goalCell.querySelector('span').textContent = '目标';
+    $('goal').textContent = '清空';
+  }
+  renderPowers();
+  drawNextMini();
+}
+
+function renderPowers(){
+  const bar = $('powerBar');
+  bar.innerHTML = '';
+  for (let i = 0; i < 3; i++){
+    const b = document.createElement('button');
+    b.className = 'pw' + (powers[i] ? ' has' : '');
+    b.disabled = !powers[i];
+    b.setAttribute('aria-label', powers[i] ? '使用道具' : '空道具位');
+    if (powers[i]){
+      const cv = document.createElement('canvas');
+      const d = 34, dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = d * dpr; cv.height = d * dpr;
+      cv.style.width = cv.style.height = d + 'px';
+      const c = cv.getContext('2d');
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const keep = R; R = d * .44;
+      powerBall(c, d / 2, d / 2, powers[i]);
+      R = keep;
+      b.appendChild(cv);
+      b.addEventListener('click', () => armPower(i));
+    }
+    bar.appendChild(b);
+  }
+}
+
+function drawNextMini(){
   const cv = $('nextCv'), c = cv.getContext('2d');
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = cv.clientWidth, h = cv.clientHeight;
-  if (!w || !h) return;
+  if (!w || !h || !next) return;
   cv.width = w * dpr; cv.height = h * dpr;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, w, h);
-  const keep = R;
-  R = Math.min(w, h) * .42;
-  ball(c, w / 2, h / 2, COLORS[next]);
-  R = keep;
+  handBall(c, w / 2, h / 2, next, Math.min(w, h) * .42);
 }
 
-function syncHud(){
-  $('score').textContent = score.toLocaleString();
-  $('best').textContent = best.toLocaleString();
-  const left = Math.max(0, DEAD_ROW - topRow());
-  $('rows').textContent = left;
-  $('rowsCell').classList.toggle('warn', left <= 2);
-  drawNext();
-}
-function topRow(){
-  for (let r = ROWS - 1; r >= 0; r--)
-    for (let c = 0; c < colsIn(r); c++) if (grid[r][c] != null) return r;
-  return 0;
+function openLevels(){
+  const box = $('lvGrid');
+  box.innerHTML = '';
+  LEVELS.forEach((L, i) => {
+    const locked = i + 1 > prog.unlocked;
+    const b = document.createElement('button');
+    b.className = 'lv' + (locked ? ' locked' : '') + (i === lvIdx ? ' cur' : '');
+    b.disabled = locked;
+    b.innerHTML = `<b>${i + 1}</b><i>${L.name}</i><u>${'★'.repeat(starsOf(i))}${'☆'.repeat(3 - starsOf(i))}</u>`;
+    if (!locked) b.addEventListener('click', () => { $('lvSheet').hidden = true; loadLevel(i); });
+    box.appendChild(b);
+  });
+  $('lvStars').textContent = `${totalStars()} / ${LEVELS.length * 3}`;
+  $('lvSheet').hidden = false;
 }
 
 // ── 主循环 ──
@@ -564,8 +962,8 @@ function tick(now){
   lastT = now;
   if (over){ if (needsDraw){ draw(); needsDraw = false; } return; }
   if (shot) step(dt);
-  if (pops.length) stepPops(dt);
-  if (needsDraw || shot || pops.length){ draw(); needsDraw = false; }
+  if (pops.length || floats.length) stepPops(dt);
+  if (needsDraw || shot || pops.length || floats.length){ draw(); needsDraw = false; }
 }
 
 // ── 输入：拖着瞄，松手发 ──
@@ -578,22 +976,21 @@ function bindAim(){
   };
   const setAim = (p) => {
     const dx = p.x - W / 2, dy = p.y - muzzleY();
-    if (dy > -R * .4) return;                 // 别往下瞄
+    if (dy > -R * .4) return;
     aim = Math.atan2(dy, dx);
-    traceAim();
-    needsDraw = true;
+    traceAim(); needsDraw = true;
   };
   const start = (e) => {
     if (over || shot) return;
     const p = point(e), n = nextSpot();
-    if (Math.hypot(p.x - n.x, p.y - n.y) < n.r * 1.9){ swap(); return; }   // 点到「下一颗」= 换手
+    if (Math.hypot(p.x - n.x, p.y - n.y) < n.r * 1.9){ swap(); return; }
     aiming = true; setAim(p);
   };
-  const move  = (e) => { if (!aiming) return; setAim(point(e)); };
-  const end   = () => { if (!aiming) return; aiming = false; fire(); };
+  const move = (e) => { if (!aiming) return; setAim(point(e)); };
+  const end = () => { if (!aiming) return; aiming = false; fire(); };
 
-  wrap.addEventListener('touchstart', (e) => { start(e); }, { passive: true });
-  wrap.addEventListener('touchmove',  (e) => { move(e); }, { passive: true });
+  wrap.addEventListener('touchstart', start, { passive: true });
+  wrap.addEventListener('touchmove', move, { passive: true });
   wrap.addEventListener('touchend', end, { passive: true });
   wrap.addEventListener('mousedown', start);
   window.addEventListener('mousemove', move);
@@ -604,7 +1001,10 @@ function bindAim(){
     if (e.code === 'ArrowRight'){ aim += .06; needsDraw = true; }
     if (e.code === 'Space'){ e.preventDefault(); fire(); }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'ArrowDown'){ e.preventDefault(); swap(); }
-    if (e.code === 'KeyR') restart();
+    if (e.code === 'KeyR') loadLevel(lvIdx);
+    if (e.code === 'Digit1') armPower(0);
+    if (e.code === 'Digit2') armPower(1);
+    if (e.code === 'Digit3') armPower(2);
     aim = clamp(aim, -Math.PI * 0.94, -Math.PI * 0.06);
     traceAim();
   });
@@ -613,11 +1013,8 @@ function bindAim(){
 // ── 音效 ──
 let actx = null, muted = false;
 
-// new AudioContext() 要起音频线程，实测要 240ms。懒到「第一次出声时」才建，
-// 那一下就是肉眼可见的卡顿（扫雷首次挖格子卡 244ms 就是这么来的）；
-// 挪到首次手势也只是换个地方卡。所以在加载后的空闲期就建好 —— 那时候
-// 没有动画在跑，付得起。手势里只做 resume()，那个是便宜的。
-// 没手势时建出来是 suspended 状态，合规，贵的那一步已经付掉了。
+// new AudioContext() 要起音频线程，实测 240ms。懒到「第一次出声时」才建，
+// 那一下就是肉眼可见的卡顿，所以挪到加载后的空闲期建好，手势里只做 resume()。
 function primeAudio(){
   if (actx) return;
   try {
@@ -644,6 +1041,9 @@ const SPECS = {
   stick: { f: 300, to: 240,  d: .05, v: .022, type: 'triangle' },
   pop:   { f: 620, to: 900,  d: .12, v: .04,  type: 'sine' },
   big:   { f: 520, to: 1180, d: .26, v: .055, type: 'triangle' },
+  boom:  { f: 220, to: 70,   d: .32, v: .07,  type: 'triangle' },
+  power: { f: 760, to: 1500, d: .18, v: .05,  type: 'square' },
+  grant: { f: 880, to: 1320, d: .16, v: .045, type: 'sine' },
   win:   { f: 560, to: 1120, d: .34, v: .055, type: 'sine' },
   over:  { f: 280, to: 62,   d: .55, v: .06,  type: 'triangle' },
 };
@@ -653,7 +1053,6 @@ function sfx(k){
   try {
     unlockAudio();
     if (!actx || actx.state === 'closed') return;
-    if (actx.state === 'suspended') actx.resume();
     const t = actx.currentTime;
     const o = actx.createOscillator(), g = actx.createGain();
     o.connect(g); g.connect(actx.destination);
@@ -666,19 +1065,27 @@ function sfx(k){
   } catch { /* 没声音就算了 */ }
 }
 
+// ── 启动 ──
 function init(){
-  try {
-    best = +localStorage.getItem(BEST_KEY) || 0;
-    muted = localStorage.getItem('bubble.muted.v1') === '1';
-  } catch { /* 忽略 */ }
-  newGrid();
+  prog = readProg();
+  try { muted = localStorage.getItem('bubble.muted.v1') === '1'; } catch { /* 忽略 */ }
+  lv = LEVELS[0];
+  for (let r = 0; r < ROWS; r++) grid.push(new Array(colsIn(r)).fill(null));
   layout();
   bindAim();
   syncMute();
 
-  $('startBtn').addEventListener('click', restart);
-  $('againBtn').addEventListener('click', restart);
-  $('restartBtn').addEventListener('click', restart);
+  $('startBtn').addEventListener('click', () => {
+    $('overlay').classList.remove('show');
+    loadLevel(Math.min(prog.unlocked - 1, LEVELS.length - 1));
+  });
+  $('againBtn').addEventListener('click', () => loadLevel(lvIdx));
+  $('nextBtn').addEventListener('click', () => loadLevel(lvIdx + 1));
+  $('restartBtn').addEventListener('click', () => { if (started) loadLevel(lvIdx); });
+  $('lvBtn').addEventListener('click', openLevels);
+  $('lvClose').addEventListener('click', () => { $('lvSheet').hidden = true; });
+  $('lvSheet').addEventListener('click', (e) => { if (e.target.id === 'lvSheet') $('lvSheet').hidden = true; });
+  $('pickBtn').addEventListener('click', () => { $('overlay').classList.remove('show'); openLevels(); });
   $('fireBtn').addEventListener('click', fire);
   $('muteBtn').addEventListener('click', () => {
     muted = !muted;
@@ -692,6 +1099,7 @@ function init(){
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
 
   $('overlay').dataset.mode = 'start';
+  $('startLv').textContent = `${Math.min(prog.unlocked, LEVELS.length)} / ${LEVELS.length}`;
   $('overlay').classList.add('show');
   syncHud();
   draw();
@@ -703,9 +1111,13 @@ function syncMute(){
 
 window.__bubble = {
   get grid(){ return grid; },
-  get state(){ return { score, best, shots, over, won, started, R, W, H, cur, next, shot: !!shot, rows }; },
-  restart, fire, swap, land: () => land(), checkEnd, dropFloating,
+  get state(){ return { lvIdx, name: lv && lv.name, goal: lv && lv.goal, score, shotsLeft, fired,
+                        combo, rescued, needRescue, powers: powers.slice(), over, won, started,
+                        R, W, H, cur, next, shot: !!shot, unlocked: prog.unlocked, stars: { ...prog.stars } }; },
+  LEVELS, loadLevel, fire, swap, armPower, grantPower, dropFloating, checkEnd,
+  land: () => land(), pushDown,
   setAim: (a) => { aim = a; traceAim(); needsDraw = true; },
+  give: (p) => { powers.push(p); syncHud(); },
   colsIn, neighbours, COLORS, DEAD_ROW, ROWS, COLS,
 };
 
