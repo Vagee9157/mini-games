@@ -18,18 +18,21 @@ const mono = (c) => ({ mono: true, I:c, O:c, T:c, S:c, Z:c, J:c, L:c });
 const PALETTES = {
   classic: { I:'#22d3ee', O:'#fbbf24', T:'#a855f7', S:'#4ade80', Z:'#f43f5e', J:'#3b82f6', L:'#fb923c' },
   clear:   { I:'#5ee7f5', O:'#f2c14e', T:'#a463dd', S:'#56c877', Z:'#e8546b', J:'#3f6fd0', L:'#ef8f4a' },
+  // 原版：Tetris Guideline 规定的七色，街机厅里那套。
+  // 纯 #0000F0 在深色底上太沉，J 往上提了一点，其余照搬。
+  guide:   { I:'#00f0f0', O:'#f0f000', T:'#a000f0', S:'#00f000', Z:'#f00000', J:'#2b3df0', L:'#f0a000' },
+  // 马卡龙：同一套色相，明度拉高饱和度压低，久看不刺眼
+  candy:   { I:'#7fe3e8', O:'#f5d77a', T:'#c49be8', S:'#93dda1', Z:'#f2938f', J:'#8faee8', L:'#f0b87e' },
   // 单色：只看形状，不看颜色
   cyan:  mono('#4fd8e8'),   // 和界面同一个调子
-  amber: mono('#f0b849'),   // 八十年代那种琥珀色单色显示器，暖、低蓝光
-  paper: mono('#d5e0f2'),   // 月白，最接近线稿
   mint:  mono('#5fd99a'),   // 老绿屏终端的味道
 };
 
 const PAL_NAMES = {
-  clear: '高区分', classic: '原配色',
-  cyan: '青', amber: '琥珀', paper: '月白', mint: '薄荷',
+  clear: '高区分', classic: '霓虹', guide: '原版', candy: '马卡龙',
+  cyan: '青', mint: '薄荷',
 };
-const PAL_ORDER = ['clear', 'classic', 'cyan', 'amber', 'paper', 'mint'];
+const PAL_ORDER = ['clear', 'classic', 'guide', 'candy', 'cyan', 'mint'];
 
 // 四种画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
 const STYLES = {
@@ -1078,23 +1081,62 @@ function buzz(pattern){
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch { /* 忽略 */ }
 }
 
-// 每个音效一到两层。手机外放喇叭放不出 300Hz 以下的东西，
-// 原来 lock 150Hz、drop 190→85Hz 在电脑上听得见，到 iPhone 上就是没声音。
-// 所以基频全部抬进 300Hz 以上，低频那口"闷"改用一层高频 click 来代替。
+// 音效走 8-bit 手法，不是连续滑音：
+//   1) 脉冲波（占空比 12.5% / 25%）代替正弦三角 —— 老主机的方波通道就这个音色
+//   2) 阶梯式跳音代替 glide —— 一串离散的音快速走完，才有"叮叮叮"的颗粒感
+//   3) 落底另开一路噪声，当作老主机的噪声通道，砸下去那一下才有质感
+// 频率全部保持在 260Hz 以上，手机外放才放得出来。
 const SPECS = {
-  rotate: [{ f: 640,  to: 790, d: .045, v: .070, type: 'triangle' }],
-  lock:   [{ f: 320,  to: 230, d: .060, v: .055, type: 'triangle' },
-           { f: 940,  to: 720, d: .022, v: .028, type: 'sine' }],
-  // 落底要有"砸实"的感觉：一层下沉的身子 + 一层短促的撞击
-  drop:   [{ f: 440,  to: 165, d: .105, v: .120, type: 'triangle' },
-           { f: 1450, to: 620, d: .032, v: .050, type: 'square' }],
-  clear:  [{ f: 620,  to: 940, d: .150, v: .075, type: 'sine' }],
-  tetris: [{ f: 520,  to: 1240, d: .26, v: .100, type: 'triangle' },
-           { f: 784,  to: 1568, d: .24, v: .040, type: 'sine', delay: .045 }],
-  level:  [{ f: 680,  to: 1020, d: .16, v: .065, type: 'sine' }],
-  hold:   [{ f: 470,  to: 560, d: .055, v: .050, type: 'sine' }],
-  over:   [{ f: 520,  to: 150, d: .60,  v: .085, type: 'triangle' }],
+  // 转一下：短促两段上跳
+  rotate: { duty:.25,  v:.085, step:.026, notes:[988, 1319] },
+  // 自然落地：闷一点的两段下跳
+  lock:   { duty:.125, v:.060, step:.024, notes:[392, 294] },
+  // 落底：快速滑梯 + 噪声撞击
+  drop:   { duty:.25,  v:.115, step:.016, notes:[1047, 784, 587, 392, 294], noise:{ v:.075, d:.07, hp:900 } },
+  // 消行：上行琶音
+  clear:  { duty:.25,  v:.100, step:.044, notes:[523, 659, 784, 1047] },
+  // 四行：更长的号角，加一层上方五度
+  tetris: { duty:.25,  v:.115, step:.052, notes:[523, 659, 784, 1047, 1319, 1568, 2093], harm:true },
+  level:  { duty:.25,  v:.090, step:.055, notes:[784, 1047, 1319, 1568] },
+  hold:   { duty:.25,  v:.070, step:.024, notes:[440, 587] },
+  // 结束：一路掉下去
+  over:   { duty:.125, v:.100, step:.105, notes:[523, 392, 330, 262, 196, 147] },
 };
+
+// 脉冲波要自己合成。占空比 d 的方波，第 n 次谐波幅度 = 2/(nπ)·sin(nπd)，
+// 建一次缓存起来，别每个音效都算一遍。
+const waveCache = new Map();
+function pulseWave(duty){
+  const key = duty;
+  if (waveCache.has(key)) return waveCache.get(key);
+  const N = 22;
+  const real = new Float32Array(N + 1), imag = new Float32Array(N + 1);
+  for (let n = 1; n <= N; n++) real[n] = 2 / (n * Math.PI) * Math.sin(n * Math.PI * duty);
+  const w = actx.createPeriodicWave(real, imag, { disableNormalization: false });
+  waveCache.set(key, w);
+  return w;
+}
+
+// 噪声通道。一段白噪声缓存着反复用，比每次现生成便宜得多。
+let noiseBuf = null;
+function noiseHit(t, cfg){
+  if (!noiseBuf){
+    noiseBuf = actx.createBuffer(1, actx.sampleRate * .3, actx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const src = actx.createBufferSource();
+  src.buffer = noiseBuf;
+  const hp = actx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = cfg.hp || 800;
+  const g = actx.createGain();
+  src.connect(hp); hp.connect(g); g.connect(actx.destination);
+  const v = Math.min(.9, cfg.v * SFX_GAIN);
+  g.gain.setValueAtTime(v, t);
+  g.gain.exponentialRampToValueAtTime(.0001, t + cfg.d);
+  src.start(t, Math.random() * .2);
+  src.stop(t + cfg.d + .02);
+}
 
 // iOS 上 AudioContext 只能在用户手势里创建/恢复，否则一直 suspended、永远没声。
 // 所以第一次触碰屏幕就把它开起来，不等第一个音效。
@@ -1114,30 +1156,34 @@ const SFX_GAIN = 1.9;
 
 function sfx(kind){
   if (muted) return;
-  const layers = SPECS[kind];
-  if (!layers) return;
+  const spec = SPECS[kind];
+  if (!spec) return;
   try {
     unlockAudio();
     if (!actx || actx.state !== 'running') return;
     const t0 = actx.currentTime;
-    for (const spec of layers){
-      const t = t0 + (spec.delay || 0);
-      const o = actx.createOscillator();
-      const g = actx.createGain();
+    const dur = spec.step * spec.notes.length;
+    const wave = pulseWave(spec.duty);
+    const voice = (mul, vol) => {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.setPeriodicWave(wave);
+      // 一个振荡器走完整串音：频率按格子跳，不做插值
+      spec.notes.forEach((f, i) => o.frequency.setValueAtTime(f * mul, t0 + i * spec.step));
       o.connect(g); g.connect(actx.destination);
-      o.type = spec.type;
-      o.frequency.setValueAtTime(spec.f, t);
-      o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
-      // 直接 setValueAtTime 会"啪"一下削波；1.5ms 足够不爆音，
-      // 再长就开始听得出「软了一下才出来」
-      g.gain.setValueAtTime(.0001, t);
-      g.gain.exponentialRampToValueAtTime(Math.min(.9, spec.v * SFX_GAIN), t + .0015);
-      g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
-      o.start(t);
-      o.stop(t + spec.d + .02);
-    }
+      const v = Math.min(.9, vol * SFX_GAIN);
+      g.gain.setValueAtTime(.0001, t0);
+      g.gain.exponentialRampToValueAtTime(v, t0 + .0015);
+      g.gain.setValueAtTime(v, t0 + Math.max(.002, dur - .028));
+      g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+      o.start(t0);
+      o.stop(t0 + dur + .02);
+    };
+    voice(1, spec.v);
+    if (spec.harm) voice(1.5, spec.v * .3);      // 上方纯五度，厚一点但不抢
+    if (spec.noise) noiseHit(t0, spec.noise);
   } catch { /* 浏览器不给声音就静音运行 */ }
 }
+
 
 // ───────────────────────── 背景音乐 ─────────────────────────
 
@@ -1194,7 +1240,9 @@ function musicBus(){
     // 方波直接出来太扎耳朵，过一道低通削掉高次谐波，剩下老掌机那种闷闷的味道
     const lp = actx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 2000;
+    // 2000 太闷了，手机喇叭本来就放不出低频，再把高次谐波削光就什么都不剩。
+    // 「不尖锐」靠的是下面那个 34ms 的慢起音，不是靠削高频。
+    lp.frequency.value = 2600;
     lp.Q.value = .4;
     musicGain.connect(lp);
     lp.connect(actx.destination);
@@ -1208,8 +1256,8 @@ function playNote(m, t, dur, kind){
   // 音尾收得早 = 断奏，比拖满音符时值轻快得多。
   // atk 是起音时长：低音原来 12ms 起，四下一小节听着像敲鼓，拉到 34ms 就柔了。
   const cfg = kind === 'bass'
-    ? { type: 'triangle', v: .072, rel: .60, atk: .034 }
-    : { type: 'square',   v: .058, rel: .52, atk: .016 };
+    ? { type: 'triangle', v: .090, rel: .60, atk: .034 }
+    : { type: 'square',   v: .080, rel: .52, atk: .016 };
   const o = actx.createOscillator();
   const g = actx.createGain();
   o.type = cfg.type;
@@ -1255,7 +1303,7 @@ function musicStart(){
   const bus = musicBus();
   bus.gain.cancelScheduledValues(actx.currentTime);
   bus.gain.setValueAtTime(Math.max(.0001, bus.gain.value), actx.currentTime);
-  bus.gain.linearRampToValueAtTime(.42, actx.currentTime + .5);
+  bus.gain.linearRampToValueAtTime(.75, actx.currentTime + .5);
   if (mTimer) return;
   mAt = actx.currentTime + .12;
   scheduleMusic();
