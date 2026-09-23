@@ -67,7 +67,6 @@ body{
 }
 .tbtn:hover{ color: var(--ink); border-color: var(--line-2); }
 .tbtn.off{ color: var(--ink-dim); }
-#fsBtn{ color: var(--n-cyan); border-color: rgba(34,211,238,.34); }
 
 /* ── 主区 ── */
 .stage{
@@ -535,11 +534,11 @@ body{
   @media (max-width: 859px){
     .bar{ gap: 6px; padding: 8px 2px 2px; }
     .bar h1{ display: none; }        /* 按钮多了，手机上标题让位 */
-    .tbtn-ic span{ display: none; }  /* 游戏模式只留图标 */
-    .tbtn-ic{ padding: 6px 10px; font-size: 13px; }
+    /* 全屏键去掉之后腾出位置，文字可以留着 —— 光图标看不出「样式」是干嘛的 */
+    .tbtn-ic{ padding: 5px 10px 5px 8px; gap: 5px; }
+    .tbtn-ic svg{ width: 14px; height: 14px; }
     .back{ font-size: 11px; padding: 5px 9px 5px 7px; white-space: nowrap; }
     .tbtn{ font-size: 10.5px; padding: 6px 9px; }
-    #fsBtn{ font-size: 10.5px; }
 
     .stat{ padding: 3px 3px 4px; }
     .stat span{ font-size: 7.5px; letter-spacing: .06em; }
@@ -605,3 +604,17 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 @media (min-width: 860px) and (min-height: 620px){
   body.immersive .stage{ gap: 14px; }
 }
+
+/* 顶栏按钮：图标 + 文字，统一一档 */
+.tbtn-ic{ display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 10px; }
+.tbtn-ic svg{ width: 15px; height: 15px; display: block; flex: none; }
+.tbtn-ic span{ line-height: 1; }
+.tbtn:active{ transform: translateY(1px); }
+
+/* HOLD 是个可点的槽，让它看起来像按钮 */
+.slot.hold{ cursor: pointer; transition: border-color .16s, background .16s; }
+.slot.hold:hover, .slot.hold:focus-visible{
+  border-color: rgba(34,211,238,.38);
+  background: linear-gradient(150deg, rgba(34,211,238,.10), rgba(34,211,238,.02)), var(--panel);
+}
+.slot.hold:active{ transform: translateY(1px); }

@@ -296,7 +296,7 @@ function restoreGame(d){
   fillQueue();
   if (!game.piece) spawnNext();
   $('overlay').classList.remove('show');
-  $('pauseBtn').textContent = '暂停';
+  $('pauseTx').textContent = '暂停';
   syncHud();
   lastFrame = performance.now();
   cancelAnimationFrame(rafId);
@@ -981,6 +981,31 @@ function draw(){
   if (previewDirty){ drawPreview(); previewDirty = false; }
 }
 
+// HOLD 空着的时候原来就是一片黑，看着像坏了。
+// 画个虚线框加一支「收进去」的箭头，明示这儿可以点。
+function drawHoldHint(c, w, h){
+  if (!w || !h) return;
+  const s = Math.min(w, h) * .56;
+  const x = (w - s) / 2, y = (h - s) / 2;
+  c.save();
+  c.strokeStyle = 'rgba(150,180,230,.30)';
+  c.lineWidth = 1.5;
+  c.setLineDash([4, 4]);
+  roundRect(c, x, y, s, s, s * .22);
+  c.stroke();
+  c.setLineDash([]);
+  c.strokeStyle = 'rgba(150,180,230,.45)';
+  c.lineWidth = Math.max(1.5, s * .09);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const cx = w / 2, top = y + s * .24, bot = y + s * .60;
+  c.beginPath();
+  c.moveTo(cx, top); c.lineTo(cx, bot);
+  c.moveTo(cx - s * .18, bot - s * .18); c.lineTo(cx, bot); c.lineTo(cx + s * .18, bot - s * .18);
+  c.moveTo(x + s * .18, y + s * .76); c.lineTo(x + s * .82, y + s * .76);
+  c.stroke();
+  c.restore();
+}
+
 function drawPreview(){
   const nw = nextCv.clientWidth, nh = nextCv.clientHeight;
   nextCtx.clearRect(0, 0, nw, nh);
@@ -997,6 +1022,7 @@ function drawPreview(){
   const hw = holdCv.clientWidth, hh = holdCv.clientHeight;
   holdCtx.clearRect(0, 0, hw, hh);
   if (game.hold) drawMini(holdCtx, game.hold, 0, 0, hw, hh, game.holdUsed ? .28 : 1);
+  else drawHoldHint(holdCtx, hw, hh);
 }
 
 function drawMini(c, type, ox, oy, w, h, alpha){
@@ -1718,8 +1744,11 @@ function fsElement(){
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
 
+// 全屏键去掉了（iPhone 上 Safari 根本不给网页全屏，那个按钮点了没反应）。
+// immersive 这套还留着：从主屏图标启动时会自动进，不需要手动按。
 function syncFsBtn(){
   const on = document.body.classList.contains('immersive');
+  if (!$('fsBtn')) return;
   $('fsIc').textContent = on ? '✕' : '⛶';
   $('fsTx').textContent = on ? '退出' : '游戏模式';
   $('fsBtn').setAttribute('aria-label', on ? '退出游戏模式' : '进入游戏模式');
@@ -1811,7 +1840,7 @@ function restart(){
   softDropping = false;
   held.left = held.right = false;
   $('overlay').classList.remove('show');
-  $('pauseBtn').textContent = '暂停';
+  $('pauseTx').textContent = '暂停';
   fillQueue();
   spawnNext();
   syncHud();
@@ -1825,7 +1854,9 @@ function restart(){
 function togglePause(){
   if (!game.started || game.over) return;
   game.paused = !game.paused;
-  $('pauseBtn').textContent = game.paused ? '继续' : '暂停';
+  $('pauseTx').textContent = game.paused ? '继续' : '暂停';
+  // 暂停时图标换成播放三角，一眼知道再点一下是继续
+  $('pauseIc').setAttribute('d', game.paused ? 'M9 6.2 18 12l-9 5.8z' : 'M9.5 6.5v11M14.5 6.5v11');
   const ov = $('overlay');
   if (game.paused){
     ov.dataset.mode = 'pause';
@@ -1906,7 +1937,6 @@ function init(){
   $('pauseBtn').addEventListener('click', togglePause);
   $('restartBtn').addEventListener('click', restart);
   $('muteBtn').addEventListener('click', toggleMute);
-  $('fsBtn').addEventListener('click', toggleGameMode);
   $('skinBtn').addEventListener('click', () => toggleStylePanel());
   $('skinDone').addEventListener('click', () => toggleStylePanel(false));
   $('styleSheet').addEventListener('click', (e) => { if (e.target.id === 'styleSheet') toggleStylePanel(false); });
