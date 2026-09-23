@@ -125,10 +125,26 @@ const SOFT_DROP_FACTOR = 20; // 软降速度倍率
 // 不靠「越来越快」——那样后期只能拼手速。
 const GRAVITY = 800;
 
-// 垃圾行：一开始 30 秒一行，每升一级快 2.5 秒，最快 12 秒
+// 垃圾行。下落速度不变，所以「越玩越难」全靠这条线升得越来越快。
+//
+// 用指数衰减的曲线，不是按等级跳台阶：
+//   周期 = MIN + (MAX - MIN) · e^(-t / TAU)
+// 开局 28 秒一行，之后一路平滑压向 6.5 秒，前期掉得快、后期趋于稳定，
+// 不会出现「刚好卡在升级线上突然难一截」的断层。
+//
+// t 不是纯挂钟时间，而是 已玩时长 + 消行数 × 1.2 秒：
+// 光苟着不消行也会慢慢变难，消得多则难度跟着进度走，两边都不亏。
 const GARBAGE = 'X';
+const G_MAX = 28000;     // 开局周期
+const G_MIN = 6500;      // 最快能到多少
+const G_TAU = 165000;    // 衰减时间常数，越大掉得越慢
+const G_LINE_BONUS = 1200;
+
+function garbageClock(){
+  return game.elapsed + game.lines * G_LINE_BONUS;
+}
 function garbagePeriod(){
-  return Math.max(12000, 30000 - (game.level - 1) * 2500);
+  return G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
 }
 
 const STORE_KEY = 'tetris.best.v1';
@@ -172,6 +188,7 @@ function saveGame(force){
       combo: game.combo,
       b2b: game.b2b,
       garbage: game.garbage,
+      elapsed: game.elapsed,
       at: Date.now(),
     }));
   } catch { /* 存不下就算了，不影响玩 */ }
@@ -203,6 +220,7 @@ function restoreGame(d){
   game.combo = typeof d.combo === 'number' ? d.combo : -1;
   game.b2b = !!d.b2b;
   game.garbage = d.garbage || 0;
+  game.elapsed = d.elapsed || 0;
   garbageTimer = 0;
   game.over = false;
   game.paused = false;
@@ -259,6 +277,7 @@ const game = {
   paused: false,
   frozen: false,      // 样式面板开着时暂停推进，但画面照常刷新
   garbage: 0,         // 一共升起过几行
+  elapsed: 0,         // 实际推进过的毫秒（暂停、消行动画不算），灰线提速看它
   started: false,
   lastRotKick: -1,    // 最近一次旋转用了第几个踢墙偏移，判 T-spin 用
   lastWasRot: false,
@@ -1240,6 +1259,7 @@ function tick(now){
 
   // 灰线倒计时（消行动画期间不推进，免得叠在一起）
   if (!clearing && game.piece){
+    game.elapsed += dt;
     garbageTimer += dt;
     const period = garbagePeriod();
     if (garbageTimer >= period){
@@ -1588,6 +1608,7 @@ function restart(){
   game.frozen = false;
   game.started = true;
   game.garbage = 0;
+  game.elapsed = 0;
   garbageTimer = 0;
   staticDirty = true;
   previewDirty = true;
@@ -1738,7 +1759,7 @@ function init(){
 }
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
-window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage,
+window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
