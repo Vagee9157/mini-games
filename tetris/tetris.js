@@ -165,11 +165,23 @@ const G_MIN = 15000;     // 压到这里就不再往下
 const G_TAU = 300000;    // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 
+// 满级（20 级）之后的加压：每再升一级，灰线周期再收 3%，没有上限。
+// 不加这条的话三条难度线全有天花板，15 分钟之后难度就是一条水平线，
+// 实测接近满分的 AI 能连打 100 分钟不死（12000 块上限都撑得到）。
+// 挂在消行数上而不是时间上：能活过 171 行的人必然在持续消行，
+// 等于「打得越好压得越快」—— 这条反向激励只在满级之后才生效。
+const G_OVER_RATE = .97;
+const G_HARD_MIN = 1000;     // 再快也不低于 1 秒：到这份上谁都必死，
+                             // 而且一帧塞进好几行会直接卡死
+
 function garbageClock(){
   return game.elapsed + game.lines * G_LINE_BONUS;
 }
 function garbagePeriod(){
-  return G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
+  let p = G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
+  const over = game.level - MAX_LEVEL;
+  if (over > 0) p *= Math.pow(G_OVER_RATE, over);
+  return Math.max(G_HARD_MIN, p);
 }
 
 // ── 一次性清档 ──
@@ -179,6 +191,17 @@ function garbagePeriod(){
 // 只在记分规则变了、老分数变得够不着的时候才动它，别跟着每次发版改。
 const WIPE_TOKEN = '2026-09-23-scoring';
 const WIPE_KEY = 'tetris.wipe.v1';
+
+// 棋盘边框的「温度」。等级越高越往热的一头走：青 → 绿 → 琥珀 → 橙 → 红 → 品红，
+// 同时描边更粗、辉光更亮更散。满级之后换成常亮脉动的光环。
+const EDGE_STOPS = [
+  [1,  '#22d3ee'],
+  [5,  '#3ee0a6'],
+  [9,  '#f0c24a'],
+  [13, '#ff9442'],
+  [17, '#ff5470'],
+  [20, '#ff3ec8'],
+];
 
 const STORE_KEY = 'tetris.best.v1';
 const BUZZ_KEY  = 'tetris.buzz.v1';
@@ -254,6 +277,7 @@ function restoreGame(d){
   game.b2b = !!d.b2b;
   game.garbage = d.garbage || 0;
   game.elapsed = d.elapsed || 0;
+  syncEdge();
   garbageTimer = 0;
   game.over = false;
   game.paused = false;
@@ -604,8 +628,11 @@ function scoreFor(n, spin, perfect){
 
   if (n > 0){
     game.lines += n;
-    const newLevel = Math.min(MAX_LEVEL, Math.floor(game.lines / LINES_PER_LEVEL) + 1);
-    if (newLevel > game.level){ game.level = newLevel; flashLevel(); }
+    // 等级本身不封顶，一直往上涨；封顶的是它驱动的三件事：
+    // 速度在 gravityFor 里 clamp、倍率在 levelMult 里 clamp、
+    // 只有灰线在满级之后继续被它推快，所以再强的人也一定会撞墙。
+    const newLevel = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
+    if (newLevel > game.level){ game.level = newLevel; flashLevel(); syncEdge(); }
   }
   if (label) showToast(label.trim());
   if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
@@ -808,12 +835,47 @@ function roundRect(c, x, y, w, h, r){
   c.closePath();
 }
 
+function edgeColor(lvl){
+  const L = clamp(lvl, 1, EDGE_STOPS[EDGE_STOPS.length - 1][0]);
+  for (let i = 1; i < EDGE_STOPS.length; i++){
+    const [a, ca] = EDGE_STOPS[i - 1], [b, cb] = EDGE_STOPS[i];
+    if (L <= b) return mix(ca, cb, (L - a) / (b - a));
+  }
+  return EDGE_STOPS[EDGE_STOPS.length - 1][1];
+}
+function rgba(c, a){ const [r, g, b] = hex(c); return `rgba(${r},${g},${b},${a.toFixed(3)})`; }
+
+// 边框只在升级时重算一次，不进每帧的绘制循环
+function syncEdge(){
+  const L = game.level;
+  const t = clamp((Math.min(L, MAX_LEVEL) - 1) / (MAX_LEVEL - 1), 0, 1);
+  const c = edgeColor(L);
+  const st = canvas.style;
+  st.setProperty('--bd-w',    (1 + t * 1.4).toFixed(2) + 'px');
+  st.setProperty('--bd-ring', rgba(c, .18 + t * .52));
+  st.setProperty('--bd-glow', rgba(c, .09 + t * .30));
+  st.setProperty('--bd-blur', Math.round(38 + t * 46) + 'px');
+
+  const over = Math.max(0, L - MAX_LEVEL);
+  const box = canvas.parentElement;
+  if (box) box.classList.toggle('maxed', L >= MAX_LEVEL);
+  const aura = $('boardAura');
+  if (aura){
+    // 超出满级的每一级再亮一点点，让「还在变难」看得见
+    aura.style.setProperty('--au-ring', rgba(c, .78));
+    aura.style.setProperty('--au-glow', rgba(c, Math.min(.60, .32 + over * .02)));
+    aura.style.setProperty('--au-blur', Math.min(150, 72 + over * 4) + 'px');
+  }
+}
+
 function mix(a, b, t){
   const pa = hex(a), pb = hex(b);
   const ch = (i) => Math.round(pa[i] + (pb[i] - pa[i]) * t);
   return `rgb(${ch(0)},${ch(1)},${ch(2)})`;
 }
 function hex(h){
+  // mix() 吐出来的是 rgb(...)，边框那条链会把它再喂回 mix/rgba，两种格式都得认
+  if (h[0] === 'r'){ const m = h.match(/\d+/g); return m ? m.slice(0, 3).map(Number) : [255,255,255]; }
   if (h[0] !== '#') return [255,255,255];
   const v = h.length === 4
     ? h.slice(1).split('').map(x => parseInt(x + x, 16))
@@ -907,8 +969,12 @@ function draw(){
   if (game.started && !game.over){
     const prog = clamp(garbageTimer / garbagePeriod(), 0, 1);
     if (prog > 0){
-      ctx.fillStyle = prog > .82 ? 'rgba(244,63,94,.75)' : 'rgba(150,175,215,.4)';
-      ctx.fillRect(0, H - 2, W * prog, 2);
+      const over = game.level > MAX_LEVEL;
+      ctx.fillStyle = prog > .82 ? 'rgba(244,63,94,.85)'
+                    : over       ? 'rgba(255,140,60,.62)'
+                                 : 'rgba(150,175,215,.4)';
+      const h = over ? 3 : 2;
+      ctx.fillRect(0, H - h, W * prog, h);
     }
   }
 
@@ -1725,6 +1791,7 @@ function restart(){
   game.started = true;
   game.garbage = 0;
   game.elapsed = 0;
+  syncEdge();
   garbageTimer = 0;
   staticDirty = true;
   previewDirty = true;
@@ -1801,6 +1868,7 @@ function init(){
   } catch { /* 忽略 */ }
   game.board = newBoard();
   game.best = readBest();
+  syncEdge();
   syncHud();
   fillQueue();
   layout();
@@ -1898,7 +1966,7 @@ function init(){
 }
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
-window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, MAX_LEVEL,
+window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

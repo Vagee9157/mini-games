@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=f046f6d2">
+<link rel="stylesheet" href="tetris.css?v=929e9234">
 </head>
 <body>
 <div class="topline"></div>
@@ -43,6 +43,7 @@
     <div class="board-wrap" id="boardWrap">
      <div class="board-box">
       <canvas id="board"></canvas>
+      <div class="board-aura" id="boardAura" aria-hidden="true"></div>
 
       <div class="overlay" id="overlay" data-mode="start">
         <div class="card">
@@ -133,7 +134,7 @@
 
 </div>
 
-<script src="tetris.js?v=f83e219e"></script>
+<script src="tetris.js?v=95eb2329"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
