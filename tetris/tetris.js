@@ -123,15 +123,17 @@ const SOFT_DROP_FACTOR = 20; // 软降速度倍率
 
 // 下落速度按等级加快。
 //
-// Guideline 官方公式是 (0.8 - (lvl-1)×0.007)^(lvl-1) 秒一格，
-// 但那条线到 level 9 就只剩 94ms、level 15 只剩 7ms，手机点按键根本跟不上
-// （DAS 150ms + ARR 40ms，横移五格本身就要 310ms）。
-// 所以这里用等比曲线，把 15 个等级铺满「1000ms → 150ms」这个还打得动的区间：
-//   间隔 = 1000ms × (150/1000)^((lvl-1)/14)
-// 每升一级快约 12.7%，级级都有感觉，最快那一档也还按得过来。
+// Guideline 官方公式是 (0.8 - (lvl-1)×0.007)^(lvl-1) 秒一格，到 level 15 只剩 7ms，
+// 那是给键盘玩家的，手机点按键跟不上；而且这里真正的压力来自底部升起的灰线，
+// 下落速度只负责慢慢收紧思考时间，不需要陡。
+//
+// 等比曲线，15 个等级铺满「从顶落到底 20 秒 → 10 秒」：
+//   间隔 = 1000ms × (500/1000)^((lvl-1)/14)
+// 每升一级快约 4.8%，全程一共只快一倍，够平滑。
+// 注意盘面堆高之后实际落距变短，同样的 level 手上时间会明显更少。
 const MAX_LEVEL = 15;
-const FALL_TOP = 1000;   // level 1：一秒一格
-const FALL_END = 150;    // level 15：封顶速度
+const FALL_TOP = 1000;   // level 1：一秒一格 = 满屏 20 秒
+const FALL_END = 500;    // level 15：半秒一格 = 满屏 10 秒
 function gravityFor(lvl){
   const t = (clamp(lvl, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1);
   return FALL_TOP * Math.pow(FALL_END / FALL_TOP, t);
