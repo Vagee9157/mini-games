@@ -1077,7 +1077,7 @@ function sfx(kind){
 // 《Korobeiniki》，1861 年的俄罗斯民谣，公有领域。这里是自己合成的版本，
 // 不加载任何音频文件——离线能放，也不占缓存。
 // 时值单位是八分音符；0 表示休止。
-const BPM = 148;
+const BPM = 170;
 const EIGHTH = 60 / BPM / 2;
 
 const A4 = 69, B4 = 71, C5 = 72, D5 = 74, E5 = 76, F5 = 77, G5 = 79, A5 = 81, GS5 = 80;
@@ -1127,7 +1127,7 @@ function musicBus(){
     // 方波直接出来太扎耳朵，过一道低通削掉高次谐波，剩下老掌机那种闷闷的味道
     const lp = actx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 2200;
+    lp.frequency.value = 3000;
     lp.Q.value = .4;
     musicGain.connect(lp);
     lp.connect(actx.destination);
@@ -1138,15 +1138,16 @@ function musicBus(){
 // 一个音：主音 + 低五度的薄薄一层，听着不那么单薄
 function playNote(m, t, dur, kind){
   const bus = musicBus();
+  // 音尾收得早 = 断奏，比拖满音符时值轻快得多
   const cfg = kind === 'bass'
-    ? { type: 'triangle', v: .105, rel: .9 }
-    : { type: 'square',   v: .060, rel: .8 };
+    ? { type: 'triangle', v: .100, rel: .55 }
+    : { type: 'square',   v: .062, rel: .52 };
   const o = actx.createOscillator();
   const g = actx.createGain();
   o.type = cfg.type;
   o.frequency.setValueAtTime(midi(m), t);
   o.connect(g); g.connect(bus);
-  const hold = dur * cfg.rel;
+  const hold = Math.max(.045, dur * cfg.rel);
   g.gain.setValueAtTime(.0001, t);
   g.gain.exponentialRampToValueAtTime(cfg.v, t + .012);
   g.gain.exponentialRampToValueAtTime(.0001, t + hold);
@@ -1162,12 +1163,13 @@ function scheduleMusic(){
   while (mAt < ahead && guard++ < 64){
     const [note, len] = MELODY[mIdx];
     if (note) playNote(note, mAt, len * EIGHTH, 'lead');
-    // 低音踩在每小节的第 1、5 个八分上
+    // 低音走「根音—五度」的蹦跳型，一小节四下，比压两个长根音跳脱
     for (let k = 0; k < len; k++){
       const pos = (mBeat + k) % 8;
-      if (pos === 0 || pos === 4){
+      if (pos % 2 === 0){
         const bar = (mBar + ((mBeat + k) / 8 | 0)) % BASS.length;
-        playNote(BASS[bar] , mAt + k * EIGHTH, EIGHTH * 3.2, 'bass');
+        const root = BASS[bar];
+        playNote(pos % 4 === 0 ? root : root + 7, mAt + k * EIGHTH, EIGHTH * 1.1, 'bass');
       }
     }
     mAt += len * EIGHTH;
