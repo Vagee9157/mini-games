@@ -42,7 +42,7 @@ const STYLES = {
   plain: { name:'纯色',  gap:.08,  fill:.10, edge:0,   lw:0,   rad:.22 },
 };
 
-const skin = { pal: 'clear', style: 'gap' };
+const skin = { pal: 'clear', style: 'plain' };
 function colorOf(type){ return type === GARBAGE ? '#93a4c4' : PALETTES[skin.pal][type]; }
 
 // 每种方块的四个旋转态，坐标是它在自己 box 里的格子位置 [x, y]。
@@ -1087,8 +1087,9 @@ function buzz(pattern){
 //   3) 落底另开一路噪声，当作老主机的噪声通道，砸下去那一下才有质感
 // 频率全部保持在 260Hz 以上，手机外放才放得出来。
 const SPECS = {
-  // 转一下：短促两段上跳
-  rotate: { duty:.25,  v:.085, step:.026, notes:[988, 1319] },
+  // 转一下：低两档的「咚」，像按实体键那一下。
+  // 频率往下走 + 半方波（50% 占空）音色更闷，再配一路低频噪声当撞击体。
+  rotate: { duty:.5,   v:.105, step:.026, notes:[415, 277], noise:{ v:.055, d:.05, hp:320 } },
   // 自然落地：闷一点的两段下跳
   lock:   { duty:.125, v:.060, step:.024, notes:[392, 294] },
   // 落底：快速滑梯 + 噪声撞击
@@ -1146,8 +1147,15 @@ function unlockAudio(){
       const AC = window.AudioContext || window.webkitAudioContext;
       // 明确要最小缓冲，别让浏览器为了省电挑个大 buffer
       actx = new AC({ latencyHint: 'interactive' });
+      // resume() 是异步的：刚调完 state 还是 suspended，musicStart 会当场退出。
+      // 之前靠一次性的 pointerdown 去起音乐，谁先谁后全看运气，
+      // 所以「刷新后有时候没有背景音乐」。改成等真的 running 了再回头起一次。
+      actx.addEventListener('statechange', () => { if (actx.state === 'running') syncMusic(); });
     }
-    if (actx.state === 'suspended') actx.resume();
+    if (actx.state === 'suspended'){
+      const p = actx.resume();
+      if (p && p.then) p.then(() => syncMusic(), () => { /* 拒了就算了 */ });
+    }
   } catch { /* 不给就算了 */ }
 }
 
@@ -1790,9 +1798,16 @@ function init(){
   bindButtons();
 
   // 任何一次触碰都先把音频上下文拉起来（iOS 必须在手势里做）
-  for (const ev of ['pointerdown', 'touchstart', 'keydown']){
-    window.addEventListener(ev, () => { unlockAudio(); syncMusic(); }, { once: true, passive: true });
-  }
+  // 一直挂着直到音频真的跑起来为止，不能只试一次
+  const KICK_EVENTS = ['pointerdown', 'touchstart', 'keydown'];
+  const kickAudio = () => {
+    unlockAudio();
+    if (actx && actx.state === 'running'){
+      syncMusic();
+      for (const ev of KICK_EVENTS) window.removeEventListener(ev, kickAudio);
+    }
+  };
+  for (const ev of KICK_EVENTS) window.addEventListener(ev, kickAudio, { passive: true });
 
   const mb = $('musicBtn');
   if (mb) mb.addEventListener('click', toggleMusic);
