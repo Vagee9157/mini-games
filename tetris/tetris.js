@@ -146,7 +146,7 @@ function gravityFor(lvl){
 //
 // 用指数衰减的曲线，不是按等级跳台阶：
 //   周期 = MIN + (MAX - MIN) · e^(-t / TAU)
-// 开局 40 秒一行，之后一路平滑压向 15 秒封顶，全程 2.7 倍落差。
+// 开局 45 秒一行，之后一路平滑压向 15 秒封顶，全程 3 倍落差。
 // 两头都得留够距离：只提封顶不提开局的话曲线会压扁成「每 27 秒恒定来一行」，
 // 难度爬升就没了；只提开局不收尾段的话后期躺平，一局能拖到十分钟以上。
 // 不会出现「刚好卡在升级线上突然难一截」的断层。
@@ -155,9 +155,9 @@ function gravityFor(lvl){
 // 模拟发现它专门惩罚打得好的人：熟练档一局消 150 行，等于白送难度钟 180 秒，
 // 越会玩、灰线来得越凶。去掉之后难度钟就是纯已玩时长，对谁都一样。
 const GARBAGE = 'X';
-const G_MAX = 40000;     // 开局周期
+const G_MAX = 45000;     // 开局周期
 const G_MIN = 15000;     // 压到这里就不再往下
-const G_TAU = 260000;    // 衰减时间常数，越大掉得越慢
+const G_TAU = 300000;    // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 
 function garbageClock(){
@@ -172,7 +172,7 @@ function garbagePeriod(){
 // 清完把新值写回本地，之后再刷新就不会再清，新成绩正常保存。
 // 空字符串 = 不清任何东西。
 // 只在记分规则变了、老分数变得够不着的时候才动它，别跟着每次发版改。
-const WIPE_TOKEN = '';
+const WIPE_TOKEN = '2026-09-23-scoring';
 const WIPE_KEY = 'tetris.wipe.v1';
 
 const STORE_KEY = 'tetris.best.v1';
@@ -437,6 +437,10 @@ function hardDrop(){
   if (!p) return;
   let d = 0;
   while (!collides(p.type, p.x, p.y + d + 1, p.rot)) d++;
+  // 声音和震动排在最前面。后面的炸粒子、锁方块、写存档加起来能有好几毫秒，
+  // 排在它们后头就是按下去过一会儿才响。
+  sfx('drop');
+  buzz(14);
   p.y += d;
   game.score += d * 2;
   needsDraw = true;
@@ -444,8 +448,6 @@ function hardDrop(){
   hardLocking = true;
   lockPiece();
   hardLocking = false;
-  sfx('drop');
-  buzz(14);
 }
 
 function holdPiece(){
@@ -530,13 +532,15 @@ function lockPiece(){
   scoreFor(full.length, spin, perfect);
 
   if (full.length){
+    // 同理：先响，再去铺几十颗粒子和改 DOM
+    sfx(full.length === 4 ? 'tetris' : 'clear');
+    buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
-    sfx(full.length === 4 ? 'tetris' : 'clear');
     flashBoard(full.length);
-    buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
   } else {
-    sfx('lock');
+    // 硬降自己已经响过 drop 了，再补一声 lock 会叠成一团糊音
+    if (!hardLocking) sfx('lock');
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
     if (topOut) endGame(); else { armPre = true; spawnNext(); saveGame(); }
@@ -999,16 +1003,22 @@ function stepParticles(dt){
     q.y += q.vy * dt / 1000;
     q.vy += 520 * dt / 1000;
   }
-  if (particles.length > 160) particles.splice(0, particles.length - 160);
+  if (particles.length > 110) particles.splice(0, particles.length - 110);
 }
 
 function drawParticles(){
+  // 以前每颗粒子都开 shadowBlur 做辉光。实测同样次数的 fillRect，
+  // 带辉光比不带贵 12 倍，而消行一爆一秒就是几千次 —— 手机发烫主要来自这里。
+  // 改成「大一圈的淡底 + 实心核」两次平铺，观感差不多，代价只有六分之一。
   ctx.save();
+  ctx.shadowBlur = 0;
   for (const q of particles){
-    ctx.globalAlpha = clamp(q.life, 0, 1) * .9;
+    const a = clamp(q.life, 0, 1);
     ctx.fillStyle = q.color;
-    ctx.shadowColor = q.color;
-    ctx.shadowBlur = 8;
+    const h = q.size * 2.1;
+    ctx.globalAlpha = a * .20;
+    ctx.fillRect(q.x - h / 2, q.y - h / 2, h, h);
+    ctx.globalAlpha = a * .92;
     ctx.fillRect(q.x - q.size / 2, q.y - q.size / 2, q.size, q.size);
   }
   ctx.restore();
@@ -1090,7 +1100,11 @@ const SPECS = {
 // 所以第一次触碰屏幕就把它开起来，不等第一个音效。
 function unlockAudio(){
   try {
-    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!actx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      // 明确要最小缓冲，别让浏览器为了省电挑个大 buffer
+      actx = new AC({ latencyHint: 'interactive' });
+    }
     if (actx.state === 'suspended') actx.resume();
   } catch { /* 不给就算了 */ }
 }
@@ -1114,9 +1128,10 @@ function sfx(kind){
       o.type = spec.type;
       o.frequency.setValueAtTime(spec.f, t);
       o.frequency.exponentialRampToValueAtTime(spec.to, t + spec.d);
-      // 直接 setValueAtTime 会"啪"一下削波，给 4ms 的起音更干净
+      // 直接 setValueAtTime 会"啪"一下削波；1.5ms 足够不爆音，
+      // 再长就开始听得出「软了一下才出来」
       g.gain.setValueAtTime(.0001, t);
-      g.gain.exponentialRampToValueAtTime(Math.min(.9, spec.v * SFX_GAIN), t + .004);
+      g.gain.exponentialRampToValueAtTime(Math.min(.9, spec.v * SFX_GAIN), t + .0015);
       g.gain.exponentialRampToValueAtTime(.0001, t + spec.d);
       o.start(t);
       o.stop(t + spec.d + .02);
@@ -1179,7 +1194,7 @@ function musicBus(){
     // 方波直接出来太扎耳朵，过一道低通削掉高次谐波，剩下老掌机那种闷闷的味道
     const lp = actx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 3000;
+    lp.frequency.value = 2000;
     lp.Q.value = .4;
     musicGain.connect(lp);
     lp.connect(actx.destination);
@@ -1190,18 +1205,20 @@ function musicBus(){
 // 一个音：主音 + 低五度的薄薄一层，听着不那么单薄
 function playNote(m, t, dur, kind){
   const bus = musicBus();
-  // 音尾收得早 = 断奏，比拖满音符时值轻快得多
+  // 音尾收得早 = 断奏，比拖满音符时值轻快得多。
+  // atk 是起音时长：低音原来 12ms 起，四下一小节听着像敲鼓，拉到 34ms 就柔了。
   const cfg = kind === 'bass'
-    ? { type: 'triangle', v: .100, rel: .55 }
-    : { type: 'square',   v: .062, rel: .52 };
+    ? { type: 'triangle', v: .072, rel: .60, atk: .034 }
+    : { type: 'square',   v: .058, rel: .52, atk: .016 };
   const o = actx.createOscillator();
   const g = actx.createGain();
   o.type = cfg.type;
   o.frequency.setValueAtTime(midi(m), t);
   o.connect(g); g.connect(bus);
   const hold = Math.max(.045, dur * cfg.rel);
+  const atk = Math.min(cfg.atk, hold * .5);
   g.gain.setValueAtTime(.0001, t);
-  g.gain.exponentialRampToValueAtTime(cfg.v, t + .012);
+  g.gain.exponentialRampToValueAtTime(cfg.v, t + atk);
   g.gain.exponentialRampToValueAtTime(.0001, t + hold);
   o.start(t);
   o.stop(t + hold + .02);
