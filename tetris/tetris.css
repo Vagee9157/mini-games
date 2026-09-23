@@ -594,8 +594,10 @@ body{
 }
 
 /* ════════ 游戏模式：壳收起来，但控制键得留着 ════════ */
-body.immersive .bar .back,
+/* 返回入口在沉浸模式下也必须留着。
+   以前是靠全屏键退出沉浸模式再点返回，全屏键删掉之后它就是唯一的出口了。 */
 body.immersive .bar h1{ display: none; }
+body.immersive .bar .back{ padding: 5px 10px 5px 7px; font-size: 11px; }
 body.immersive .bar{ justify-content: flex-end; gap: 6px; padding: 2px 0 0; }
 body.immersive .game{ gap: 6px; padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(34px, calc(env(safe-area-inset-bottom) + 30px)); }
 body.immersive .stage{ gap: 7px; }
