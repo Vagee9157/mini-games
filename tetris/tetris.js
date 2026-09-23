@@ -121,23 +121,35 @@ const DAS = 150;             // 按住方向键多久开始连发
 const ARR = 40;              // 连发间隔
 const SOFT_DROP_FACTOR = 20; // 软降速度倍率
 
-// 下落速度全程不变。难度靠底部不断升起的灰线来加，
-// 不靠「越来越快」——那样后期只能拼手速。
-const GRAVITY = 800;
+// 下落速度按等级加快。
+//
+// Guideline 官方公式是 (0.8 - (lvl-1)×0.007)^(lvl-1) 秒一格，
+// 但那条线到 level 9 就只剩 94ms、level 15 只剩 7ms，手机点按键根本跟不上
+// （DAS 150ms + ARR 40ms，横移五格本身就要 310ms）。
+// 所以这里用等比曲线，把 15 个等级铺满「1000ms → 150ms」这个还打得动的区间：
+//   间隔 = 1000ms × (150/1000)^((lvl-1)/14)
+// 每升一级快约 12.7%，级级都有感觉，最快那一档也还按得过来。
+const MAX_LEVEL = 15;
+const FALL_TOP = 1000;   // level 1：一秒一格
+const FALL_END = 150;    // level 15：封顶速度
+function gravityFor(lvl){
+  const t = (clamp(lvl, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1);
+  return FALL_TOP * Math.pow(FALL_END / FALL_TOP, t);
+}
 
 // 垃圾行。下落速度不变，所以「越玩越难」全靠这条线升得越来越快。
 //
 // 用指数衰减的曲线，不是按等级跳台阶：
 //   周期 = MIN + (MAX - MIN) · e^(-t / TAU)
-// 开局 28 秒一行，之后一路平滑压向 6.5 秒，前期掉得快、后期趋于稳定，
+// 开局 30 秒一行，之后一路平滑压向 15 秒封顶，
 // 不会出现「刚好卡在升级线上突然难一截」的断层。
 //
 // t 不是纯挂钟时间，而是 已玩时长 + 消行数 × 1.2 秒：
 // 光苟着不消行也会慢慢变难，消得多则难度跟着进度走，两边都不亏。
 const GARBAGE = 'X';
-const G_MAX = 28000;     // 开局周期
-const G_MIN = 6500;      // 最快能到多少
-const G_TAU = 165000;    // 衰减时间常数，越大掉得越慢
+const G_MAX = 30000;     // 开局周期
+const G_MIN = 15000;     // 压到这里就不再往下
+const G_TAU = 240000;    // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 1200;
 
 function garbageClock(){
@@ -555,7 +567,7 @@ function scoreFor(n, spin, perfect){
 
   if (n > 0){
     game.lines += n;
-    const newLevel = Math.floor(game.lines / 10) + 1;
+    const newLevel = Math.min(MAX_LEVEL, Math.floor(game.lines / 10) + 1);
     if (newLevel > game.level){ game.level = newLevel; flashLevel(); }
   }
   if (label) showToast(label.trim());
@@ -1283,7 +1295,8 @@ function tick(now){
   }
 
   if (game.piece){
-    const speed = softDropping ? GRAVITY / SOFT_DROP_FACTOR : GRAVITY;
+    const g = gravityFor(game.level);
+    const speed = softDropping ? g / SOFT_DROP_FACTOR : g;
     dropTimer += dt;
     while (dropTimer >= speed){
       dropTimer -= speed;
@@ -1759,7 +1772,7 @@ function init(){
 }
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
-window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock,
+window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, MAX_LEVEL,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
