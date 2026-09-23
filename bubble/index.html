@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
+<link rel="stylesheet" href="../assets/ui.css?v=03017f7e">
 <link rel="stylesheet" href="bubble.css?v=beb1ad39">
 </head>
 <body>
@@ -31,6 +31,8 @@
     <a class="back" href="../">← 合集</a>
     <h1>泡泡龙<em>BUBBLE</em></h1>
     <div class="sp"></div>
+    <button class="tbtn tbtn-ic" id="arcBtn" aria-label="竞技模式"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5.5H5.6a2.4 2.4 0 0 0 2.4 4"/><path d="M16 5.5h2.4a2.4 2.4 0 0 1-2.4 4"/><path d="M10.5 13h3l.6 3.2h-4.2z"/><path d="M8 19.5h8"/></svg><span>竞技</span></button>
+    <button class="tbtn tbtn-ic" id="lvBtn" aria-label="闯关模式"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 20V4"/><path d="M6.5 5h10l-2.2 3.4L16.5 12h-10z"/></svg><span>闯关</span></button>
     <button class="tbtn tbtn-sq" id="muteBtn" aria-label="音效开关">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M11 5 6.5 9H3v6h3.5L11 19z"/>
@@ -39,9 +41,7 @@
         <path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/>
       </svg>
     </button>
-    <button class="tbtn" id="arcBtn">竞技</button>
-    <button class="tbtn" id="lvBtn">闯关</button>
-    <button class="tbtn" id="restartBtn">重开</button>
+    <button class="tbtn tbtn-ic" id="restartBtn" aria-label="重开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12a7.4 7.4 0 1 1-2.2-5.3"/><path d="M19.4 4.4v4.5h-4.5"/></svg><span>重开</span></button>
   </header>
 
   <div class="hud">

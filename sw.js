@@ -1,6 +1,6 @@
 /* Service Worker —— 让这些游戏在没网的时候也能玩（高铁、地铁、飞机）。
    这个文件由 bump.py 生成，别手改：资源清单和版本号都是算出来的。 */
-const CACHE = 'mini-games-38a7f963e9';
+const CACHE = 'mini-games-dbaedd887b';
 const ASSETS = [
   "./",
   "./index.html",
@@ -14,7 +14,7 @@ const ASSETS = [
   "./minesweeper/",
   "./minesweeper/index.html",
   "./minesweeper/manifest.json",
-  "./assets/ui.css?v=9c37111d",
+  "./assets/ui.css?v=03017f7e",
   "./minesweeper/mine.css?v=2df98c8e",
   "./minesweeper/mine.js?v=0921474b",
   "./bubble/",

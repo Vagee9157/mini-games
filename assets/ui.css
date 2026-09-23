@@ -275,3 +275,9 @@ body{
   .bar h1{ display: none; }
   .tbtn{ font-size: 10.5px; padding: 6px 10px; }
 }
+
+/* 顶栏按钮：图标 + 文字。跟俄罗斯方块那套保持一致 */
+.tbtn-ic{ display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px 6px 9px; }
+.tbtn-ic svg{ width: 14px; height: 14px; display: block; flex: none; }
+.tbtn-ic span{ line-height: 1; }
+.tbtn:active{ transform: translateY(1px); }
