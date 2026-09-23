@@ -164,6 +164,14 @@ function garbagePeriod(){
   return G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
 }
 
+// ── 一次性清档 ──
+// 改这个值（随便填个新字符串）= 每个人下次打开时清掉最高分和未完成的存档，
+// 清完把新值写回本地，之后再刷新就不会再清，新成绩正常保存。
+// 空字符串 = 不清任何东西。
+// 只在记分规则变了、老分数变得够不着的时候才动它，别跟着每次发版改。
+const WIPE_TOKEN = '';
+const WIPE_KEY = 'tetris.wipe.v1';
+
 const STORE_KEY = 'tetris.best.v1';
 const BUZZ_KEY  = 'tetris.buzz.v1';
 const MUSIC_KEY = 'tetris.music.v1';
@@ -1684,7 +1692,21 @@ function syncMuteBtn(){
 
 // ───────────────────────── 启动 ─────────────────────────
 
+// 返回「这次真的清掉了一个成绩」，只有那样才值得弹提示
+function applyWipe(){
+  if (!WIPE_TOKEN) return false;
+  try {
+    if (localStorage.getItem(WIPE_KEY) === WIPE_TOKEN) return false;
+    const had = parseInt(localStorage.getItem(STORE_KEY) || '0', 10) || 0;
+    localStorage.removeItem(STORE_KEY);
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.setItem(WIPE_KEY, WIPE_TOKEN);
+    return had > 0;
+  } catch { return false; }   // 隐私模式下读写都会抛，那就当没这回事
+}
+
 function init(){
+  const wiped = applyWipe();
   const savedSkin = readSkin();
   if (savedSkin) { skin.pal = savedSkin.pal; skin.style = savedSkin.style; }
   try {
@@ -1751,6 +1773,8 @@ function init(){
   if (window.ResizeObserver) new ResizeObserver(() => layout()).observe($('boardWrap'));
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
   window.addEventListener('load', layout);
+  // 分数被清掉的话说一声，不然用户以为成绩自己丢了
+  if (wiped) setTimeout(() => showToast('记分规则已更新，最高分重新开始'), 600);
   // iOS 转屏后尺寸要过一会儿才稳，补两次
   window.addEventListener('orientationchange', () => { setTimeout(layout, 120); setTimeout(layout, 450); });
   if (window.visualViewport) window.visualViewport.addEventListener('resize', layout);
