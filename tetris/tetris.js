@@ -132,6 +132,9 @@ const SOFT_DROP_FACTOR = 20; // 软降速度倍率
 // 每升一级快约 4.8%，全程一共只快一倍，够平滑。
 // 注意盘面堆高之后实际落距变短，同样的 level 手上时间会明显更少。
 const MAX_LEVEL = 15;
+// 每消几行升一级。按 10 行算的话满级要 140 行，模拟里普通玩家中位只消 54 行，
+// 15 个等级有 9 级永远见不到；7 行一级能让他一局摸到 9 级，等级条走得动。
+const LINES_PER_LEVEL = 7;
 const FALL_TOP = 1000;   // level 1：一秒一格 = 满屏 20 秒
 const FALL_END = 500;    // level 15：半秒一格 = 满屏 10 秒
 function gravityFor(lvl){
@@ -574,7 +577,7 @@ function scoreFor(n, spin, perfect){
 
   if (n > 0){
     game.lines += n;
-    const newLevel = Math.min(MAX_LEVEL, Math.floor(game.lines / 10) + 1);
+    const newLevel = Math.min(MAX_LEVEL, Math.floor(game.lines / LINES_PER_LEVEL) + 1);
     if (newLevel > game.level){ game.level = newLevel; flashLevel(); }
   }
   if (label) showToast(label.trim());
