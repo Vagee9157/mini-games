@@ -1,6 +1,6 @@
 /* Service Worker —— 让这些游戏在没网的时候也能玩（高铁、地铁、飞机）。
    这个文件由 bump.py 生成，别手改：资源清单和版本号都是算出来的。 */
-const CACHE = 'mini-games-cce52af311';
+const CACHE = 'mini-games-92b4a3594d';
 const ASSETS = [
   "./",
   "./index.html",
@@ -20,8 +20,8 @@ const ASSETS = [
   "./bubble/",
   "./bubble/index.html",
   "./bubble/manifest.json",
-  "./bubble/bubble.css?v=2e6531ed",
-  "./bubble/bubble.js?v=4c882dbd",
+  "./bubble/bubble.css?v=beb1ad39",
+  "./bubble/bubble.js?v=2c3dc084",
   "./pool/",
   "./pool/index.html",
   "./pool/manifest.json",

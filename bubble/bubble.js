@@ -13,6 +13,7 @@ const SQ3 = Math.sqrt(3);
 
 const COLORS = ['#22d3ee', '#fbbf24', '#a855f7', '#f43f5e', '#4ade80'];
 const PROG_KEY = 'bubble.prog.v2';
+const BEST_KEY = 'bubble.best.v2';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -27,55 +28,62 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 // push    每几发整体压下来一行，0 = 不压
 // goal    'clear' 清空所有能消的 / 'rescue' 把目标物全救下来
 const LEVELS = [
+  // 排布的铁律：同色要成块。盘面上没有成对的同色，玩家就永远补不出第三颗，
+  // 那种交替色的棋盘格看着规整，实际是死局。
+  // 冰冻泡只要震裂一次就化开（hp 1），所以每片冰下面都得压着能消的普通泡。
+
   // ── 1-4 入门：三色，纯消除 ──
-  { name:'开场', colors:3, shots:26, push:0, goal:'clear', rows:[
-    'aabbccaa','abbccaa','bbccaabb','bccaabb' ]},
-  { name:'吊桥', colors:3, shots:26, push:0, goal:'clear', rows:[
-    'aa.bb.cc','a..b..c','aa.bb.cc','.a.b.c.','..abc..' ]},
-  { name:'阶梯', colors:3, shots:28, push:0, goal:'clear', rows:[
-    'aaaabbbb','.aabbcc','..abcc.','...bc..','...c...' ]},
-  { name:'蜂巢', colors:3, shots:30, push:10, goal:'clear', rows:[
-    'abcabcab','bcabcab','cabcabca','abcabca','bcabcabc' ]},
+  { name:'开场', colors:3, shots:19, push:0, goal:'clear', rows:[
+    'aaabbccc','aabbbcc','aaabbccc' ]},
+  { name:'三带', colors:3, shots:19, push:0, goal:'clear', rows:[
+    'aaaabbbb','cccaabb','bbbccaaa','..bbcc.' ]},
+  { name:'阶梯', colors:3, shots:19, push:0, goal:'clear', rows:[
+    'aaaabbbb','.aabbcc','..bbcc.','...cc..' ]},
+  { name:'蜂巢', colors:3, shots:29, push:0, goal:'clear', rows:[
+    'aabbccaa','aabbcca','bbccaabb','bbccaab','ccaabbcc' ]},
 
-  // ── 5-8 石头登场 ──
-  { name:'石门', colors:3, shots:28, push:0, goal:'clear', rows:[
-    '##aabb##','#abbcc#','aabbccaa','abbccaa','.bbcc..' ]},
-  { name:'夹心', colors:4, shots:30, push:0, goal:'clear', rows:[
-    'aabbccdd','#######','abcdabcd','.......','..abcd..' ]},
-  { name:'柱廊', colors:3, shots:30, push:12, goal:'clear', rows:[
-    'a#b#c#a#','abcabca','a#b#c#a#','abcabca','.#b#c#.' ]},
-  { name:'碉堡', colors:4, shots:32, push:0, goal:'clear', rows:[
-    '#aabbcc#','#abbcc#','##abcd##','.#abc#.','..abc..' ]},
+  // ── 5-8 石头登场：打不消，只能靠断开让它掉 ──
+  { name:'石门', colors:3, shots:19, push:0, goal:'clear', rows:[
+    '##aabb##','#aabbc#','aabbccaa','.bbcca.' ]},
+  // 石头别横着连成一整排 —— 那样上半部分永远够不着，是死锁。
+  // 留口子要留「空格」，填成泡泡那行照样是满的，打不上去。
+  { name:'夹心', colors:3, shots:29, push:0, goal:'clear', rows:[
+    'aaabbbcc','#.bbb.#','ccbbbaaa','..bbcc.' ]},
+  { name:'立柱', colors:3, shots:27, push:0, goal:'clear', rows:[
+    'aa##bb##','aaabbbc','##cc##aa','.cccaa.' ]},
+  { name:'碉堡', colors:4, shots:35, push:0, goal:'clear', rows:[
+    '#aabbcc#','#aabbc#','##ccdd##','.ccdd..' ]},
 
-  // ── 9-12 冰冻登场 ──
-  { name:'初霜', colors:3, shots:30, push:0, goal:'clear', rows:[
-    'AABBCCAA','abbccaa','aabbccaa','.bbcc..' ]},
-  { name:'冰层', colors:4, shots:32, push:0, goal:'clear', rows:[
-    'ABCDABCD','abcdabc','ABCDABCD','abcdabc','..abcd..' ]},
-  { name:'寒潮', colors:4, shots:34, push:12, goal:'clear', rows:[
-    'A#B#C#D#','abcdabc','A#B#C#D#','abcdabc','.#bc#..' ]},
-  { name:'冰封', colors:4, shots:34, push:0, goal:'clear', rows:[
-    '##AABB##','#ABBCC#','AABBCCDD','ABBCCDD','.BBCC..' ]},
+  // ── 9-12 冰冻登场：震一次就化，化完还得再消掉 ──
+  { name:'初霜', colors:3, shots:33, push:0, goal:'clear', rows:[
+    'AAABBCcc','aabbbcc','aaabbccc' ]},
+  { name:'冰层', colors:3, shots:25, push:0, goal:'clear', rows:[
+    'AAABBCCC','aabbbcc','AAABBCCC','.bbcc..' ]},
+  { name:'寒潮', colors:4, shots:31, push:0, goal:'clear', rows:[
+    'AAABBBcc','aabbbcc','ccddaabb','.ccdda.' ]},
+  { name:'冰封', colors:4, shots:35, push:0, goal:'clear', rows:[
+    'AABBCCDD','aabbccd','AABBCCDD','aabbccd','..bbcc.' ]},
 
-  // ── 13-16 救援：把目标物打下来 ──
-  { name:'吊笼', colors:3, shots:24, push:0, goal:'rescue', rows:[
-    'aabbccaa','abbccaa','a.*..*.a','.a.bb.c','..abc..' ]},
-  { name:'鸟巢', colors:3, shots:26, push:0, goal:'rescue', rows:[
-    '#aabbcc#','abcabca','a.*.*.a','.abcab.','...*...' ]},
-  { name:'深井', colors:4, shots:28, push:10, goal:'rescue', rows:[
-    'aabbccdd','abcdabc','a#*#*#a','.abcab.','..*.*..' ]},
-  { name:'冰窟', colors:4, shots:30, push:0, goal:'rescue', rows:[
-    'AABBCCDD','abcdabc','A.*..*.A','.abcab.','..*.*..' ]},
+  // ── 13-16 救援：把星星下面掏空，让它掉下来 ──
+  { name:'吊笼', colors:3, shots:19, push:0, goal:'rescue', rows:[
+    'aaabbccc','aabbbcc','a.*..*.a','.aabbc.' ]},
+  { name:'鸟巢', colors:3, shots:21, push:0, goal:'rescue', rows:[
+    '#aabbcc#','aabbbcc','a.*.*.a','.aabbc.','...*...' ]},
+  // 星星别用石头夹着：石头只要还连着上面就不掉，星星等于被钉死在那儿
+  { name:'深井', colors:4, shots:33, push:0, goal:'rescue', rows:[
+    'aabbccdd','aabbccd','aa*bb*dd','.aabbc.','...*...' ]},
+  { name:'冰窟', colors:4, shots:31, push:0, goal:'rescue', rows:[
+    'AABBCCDD','aabbccd','a.*..*.a','.aabbc.','..*.*..' ]},
 
-  // ── 17-20 收官：五色、混合障碍 ──
-  { name:'万花筒', colors:5, shots:34, push:10, goal:'clear', rows:[
-    'abcdeabc','bcdeabc','cdeabcde','deabcde','eabcdeab' ]},
-  { name:'迷宫', colors:4, shots:34, push:0, goal:'clear', rows:[
-    '#abc#abc','A#bc#ab','#abc#abc','a#bc#ab','.abc#a.' ]},
-  { name:'囚笼', colors:4, shots:32, push:12, goal:'rescue', rows:[
-    '########','ABCDABC','#a*bc*d#','.ABCDA.','..*.*..' ]},
-  { name:'终局', colors:5, shots:36, push:10, goal:'clear', rows:[
-    'ABCDEABC','#bcdeab#','ABCDEABC','#bcdeab#','.ABCDE.' ]},
+  // ── 17-20 收官：五色、混合障碍、开始压行 ──
+  { name:'万花筒', colors:5, shots:41, push:0, goal:'clear', rows:[
+    'aabbccdd','eeaabbc','ccddeeaa','.bbccd.' ]},
+  { name:'迷宫', colors:4, shots:29, push:14, goal:'clear', rows:[
+    '#aabb#cc','#aabbc#','dd##aabb','.ddaab.' ]},
+  { name:'囚笼', colors:4, shots:37, push:0, goal:'rescue', rows:[
+    '##aabb##','aabbccd','a.*bb*.d','.aabbc.','...*...' ]},
+  { name:'终局', colors:5, shots:43, push:0, goal:'clear', rows:[
+    'AAABBBcc','aabbbcc','ccddeeaa','.ccdde.' ]},
 ];
 
 // ── 格子 ──
@@ -92,14 +100,16 @@ function parseChar(ch){
   const lo = 'abcde'.indexOf(ch);
   if (lo >= 0) return { t:'n', c:lo };
   const hi = 'ABCDE'.indexOf(ch);
-  if (hi >= 0) return { t:'i', c:hi, hp:2 };
+  if (hi >= 0) return { t:'i', c:hi, hp:1 };   // 震一次就化，两次的话预算算不过来
   return null;
 }
 
 // ── 状态 ──
 let grid = [];
 let R = 24, W = 0, H = 0;
+let MODE = 'arcade';                // 'arcade' 竞技无尽 / 'levels' 闯关
 let lvIdx = 0, lv = null;
+let best = 0, wave = 0;             // 竞技模式：历史最高分 / 已经压下来几行
 let cur = null, next = null;        // { c } 或 { power:'bomb'|'rainbow'|'laser' }
 let shot = null;
 let aim = -Math.PI / 2, aiming = false;
@@ -170,6 +180,7 @@ const totalStars = () => LEVELS.reduce((s, _, i) => s + starsOf(i), 0);
 
 // ── 装关卡 ──
 function loadLevel(i){
+  MODE = 'levels';
   lvIdx = clamp(i, 0, LEVELS.length - 1);
   lv = LEVELS[lvIdx];
   grid = [];
@@ -198,6 +209,56 @@ function loadLevel(i){
   if (!rafId) rafId = requestAnimationFrame(tick);
 }
 
+// 竞技模式：没有终点，活多久算多久。
+// 难度三条线一起爬 —— 颜色变多、压行变勤、新行开始掺障碍。
+// 数值挂在「已发射数」上：打得越久越难，跟闯关那套关卡预算完全分开。
+const ARC_PUSH0 = 8;        // 开局每 8 发压一行
+const ARC_PUSH_MIN = 3;     // 间隔压到 3 发就不再缩
+function arcadeTune(){
+  const f = fired;
+  lv.colors = f < 25 ? 3 : f < 70 ? 4 : 5;
+  lv.push = Math.max(ARC_PUSH_MIN, ARC_PUSH0 - Math.floor(f / 26));
+  // 障碍从第 35 发开始掺进新压下来的行里，越往后越多
+  lv.stone = f < 35 ? 0 : Math.min(.26, (f - 35) * .0022);
+  lv.ice   = f < 50 ? 0 : Math.min(.30, (f - 50) * .0028);
+  // 上面三条都有天花板，到 180 发左右难度就成了水平线，
+  // 够强的人可以无限打下去（bot 实测 400 发不死）。
+  // 所以再加一条没有上限的：过了 170 发开始一次压两行，之后每 70 发再多一行。
+  lv.pushRows = 1 + Math.max(0, Math.floor((f - 170) / 70) + (f >= 170 ? 1 : 0));
+}
+
+// 竞技模式新压一行时按当前难度掺障碍
+function arcadeCell(){
+  if (MODE === 'arcade'){
+    if (Math.random() < lv.stone) return { t:'s', c:-1 };
+    if (Math.random() < lv.ice)   return { t:'i', c: pickColor(), hp:1 };
+  }
+  return { t:'n', c: pickColor() };
+}
+
+function loadArcade(){
+  MODE = 'arcade';
+  lv = { name:'竞技', colors:3, shots:Infinity, push:ARC_PUSH0, goal:'arcade', stone:0, ice:0 };
+  grid = [];
+  for (let r = 0; r < ROWS; r++) grid.push(new Array(colsIn(r)).fill(null));
+  score = 0; fired = 0; combo = 0; rescued = 0; needRescue = 0; wave = 0;
+  shotsLeft = Infinity;
+  powers = [];
+  over = false; won = false; started = true;
+  shot = null; pops = []; floats = [];
+  // 开局铺四行
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c < colsIn(r); c++)
+      grid[r][c] = { t:'n', c: (Math.random() * 3) | 0 };
+  cur = { c: pickColor() }; next = { c: pickColor() };
+  $('overlay').classList.remove('show');
+  $('lvSheet').hidden = true;
+  staticDirty = true; needsDraw = true;
+  arcadeTune(); traceAim(); syncHud();
+  lastT = performance.now();
+  if (!rafId) rafId = requestAnimationFrame(tick);
+}
+
 // 只发盘面上还有的颜色，免得给一颗根本凑不出三连的死球
 function pickColor(){
   const live = new Set();
@@ -216,7 +277,8 @@ function fire(){
   shot = { x: W / 2, y: muzzleY(), vx: Math.cos(a) * SPEED, vy: Math.sin(a) * SPEED,
            c: cur.c, power: cur.power || null };
   cur = next; next = { c: pickColor() };
-  shotsLeft--; fired++;
+  if (MODE === 'levels') shotsLeft--;
+  fired++;
   sfx(shot.power ? 'power' : 'shoot');
   syncHud();
   needsDraw = true;
@@ -385,6 +447,7 @@ function afterShot(popped, loose){
   } else {
     combo = 0;
   }
+  if (MODE === 'arcade') arcadeTune();
   if (lv.push && fired % lv.push === 0) pushDown();
   checkEnd();
   traceAim(); syncHud();
@@ -432,15 +495,21 @@ function dropFloating(){
 // 奇偶行列数不一样（8 / 7），下移时最右那颗装不下会被丢掉，
 // 原本挂在它下面的可能就断了 —— 所以压完必须再跑一次悬空检查。
 function pushDown(){
+  const times = MODE === 'arcade' ? (lv.pushRows || 1) : 1;
+  for (let i = 0; i < times; i++) pushOneRow();
+  dropFloating();
+  staticDirty = true;
+  toast(times > 1 ? `压下来 ${times} 行！` : '压下来一行');
+}
+
+function pushOneRow(){
   for (let r = ROWS - 1; r > 0; r--){
     const src = grid[r - 1], dst = grid[r];
     for (let c = 0; c < dst.length; c++) dst[c] = c < src.length ? src[c] : null;
   }
   grid[0] = new Array(colsIn(0)).fill(null);
-  for (let c = 0; c < colsIn(0); c++) grid[0][c] = { t:'n', c: pickColor() };
-  dropFloating();
-  staticDirty = true;
-  toast('压下来一行');
+  for (let c = 0; c < colsIn(0); c++) grid[0][c] = arcadeCell();
+  wave++;
 }
 
 // ── 胜负 ──
@@ -454,11 +523,27 @@ function checkEnd(){
       if (b.t === 'n' || b.t === 'i') anyPop = true;
       if (r >= DEAD_ROW) deep = true;
     }
+  if (MODE === 'arcade'){
+    // 竞技模式没有赢，只有活多久；盘面清空了就再铺两行接着来
+    if (!anyPop && !deep){ refillArcade(); return; }
+    if (deep){ finish(false, '压到底线了'); return; }
+    return;
+  }
   if (lv.goal === 'rescue'){
     if (rescued >= needRescue){ finish(true); return; }
   } else if (!anyPop){ finish(true); return; }
   if (deep){ finish(false, '压到底线了'); return; }
   if (shotsLeft <= 0 && !shot){ finish(false, '泡泡用完了'); return; }
+}
+
+// 全清了给一笔奖励再续上，别让人因为打得太好反而没得打
+function refillArcade(){
+  score += 500;
+  toast('全清 +500');
+  for (let r = 0; r < 2; r++)
+    for (let c = 0; c < colsIn(r); c++) grid[r][c] = arcadeCell();
+  staticDirty = true; needsDraw = true;
+  syncHud();
 }
 
 function starsFor(){
@@ -468,6 +553,17 @@ function starsFor(){
 
 function finish(win, why){
   over = true; won = win;
+  if (MODE === 'arcade'){
+    if (score > best){ best = score; try { localStorage.setItem(BEST_KEY, String(best)); } catch { /* 忽略 */ } }
+    $('overlay').dataset.mode = 'arc';
+    $('arcScore').textContent = score.toLocaleString();
+    $('arcBest').textContent = best.toLocaleString();
+    $('arcShots').textContent = fired;
+    $('arcWave').textContent = wave;
+    $('overlay').classList.add('show');
+    sfx('over'); syncHud(); needsDraw = true;
+    return;
+  }
   let st = 0;
   if (win){
     st = starsFor();
@@ -887,17 +983,31 @@ function topRow(){
 
 // ── HUD / 选关 ──
 function syncHud(){
-  $('lvName').textContent = `${lvIdx + 1} · ${lv ? lv.name : ''}`;
   $('score').textContent = score.toLocaleString();
-  $('shots').textContent = shotsLeft;
-  $('shotsCell').classList.toggle('warn', shotsLeft <= 5);
-  const goalCell = $('goalCell');
-  if (lv && lv.goal === 'rescue'){
-    goalCell.querySelector('span').textContent = '救出';
-    $('goal').textContent = `${rescued}/${needRescue}`;
+  const lvCell = $('lvCell'), goalCell = $('goalCell'), shotsCell = $('shotsCell');
+  if (MODE === 'arcade'){
+    // 竞技模式看的是：最高分、离底线还有几行、连击
+    lvCell.querySelector('span').textContent = '最高';
+    $('lvName').textContent = best.toLocaleString();
+    goalCell.querySelector('span').textContent = '连击';
+    $('goal').textContent = combo > 0 ? `×${Math.min(5, combo)}` : '—';
+    shotsCell.querySelector('span').textContent = '离底线';
+    const left = Math.max(0, DEAD_ROW - topRow());
+    $('shots').textContent = left;
+    shotsCell.classList.toggle('warn', left <= 2);
   } else {
-    goalCell.querySelector('span').textContent = '目标';
-    $('goal').textContent = '清空';
+    lvCell.querySelector('span').textContent = '关卡';
+    $('lvName').textContent = `${lvIdx + 1} · ${lv ? lv.name : ''}`;
+    shotsCell.querySelector('span').textContent = '剩余';
+    $('shots').textContent = shotsLeft;
+    shotsCell.classList.toggle('warn', shotsLeft <= 5);
+    if (lv && lv.goal === 'rescue'){
+      goalCell.querySelector('span').textContent = '救出';
+      $('goal').textContent = `${rescued}/${needRescue}`;
+    } else {
+      goalCell.querySelector('span').textContent = '目标';
+      $('goal').textContent = '清空';
+    }
   }
   renderPowers();
   drawNextMini();
@@ -1001,7 +1111,7 @@ function bindAim(){
     if (e.code === 'ArrowRight'){ aim += .06; needsDraw = true; }
     if (e.code === 'Space'){ e.preventDefault(); fire(); }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'ArrowDown'){ e.preventDefault(); swap(); }
-    if (e.code === 'KeyR') loadLevel(lvIdx);
+    if (e.code === 'KeyR') MODE === 'arcade' ? loadArcade() : loadLevel(lvIdx);
     if (e.code === 'Digit1') armPower(0);
     if (e.code === 'Digit2') armPower(1);
     if (e.code === 'Digit3') armPower(2);
@@ -1068,24 +1178,27 @@ function sfx(k){
 // ── 启动 ──
 function init(){
   prog = readProg();
-  try { muted = localStorage.getItem('bubble.muted.v1') === '1'; } catch { /* 忽略 */ }
+  try {
+    muted = localStorage.getItem('bubble.muted.v1') === '1';
+    best = +localStorage.getItem(BEST_KEY) || 0;
+  } catch { /* 忽略 */ }
   lv = LEVELS[0];
   for (let r = 0; r < ROWS; r++) grid.push(new Array(colsIn(r)).fill(null));
   layout();
   bindAim();
   syncMute();
 
-  $('startBtn').addEventListener('click', () => {
-    $('overlay').classList.remove('show');
-    loadLevel(Math.min(prog.unlocked - 1, LEVELS.length - 1));
-  });
+  $('startBtn').addEventListener('click', () => { $('overlay').classList.remove('show'); loadArcade(); });
+  $('arcAgain').addEventListener('click', loadArcade);
+  $('arcPick').addEventListener('click', () => { $('overlay').classList.remove('show'); openLevels(); });
   $('againBtn').addEventListener('click', () => loadLevel(lvIdx));
   $('nextBtn').addEventListener('click', () => loadLevel(lvIdx + 1));
-  $('restartBtn').addEventListener('click', () => { if (started) loadLevel(lvIdx); });
+  $('restartBtn').addEventListener('click', () => { if (!started) return; MODE === 'arcade' ? loadArcade() : loadLevel(lvIdx); });
   $('lvBtn').addEventListener('click', openLevels);
   $('lvClose').addEventListener('click', () => { $('lvSheet').hidden = true; });
   $('lvSheet').addEventListener('click', (e) => { if (e.target.id === 'lvSheet') $('lvSheet').hidden = true; });
   $('pickBtn').addEventListener('click', () => { $('overlay').classList.remove('show'); openLevels(); });
+  $('arcBtn').addEventListener('click', loadArcade);
   $('fireBtn').addEventListener('click', fire);
   $('muteBtn').addEventListener('click', () => {
     muted = !muted;
@@ -1098,7 +1211,9 @@ function init(){
   if (window.ResizeObserver) new ResizeObserver(layout).observe($('boardWrap'));
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
 
+  lv = { name:'竞技', colors:3, shots:Infinity, push:ARC_PUSH0, goal:'arcade', stone:0, ice:0 };
   $('overlay').dataset.mode = 'start';
+  $('startBest').textContent = best.toLocaleString();
   $('startLv').textContent = `${Math.min(prog.unlocked, LEVELS.length)} / ${LEVELS.length}`;
   $('overlay').classList.add('show');
   syncHud();
@@ -1111,14 +1226,15 @@ function syncMute(){
 
 window.__bubble = {
   get grid(){ return grid; },
-  get state(){ return { lvIdx, name: lv && lv.name, goal: lv && lv.goal, score, shotsLeft, fired,
+  get state(){ return { MODE, best, wave, lvIdx, name: lv && lv.name, goal: lv && lv.goal, score, shotsLeft, fired,
                         combo, rescued, needRescue, powers: powers.slice(), over, won, started,
                         R, W, H, cur, next, shot: !!shot, unlocked: prog.unlocked, stars: { ...prog.stars } }; },
-  LEVELS, loadLevel, fire, swap, armPower, grantPower, dropFloating, checkEnd,
+  LEVELS, loadArcade, loadLevel, arcadeTune, fire, swap, armPower,
+  get lv(){ return lv; }, set fired(v){ fired = v; }, grantPower, dropFloating, checkEnd,
   land: () => land(), pushDown,
   setAim: (a) => { aim = a; traceAim(); needsDraw = true; },
   give: (p) => { powers.push(p); syncHud(); },
-  colsIn, neighbours, COLORS, DEAD_ROW, ROWS, COLS,
+  colsIn, neighbours, cellX, cellY, muzzleY, sameGroup, COLORS, DEAD_ROW, ROWS, COLS,
 };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

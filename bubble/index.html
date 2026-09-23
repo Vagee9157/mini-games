@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
 <link rel="stylesheet" href="../assets/ui.css?v=9c37111d">
-<link rel="stylesheet" href="bubble.css?v=2e6531ed">
+<link rel="stylesheet" href="bubble.css?v=beb1ad39">
 </head>
 <body>
 <div class="topline"></div>
@@ -39,12 +39,13 @@
         <path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/>
       </svg>
     </button>
-    <button class="tbtn" id="lvBtn">选关</button>
+    <button class="tbtn" id="arcBtn">竞技</button>
+    <button class="tbtn" id="lvBtn">闯关</button>
     <button class="tbtn" id="restartBtn">重开</button>
   </header>
 
   <div class="hud">
-    <div class="cell hi"><span>关卡</span><b id="lvName">1</b></div>
+    <div class="cell hi" id="lvCell"><span>最高</span><b id="lvName">0</b></div>
     <div class="cell" id="goalCell"><span>目标</span><b id="goal">清空</b></div>
     <div class="cell" id="shotsCell"><span>剩余</span><b id="shots">0</b></div>
     <div class="cell"><span>得分</span><b id="score">0</b></div>
@@ -61,13 +62,25 @@
           <h2>泡泡<span class="neon">龙</span></h2>
           <p>
             <b>拖着瞄准，松手就发</b>，瞄准线把撞墙反弹算进去了。<br>
-            三个同色连上就消，<b>被打断的一串会整片掉下来</b>。<br>
-            一杆消掉五颗以上会掉<b>道具</b>：炸弹、彩虹、激光。<br>
-            <b>石头</b>打不消，只能靠断开让它掉；<b>冰冻泡</b>要在旁边消两次才化。
+            三个同色连上就消，<b>被打断的一串会整片掉下来</b>，掉落的更值分。<br>
+            一杆消掉五颗以上掉<b>道具</b>：炸弹、彩虹、激光。<br>
+            竞技模式<b>没有终点</b> —— 打得越久，颜色越多、压行越勤，
+            后面还会掺进<b>石头</b>（打不消）和<b>冰冻泡</b>（旁边消一次才化）。
           </p>
-          <div class="prog">已解锁 <b id="startLv">1 / 20</b></div>
-          <button class="pbtn" id="startBtn">继续闯关</button>
-          <button class="pbtn ghost" id="pickBtn">选关</button>
+          <div class="prog">最高分 <b id="startBest">0</b> · 闯关已解锁 <b id="startLv">1 / 20</b></div>
+          <button class="pbtn" id="startBtn">开始竞技</button>
+          <button class="pbtn ghost" id="pickBtn">闯关模式</button>
+        </div>
+        <div data-when="arc">
+          <h2>压<span class="warn">到底线了</span></h2>
+          <div class="final">
+            <div><span>得分</span><b id="arcScore">0</b></div>
+            <div><span>最高</span><b id="arcBest">0</b></div>
+            <div><span>发射</span><b id="arcShots">0</b></div>
+            <div><span>撑过</span><b id="arcWave">0</b></div>
+          </div>
+          <button class="pbtn" id="arcAgain">再来一局</button>
+          <button class="pbtn ghost" id="arcPick">闯关模式</button>
         </div>
         <div data-when="win">
           <h2>过<span class="neon">关</span></h2>
@@ -111,7 +124,7 @@
 
 </div>
 
-<script src="bubble.js?v=4c882dbd"></script>
+<script src="bubble.js?v=2c3dc084"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

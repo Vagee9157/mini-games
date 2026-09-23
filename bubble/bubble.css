@@ -151,3 +151,6 @@
 .lv.locked{ opacity: .38; cursor: default; }
 .lv.locked u{ color: var(--ink-dim); }
 .lv:not(.locked):active{ transform: translateY(1px); }
+
+/* 竞技结束面板四格塞得下 */
+.card .final{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
