@@ -275,6 +275,32 @@ function fitBoard(){
 
 // ── 音效：跟俄罗斯方块一个路子，单振荡器，克制 ──
 let actx = null, muted = false;
+
+// new AudioContext() 要起音频线程，实测要 240ms。懒到「第一次出声时」才建，
+// 那一下就是肉眼可见的卡顿（扫雷首次挖格子卡 244ms 就是这么来的）；
+// 挪到首次手势也只是换个地方卡。所以在加载后的空闲期就建好 —— 那时候
+// 没有动画在跑，付得起。手势里只做 resume()，那个是便宜的。
+// 没手势时建出来是 suspended 状态，合规，贵的那一步已经付掉了。
+function primeAudio(){
+  if (actx) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    actx = new AC({ latencyHint: 'interactive' });
+  } catch { /* 不给就算了 */ }
+}
+if (window.requestIdleCallback) requestIdleCallback(primeAudio, { timeout: 2500 });
+else setTimeout(primeAudio, 700);
+
+function unlockAudio(){
+  try {
+    primeAudio();
+    if (actx && actx.state === 'suspended') actx.resume();
+  } catch { /* 不给就算了 */ }
+}
+for (const ev of ['pointerdown', 'touchstart', 'keydown']){
+  window.addEventListener(ev, unlockAudio, { passive: true });
+}
+
 const SPECS = {
   dig:  { f: 420, to: 520, d: .04, v: .022, type: 'sine' },
   flag: { f: 300, to: 380, d: .05, v: .026, type: 'triangle' },
@@ -285,7 +311,8 @@ function sfx(kind){
   if (muted) return;
   const s = SPECS[kind]; if (!s) return;
   try {
-    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    unlockAudio();
+    if (!actx || actx.state === 'closed') return;
     if (actx.state === 'suspended') actx.resume();
     const t = actx.currentTime;
     const o = actx.createOscillator(), g = actx.createGain();

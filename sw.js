@@ -1,6 +1,6 @@
 /* Service Worker —— 让这些游戏在没网的时候也能玩（高铁、地铁、飞机）。
    这个文件由 bump.py 生成，别手改：资源清单和版本号都是算出来的。 */
-const CACHE = 'mini-games-eb3345c95d';
+const CACHE = 'mini-games-d1775e275b';
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,23 +10,23 @@ const ASSETS = [
   "./tetris/index.html",
   "./tetris/manifest.json",
   "./tetris/tetris.css?v=929e9234",
-  "./tetris/tetris.js?v=95eb2329",
+  "./tetris/tetris.js?v=aeafc83b",
   "./minesweeper/",
   "./minesweeper/index.html",
   "./minesweeper/manifest.json",
   "./assets/ui.css?v=9c37111d",
   "./minesweeper/mine.css?v=2df98c8e",
-  "./minesweeper/mine.js?v=9987eda3",
+  "./minesweeper/mine.js?v=0921474b",
   "./bubble/",
   "./bubble/index.html",
   "./bubble/manifest.json",
   "./bubble/bubble.css?v=4ff7cd54",
-  "./bubble/bubble.js?v=d007ebf5",
+  "./bubble/bubble.js?v=9c2f84f2",
   "./pool/",
   "./pool/index.html",
   "./pool/manifest.json",
   "./pool/pool.css?v=f3439b39",
-  "./pool/pool.js?v=3e8a9188",
+  "./pool/pool.js?v=ec2cc007",
   "./assets/icons/favicon-32.png",
   "./assets/icons/icon-180.png",
   "./assets/icons/icon-192.png",

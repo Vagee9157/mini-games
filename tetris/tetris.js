@@ -189,7 +189,7 @@ function garbagePeriod(){
 // 清完把新值写回本地，之后再刷新就不会再清，新成绩正常保存。
 // 空字符串 = 不清任何东西。
 // 只在记分规则变了、老分数变得够不着的时候才动它，别跟着每次发版改。
-const WIPE_TOKEN = '2026-09-23-scoring';
+const WIPE_TOKEN = '2026-09-23-level20';
 const WIPE_KEY = 'tetris.wipe.v1';
 
 // 棋盘边框的「温度」。等级越高越往热的一头走：青 → 绿 → 琥珀 → 橙 → 红 → 品红，
@@ -1216,18 +1216,28 @@ function noiseHit(t, cfg){
 
 // iOS 上 AudioContext 只能在用户手势里创建/恢复，否则一直 suspended、永远没声。
 // 所以第一次触碰屏幕就把它开起来，不等第一个音效。
+// new AudioContext() 要起音频线程，实测 240ms。放在首次手势里建，
+// 用户第一次点屏幕就会卡一下；所以挪到加载后的空闲期 —— 那会儿没动画在跑。
+// 没手势时建出来是 suspended，合规，贵的那步已经付掉了。
+function primeAudio(){
+  if (actx) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    // 明确要最小缓冲，别让浏览器为了省电挑个大 buffer
+    actx = new AC({ latencyHint: 'interactive' });
+    // resume() 是异步的：刚调完 state 还是 suspended，musicStart 会当场退出。
+    // 之前靠一次性的 pointerdown 去起音乐，谁先谁后全看运气，
+    // 所以「刷新后有时候没有背景音乐」。改成等真的 running 了再回头起一次。
+    actx.addEventListener('statechange', () => { if (actx.state === 'running') syncMusic(); });
+  } catch { /* 不给就算了 */ }
+}
+if (window.requestIdleCallback) requestIdleCallback(primeAudio, { timeout: 2500 });
+else setTimeout(primeAudio, 700);
+
 function unlockAudio(){
   try {
-    if (!actx){
-      const AC = window.AudioContext || window.webkitAudioContext;
-      // 明确要最小缓冲，别让浏览器为了省电挑个大 buffer
-      actx = new AC({ latencyHint: 'interactive' });
-      // resume() 是异步的：刚调完 state 还是 suspended，musicStart 会当场退出。
-      // 之前靠一次性的 pointerdown 去起音乐，谁先谁后全看运气，
-      // 所以「刷新后有时候没有背景音乐」。改成等真的 running 了再回头起一次。
-      actx.addEventListener('statechange', () => { if (actx.state === 'running') syncMusic(); });
-    }
-    if (actx.state === 'suspended'){
+    primeAudio();
+    if (actx && actx.state === 'suspended'){
       const p = actx.resume();
       if (p && p.then) p.then(() => syncMusic(), () => { /* 拒了就算了 */ });
     }
