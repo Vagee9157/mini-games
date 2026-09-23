@@ -529,8 +529,13 @@ function lockPiece(){
   }
 }
 
+// 等级加成。原来是直接 × level，1 级到 15 级差 15 倍，
+// 高手「消得多」和「倍率高」两头相乘，分数差被放大到实力差的四倍。
+// 改成半速增长：level 15 是 8 倍，等级仍然值钱，但前期的分不至于白打。
+function levelMult(lvl){ return 1 + (lvl - 1) * .5; }
+
 function scoreFor(n, spin, perfect){
-  const lvl = game.level;
+  const mult = levelMult(game.level);
   let base = 0, label = '';
 
   if (spin === 'tspin'){
@@ -565,7 +570,7 @@ function scoreFor(n, spin, perfect){
     buzz([40, 50, 60, 50, 90]);
   }
 
-  game.score += base * lvl;
+  game.score += Math.round(base * mult);
 
   if (n > 0){
     game.lines += n;
