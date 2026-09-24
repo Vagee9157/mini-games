@@ -305,6 +305,40 @@ body{
 .final span{ display: block; font-family: var(--mono); font-size: 8.5px; letter-spacing: .14em; color: var(--ink-dim); }
 .final b{ display: block; font-family: var(--mono); font-size: 15px; color: var(--ink); margin-top: 2px; font-variant-numeric: tabular-nums; }
 
+/* 死因说人话，摆在标题下面 */
+.died{ font-size: 11px; color: var(--ink-dim); margin: -2px 0 12px; letter-spacing: .04em; }
+
+/* 死亡慢镜：结算页弹出来之前，盘面褪色定住 700ms。
+   只动 filter 和 opacity，合成器层面的事，不会引起重绘。 */
+body.dying #board{ filter: grayscale(.72) brightness(.62); transition: filter .6s ease; }
+body.dying .board-aura,
+body.dying .danger,
+body.dying .streak,
+body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
+@media (prefers-reduced-motion: reduce){
+  body.dying #board{ transition: none; }
+}
+
+/* 这局的流水账。所有机制都在跑，但之前没有一个地方把它们汇总给玩家看。 */
+.runlog{ margin: 0 0 13px; text-align: left; }
+.runtitle{ display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+.runtitle b{
+  font-family: var(--mono); font-size: 17px; letter-spacing: .12em;
+  color: #ffd166; text-shadow: 0 0 16px rgba(255,193,71,.45);
+}
+.runtitle span{ font-size: 10.5px; color: var(--ink-dim); }
+.runstats{
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px;
+  font-size: 10.5px; color: var(--ink-soft); line-height: 1.65;
+}
+.runstats span{ display: flex; justify-content: space-between; gap: 6px; min-width: 0; }
+.runstats span.w{ grid-column: 1 / -1; }     /* 变异块那行长，占满一排 */
+.runstats i{ font-style: normal; color: var(--ink-dim); flex: none; }
+.runstats b{
+  font-family: var(--mono); color: var(--ink); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 .overlay [data-when]{ display: none; }
 .overlay[data-mode="start"] [data-when~="start"],
 .overlay[data-mode="pause"] [data-when~="pause"],

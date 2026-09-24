@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=2949625e">
+<link rel="stylesheet" href="tetris.css?v=482c3567">
 </head>
 <body>
 <div class="topline"></div>
@@ -77,12 +77,18 @@
 
           <div data-when="over">
             <h2>堆到顶了</h2>
+            <p class="died" id="overDied"></p>
             <div class="final">
               <div><span>SCORE</span><b id="overScore">0</b></div>
               <div><span>BEST</span><b id="overBest">0</b></div>
               <div><span>LINES</span><b id="overLines">0</b></div>
               <div><span>LEVEL</span><b id="overLevel">1</b></div>
               <div id="legacyCell" hidden><span>旧版纪录</span><b id="overLegacy">0</b></div>
+            </div>
+            <!-- 这局的流水账。疯狂版才填（标准版没有热度/变异/梭哈这些东西可讲）。 -->
+            <div class="runlog" id="runlog" hidden>
+              <div class="runtitle"><b id="runTitle">稳</b><span id="runWhy"></span></div>
+              <div class="runstats" id="runStats"></div>
             </div>
             <button class="pbtn" id="againBtn">再来一局</button>
           </div>
@@ -163,7 +169,7 @@
 
 </div>
 
-<script src="tetris.js?v=80704601"></script>
+<script src="tetris.js?v=88804c8e"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

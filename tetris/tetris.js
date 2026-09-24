@@ -332,6 +332,7 @@ function clearSave(){
 
 function restoreGame(d){
   game.board = d.board;
+  game.run = newRun();
   game.queue = d.queue || [];
   // 旧存档没有 mods 字段，或者长度对不上，就地补齐 —— 两条数组必须严格同长，
   // 错位一格会让所有方块的变异都跟着错
@@ -360,6 +361,7 @@ function restoreGame(d){
   sweeps.length = 0;
   rings.length = 0;
   trails.length = 0;
+  squash = null;
   clearing = null;
   softDropping = false;
   held.left = held.right = false;
@@ -399,6 +401,9 @@ const game = {
   hold: null,
   holdUsed: false,
   bag: [],
+  // 这一局都发生了什么。结算页要把它讲出来 —— 所有机制都在跑，
+  // 但之前没有任何一个地方把它们汇总给玩家看。
+  run: null,
   queue: [],          // 预览队列，保持 5 个
   mods: [],           // 和 queue 一一对应的变异，入队时摇好
   holdMod: null,
@@ -486,6 +491,7 @@ function spawn(type, mod){
   needsDraw = true;
   const def = PIECES[type];
   const p = { type, x: def.spawnX, y: 0, rot: 0, mod: CRAZY ? (mod || null) : null };
+  if (game.run && p.mod) game.run[p.mod]++;
   game.piece = p;
   game.holdUsed = false;
   game.lastWasRot = false;
@@ -657,6 +663,8 @@ function lockPiece(){
     if (CRAZY && game.board[y].some(c => c === FROZEN)) thaw.push(y); else full.push(y);
   }
   if (thaw.length) crazyThaw(thaw);
+  // 消行时不压 —— 那时有消行动画顶着，两个特效叠一起反而糊
+  if (!full.length && !thaw.length) startSquash(p);
 
   // 消完这几行之后整个盘就空了 = 全消，Guideline 里给大额奖励
   const perfect = full.length > 0 &&
@@ -672,6 +680,7 @@ function lockPiece(){
     const pitch = Math.pow(1.0595, Math.min(6, Math.max(0, game.combo)));
     sfx(spin ? 'tspin' : (full.length === 4 ? 'tetris' : 'clear'), pitch);
     buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
+    if (full.length === 4 || perfect) musicDuck(170);
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
     if (CRAZY) addEmbers(full, full.length === 4 ? '#ffd166' : '#7fe3ff');
@@ -732,6 +741,58 @@ function clearStyle(n, spin, perfect){
           { name: 'TETRIS', cls: 't4', scale: 1.60 }][n] || null;
 }
 
+// 把这一局讲出来。只挑「真的发生过」的条目 —— 一堆 0 比什么都不写更难看。
+function fillRunLog(){
+  const box = $('runlog');
+  if (!box) return;
+  const r = game.run;
+  if (!CRAZY || !r){ box.hidden = true; return; }
+  const secs = game.elapsed / 1000;
+  const [title, why] = runTitle(r, secs);
+  $('runTitle').textContent = title;
+  $('runWhy').textContent = why;
+
+  const rows = [];
+  // 每条自己是一个 flex 行（名字靠左、数值靠右），两条并成一排 ——
+  // 拆成「名字一格、数值一格」的话长数值会顶出格子，实测「激1」被切掉了
+  const add = (k, v, wide) => rows.push(`<span${wide ? ' class="w"' : ''}><i>${k}</i><b>${v}</b></span>`);
+  if (r.peak > 1.05) add('峰值倍率', '×' + r.peak.toFixed(1));
+  if (r.bestHit > 0) add('最大一击', fmtScore(r.bestHit));
+  if (r.dangerMs > 500) add('危险区', (r.dangerMs / 1000).toFixed(0) + ' 秒');
+  const mods = [['金', r.gold], ['锤', r.hammer], ['弹', r.bomb], ['激', r.laser]]
+    .filter(v => v[1] > 0).map(v => v[0] + v[1]).join(' ');
+  if (mods) add('变异块', mods, true);
+  if (r.tetris) add('四行', r.tetris + ' 次');
+  if (r.tspin) add('T-SPIN', r.tspin + ' 次');
+  if (r.perfect) add('全消', r.perfect + ' 次');
+  if (r.bets) add('梭哈', `${r.betWins}/${r.bets}`);
+  if (r.rerolls) add('换牌', r.rerolls + ' 次');
+  // 写成 4:47 而不是「4 分 47 秒」—— 后者在 320px 宽的屏上会被截掉尾巴
+  add('这局用了', Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0'));
+
+  $('runStats').innerHTML = rows.join('');
+  box.hidden = false;
+}
+
+function newRun(){
+  return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0,
+           bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0 };
+}
+
+// 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
+// 同时满足好几条的时候，「赖皮」比「稳」更值得说。
+function runTitle(r, secs){
+  const dangerPct = secs > 0 ? r.dangerMs / (secs * 1000) : 0;
+  if (dangerPct > .25)        return ['赖皮', '四分之一的时间泡在危险区'];
+  if (r.betWins >= 3)         return ['赌徒', `梭哈赢了 ${r.betWins} 次`];
+  if (r.tspin >= 3)           return ['花活', `${r.tspin} 次 T-SPIN`];
+  if (r.rerolls >= 5)         return ['挑食', `换掉了 ${r.rerolls} 块`];
+  if (r.tetris >= 8)          return ['板砖工', `${r.tetris} 次四行`];
+  if (r.peak >= 10)           return ['上头', `峰值 ×${r.peak.toFixed(1)}`];
+  if (r.perfect > 0)          return ['干净', '打出过全消'];
+  return ['稳', '没什么惊险，也没什么惊喜'];
+}
+
 function scoreFor(n, spin, perfect){
   const mult = levelMult(game.level);
   let base = 0, label = '';
@@ -773,6 +834,12 @@ function scoreFor(n, spin, perfect){
 
   const gain = Math.round(base * mult * crazyScoreMult());
   game.score += gain;
+  if (game.run){
+    if (gain > game.run.bestHit) game.run.bestHit = gain;
+    if (n === 4) game.run.tetris++;
+    if (spin === 'tspin') game.run.tspin++;
+    if (perfect) game.run.perfect++;
+  }
 
   // 飘字落在被消掉那几行的中间；空转的 T-spin 没有消除行，落在方块自己身上
   const st = clearStyle(n, spin, perfect);
@@ -855,14 +922,27 @@ function riseGarbage(){
 }
 
 // why 只给 harness 统计死因分布用，不影响玩法
+// 死因说人话。「锁在隐藏区」「出生撞死」这种词玩家看不懂区别，
+// 而这两种死法其实要改的东西完全不一样。
+const DEATH_TEXT = {
+  '出生撞死':   '新方块出不来了',
+  '锁在隐藏区': '方块摞出屏幕了',
+  '灰线顶出':   '被灰线顶穿了',
+};
+let dieTimer = 0;
+
 function endGame(why){
   game.over = true;
+  // FEVER 的视觉不能留到结算页 —— crazyReset 要等重开才跑，中间这段
+  // 背景条纹会一直在动
+  if (CRAZY && feverLeft > 0) feverEnd();
   game.why = why || '?';
   game.piece = null;
   particles.length = 0;
   sweeps.length = 0;
   rings.length = 0;
   trails.length = 0;
+  squash = null;
   staticDirty = true;
   needsDraw = true;
   clearSave();
@@ -877,8 +957,18 @@ function endGame(why){
   const lg = readLegacy();
   $('legacyCell').hidden = !lg;
   if (lg) $('overLegacy').textContent = lg.toLocaleString();
-  $('overlay').classList.add('show');
+  fillRunLog();
+  $('overDied').textContent = DEATH_TEXT[game.why] || '';
   $('overlay').dataset.mode = 'over';
+
+  // 死亡慢镜：结算页晚 700ms 再弹，中间让盘面褪色定住。
+  // 以前是瞬间切到结算页，你还没看清自己怎么死的就结束了 —— 输也该有重量。
+  clearTimeout(dieTimer);
+  document.body.classList.add('dying');
+  dieTimer = setTimeout(() => {
+    document.body.classList.remove('dying');
+    $('overlay').classList.add('show');
+  }, 700);
   syncHud();
   sfx('over');
   buzz([90, 60, 90, 60, 160]);
@@ -1115,6 +1205,7 @@ function drawStatic(){
     for (let x = 0; x < COLS; x++){
       const t = row[x];
       if (!t) continue;
+      if (squash && squash.keys.has(y * COLS + x)) continue;   // 这几格由主画布带缩放画
       // 暗幕：只剩轮廓，逼你记棋盘。走 ghost 那套画法，不另写一份。
       drawCell(bgCtx, x * CELL, (y - BUFFER) * CELL, CELL, colorOf(t),
                evBlackout() ? { ghost: true } : { garbage: t === GARBAGE });
@@ -1130,6 +1221,7 @@ function draw(){
 
   if (staticDirty) drawStatic();
   ctx.drawImage(bgCv, 0, 0, W, H);
+  if (squash) drawSquash();
 
   if (clearing){
     // 消行动画分两段，总时长仍是 260ms，不延长冻结：
@@ -1581,6 +1673,7 @@ function syncHeat(){
   const el = $('badgeHeat');
   if (!el) return;
   const m = heatMult();
+  if (game.run && m > game.run.peak) game.run.peak = m;
   const on = m >= 1.15 && !game.over;
   el.classList.toggle('on', on);
   if (on) el.textContent = '×' + m.toFixed(1);
@@ -1621,6 +1714,7 @@ function syncDanger(){
   if (!el) return;
   const top = topFilledRow();
   const left = top < 0 ? 99 : top - BUFFER;
+  dangerLeft = left;
   if (!dangerOn && left <= 3) dangerOn = true;
   else if (dangerOn && left >= 5) dangerOn = false;
   el.classList.toggle('on', dangerOn && !game.over && game.started);
@@ -1993,7 +2087,49 @@ function musicBus(){
   return musicGain;
 }
 
+const MUSIC_VOL = .75;          // 音乐总线的正常音量，musicStart 爬到这里
 const LP_OPEN = 2600, LP_MUFFLE = 560;
+
+// 大消除落地前把音乐掐掉一瞬，消除的那下再回来。老把戏，但它让四行的
+// 冲击力翻倍 —— 静默本身就是一种响度。
+function musicDuck(ms){
+  if (!musicLP || !actx || !musicGain || !musicOn || muted) return;
+  const t = actx.currentTime, s = ms / 1000;
+  musicGain.gain.cancelScheduledValues(t);
+  // 目标值用常量而不是读 .value：读的时候可能正卡在某条斜坡中间，
+  // 读回来是个中间值，恢复之后音乐就再也回不到原音量了
+  musicGain.gain.setValueAtTime(musicGain.gain.value, t);
+  musicGain.gain.linearRampToValueAtTime(.0001, t + .018);
+  musicGain.gain.setValueAtTime(.0001, t + s);
+  musicGain.gain.linearRampToValueAtTime(MUSIC_VOL, t + s + .10);
+}
+
+// 心跳。频率压在 320Hz 以上 —— 手机外放放不出更低的，再「闷」也只是没声音。
+function thump(vol){
+  if (!actx || muted || actx.state !== 'running') return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(440, t);
+  o.frequency.exponentialRampToValueAtTime(330, t + .09);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(vol, t + .012);
+  g.gain.exponentialRampToValueAtTime(.0001, t + .15);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t); o.stop(t + .17);
+}
+
+let heartTimer = 0, dangerLeft = 99;
+function stepHeart(dt){
+  if (!dangerOn || game.over || !game.started || muted){ heartTimer = 0; return; }
+  heartTimer -= dt;
+  if (heartTimer > 0) return;
+  // 离顶越近跳得越快：还剩 3 行 ≈ 一秒一下，贴到顶 ≈ 每 0.42 秒一下
+  const close = Math.max(0, 4 - dangerLeft);
+  heartTimer = 1020 - close * 150;
+  thump(.11);
+  setTimeout(() => thump(.07), 155);     // lub-dub 的第二下
+}
 // 暗幕时把音乐闷下去。看不见方块已经够慌了，声音再一起蒙住，
 // 那五秒的压迫感是加倍的 —— 一个滤波器参数换来的。
 function setMuffle(on){
@@ -2251,6 +2387,7 @@ function crazyOnClear(lines, spin, perfect){
   if (lines > 0 && betLeft > 0){        // 赌赢：这一手的注入翻倍
     gain *= BET_MULT;
     betLeft = 0; betHide();
+    if (game.run) game.run.betWins++;
     showToast('梭哈成功　热度 ×' + BET_MULT);
     sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
   }
@@ -2413,6 +2550,51 @@ function boom(x, y, color){
       vx: (rndFx() - .5) * 260, vy: (rndFx() - .5) * 220,
       life: .9, color, size: CELL * .19,
     });
+}
+
+// ── 落地压扁 ──
+// 锁定那一瞬把方块竖直压一下再弹回来。一局要触发八十多次，是整套反馈里
+// 单位成本收益最高的一项。
+//
+// 做法是「这几格暂时不画进静态层，改由主画布带缩放画」：方块锁定时格子
+// 已经写进 game.board 了，drawStatic 会照常画它们，所以必须让 drawStatic
+// 跳过这几格，否则压扁的那层会叠在原尺寸的上面。
+// 代价是一次锁定多两次全量静态重绘（开始、结束各一次），实测可忽略。
+let squash = null;              // { keys:Set, color, t }
+const SQUASH_MS = 95;
+
+function startSquash(p){
+  const keys = new Set();
+  for (const [cx, cy] of cellsOf(p.type, p.rot)){
+    const by = p.y + cy;
+    if (by >= BUFFER) keys.add(by * COLS + (p.x + cx));
+  }
+  if (!keys.size) return;
+  squash = { keys, color: colorOf(p.type), t: 0 };
+  staticDirty = true; needsDraw = true;
+}
+
+function stepSquash(dt){
+  if (!squash) return;
+  squash.t += dt;
+  needsDraw = true;
+  if (squash.t >= SQUASH_MS){ squash = null; staticDirty = true; }
+}
+
+function drawSquash(){
+  const k = squash.t / SQUASH_MS;
+  const sy = 1 - Math.sin(Math.PI * k) * .17;   // 先压到 .83 再弹回 1
+  for (const key of squash.keys){
+    const y = (key / COLS) | 0, x = key % COLS;
+    const px = x * CELL, py = (y - BUFFER) * CELL;
+    ctx.save();
+    // 以格子底边为锚点缩放，看着才像「砸实了」而不是「缩小了」
+    ctx.translate(px, py + CELL);
+    ctx.scale(1, sy);
+    ctx.translate(-px, -(py + CELL));
+    drawCell(ctx, px, py, CELL, squash.color, {});
+    ctx.restore();
+  }
 }
 
 let beams = [];                 // 激光柱 { x, t }
@@ -2705,6 +2887,7 @@ function rerollPiece(){
   game.mods.push(game.piece.mod || null);
   spawn(t, m);
   fillQueue();
+  if (game.run) game.run.rerolls++;
   heatQuant = -1; syncHeat(); syncEdge(); syncReroll();
   showToast(`换牌　−${REROLL_COST} 热度`);
   sfx('hold', 1.22); buzz(18);
@@ -2735,6 +2918,7 @@ function betMaybeOffer(n, spin){
 function betAccept(){
   if (!CRAZY || betOffer <= 0) return;
   betOffer = 0; betLeft = BET_MS;
+  if (game.run) game.run.bets++;
   betHide();
   showToast('梭哈！十秒内必须消行');
   sfx('tetris', 1.15); buzz([40, 30, 40]);
@@ -2773,6 +2957,11 @@ function stepOnce(dt){
   stepParticles(dt);
   stepTrails(dt);
   stepFx(dt);
+  stepSquash(dt);
+  stepHeart(dt);
+  // 危险区计时。蹭 syncDanger 已经算好的 dangerOn，不另外扫一遍盘面 ——
+  // topFilledRow 是 220 格的扫描，不该每帧多跑一次
+  if (game.run && dangerOn) game.run.dangerMs += dt;
   crazyStep(dt);
   crazyClocks(dt);
   handleAutoRepeat(dt);
@@ -3189,6 +3378,9 @@ function restart(){
   clearSave();
   game.board = newBoard();
   game.bag = [];
+  clearTimeout(dieTimer);
+  document.body.classList.remove('dying');
+  game.run = newRun();
   game.queue = [];
   game.mods = [];
   game.holdMod = null;
@@ -3213,6 +3405,7 @@ function restart(){
   trails.length = 0;
   sweeps.length = 0;
   rings.length = 0;
+  squash = null;
   syncEdge();
   garbageTimer = 0;
   staticDirty = true;
@@ -3443,7 +3636,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   feverStart, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
-  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length }) };
+  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();
