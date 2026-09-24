@@ -358,16 +358,17 @@ body{
   transition: transform .08s, background .12s, border-color .12s;
 }
 .k svg{ width: 24px; height: 24px; display: block; color: var(--ink); }
-/* 下排的矮键：跨满两格保证点得中，但纵向压到 40px 且贴最下沿，
-   拇指自然位置够不到。图标和字改并排，不然 40px 塞不下两行。 */
-.k-wide{
-  grid-column: 1 / -1;
-  min-height: 40px;
-  flex-direction: row;
-  gap: 7px;
+/* 落底：挪到右列 BEST 下方。margin-top:auto 把它顶到侧栏最下面（贴近变换、
+   拇指够得到），margin-bottom 留一道死区 —— 它和变换上下相邻又同在右侧，
+   按变换手指往上滑出界时得落在空处，不能落在这个不可撤销的键上。 */
+.k-side{
+  margin-top: auto;
+  margin-bottom: 18px;
+  min-height: 52px;
   border-radius: 14px;
+  flex: none;
 }
-.k-wide svg{ width: 19px; height: 19px; }
+.k-side svg{ width: 21px; height: 21px; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);
@@ -375,8 +376,8 @@ body{
   border-color: rgba(120,235,255,.42);
   color: var(--ink);
 }
-/* 高度由 .k-wide 给（40px）。这里再写 min-height 会盖掉它 —— 
-   .k-drop 在文件里排在 .k-wide 后面，同特异度后来者赢。 */
+/* 高度由 .k-side 给。这里别再写 min-height —— .k-drop 排在 .k-side 后面，
+   同特异度后来者赢，会把它盖掉。 */
 .k-drop{
   background:
     linear-gradient(150deg, rgba(34,211,238,.28), rgba(168,85,247,.14)),
@@ -504,9 +505,10 @@ body{
     grid-template-areas:
       "hold  board next"
       "stats board bar"
+      "padl  board drop"
       "padl  board padr";
     grid-template-columns: minmax(140px, 1fr) minmax(170px, 250px) minmax(140px, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     align-items: start;
   }
   .board-wrap{ align-self: stretch; }   /* 别跟着 align-items:start 缩掉 */
@@ -523,8 +525,16 @@ body{
   .pad-g{ gap: 7px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
-  .k-wide{ min-height: 36px; }
-  .k-wide svg{ width: 17px; height: 17px; }
+  /* 横屏下 .side 是 display:contents，落底得自己认领一个格子，
+     还是摆在变换正上方，死区照留 */
+  .k-side{
+    grid-area: drop;
+    align-self: end;
+    margin: 0 0 12px;
+    min-height: 44px;
+    width: 100%;
+  }
+  .k-side svg{ width: 18px; height: 18px; }
 
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 5px 4px; text-align: left; }
@@ -599,7 +609,9 @@ body{
   .stat{ padding: 8px 10px 9px; text-align: left; }
   .stat span{ font-size: 9.5px; }
   .stat b{ font-size: 20px; }
+  /* 桌面用键盘，按键区和落底键都收起来（空格 = 落底） */
   .pads{ display: none; }
+  .k-side{ display: none; }
   .overlay h2{ font-size: 26px; }
   .overlay p{ font-size: 13px; }
 }

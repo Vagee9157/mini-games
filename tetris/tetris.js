@@ -2220,7 +2220,6 @@ function bindButtons(){
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
     ['btnCw',    () => { preHeld.cw = true;  tryRotate(1);  }, () => { preHeld.cw = false;  }],
-    ['btnCcw',   () => { preHeld.ccw = true; tryRotate(-1); }, () => { preHeld.ccw = false; }],
     // 软降引擎里本来就有（20 倍重力、每格 +1 分），以前只有键盘 ↓ 能用
     ['btnSoft',  () => { softDropping = true; },  () => { softDropping = false; }],
     ['btnDrop',  () => hardDrop(),      null],
