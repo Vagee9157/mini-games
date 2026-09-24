@@ -4,7 +4,7 @@
   "description": "浏览器里的俄罗斯方块，手机按键操作，竖屏横屏都能玩。",
   "start_url": "./?mode=app",
   "scope": "./",
-  "display": "fullscreen",
+  "display": "standalone",
   "display_override": ["fullscreen", "standalone"],
   "orientation": "any",
   "background_color": "#080b14",

@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=b559f132">
+<link rel="stylesheet" href="tetris.css?v=46000649">
 </head>
 <body>
 <div class="topline"></div>
@@ -49,6 +49,9 @@
       <div class="fx" id="fx" aria-hidden="true"></div>
       <div class="feverbar" aria-hidden="true">FEVER ×4</div>
       <div class="streak" id="streak" aria-hidden="true">
+       <!-- 热度徽章只有疯狂版会点亮（syncHeat 开头就 !CRAZY 早退），
+            标准版里它永远拿不到 .on，等于不存在 -->
+       <span class="badge heat" id="badgeHeat">×1.0</span>
        <span class="badge b2b" id="badgeB2B">B2B</span>
        <span class="badge cmb" id="badgeCombo">COMBO ×1</span>
       </div>
@@ -149,7 +152,7 @@
 
 </div>
 
-<script src="tetris.js?v=66f35b2e"></script>
+<script src="tetris.js?v=e4a59c97"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

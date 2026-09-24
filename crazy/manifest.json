@@ -4,7 +4,7 @@
   "description": "加了 FEVER、黄金方块和行雨的俄罗斯方块，分数会爆。",
   "start_url": "./?mode=app",
   "scope": "./",
-  "display": "fullscreen",
+  "display": "standalone",
   "display_override": ["fullscreen", "standalone"],
   "orientation": "any",
   "background_color": "#080b14",

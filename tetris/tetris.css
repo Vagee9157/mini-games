@@ -778,10 +778,36 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 .badge.b2b{ color: #ffd9f2; background: rgba(232,121,249,.22); border: 1px solid rgba(232,121,249,.5); }
 .badge.cmb{ color: #bdf3ff; background: rgba(34,211,238,.18);  border: 1px solid rgba(34,211,238,.45); }
 
+/* 热度徽章：疯狂版的主读数。分四档换色，档位由 JS 写 data-tier，
+   不逐帧改样式 —— 一局只会变几次。 */
+.badge.heat{ font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.badge.heat[data-tier="1"]{ color: #bdf3ff; background: rgba(34,211,238,.16); border: 1px solid rgba(34,211,238,.42); }
+.badge.heat[data-tier="2"]{ color: #d8ffd0; background: rgba(95,224,200,.20); border: 1px solid rgba(95,224,200,.55); }
+.badge.heat[data-tier="3"]{ color: #ffe3a8; background: rgba(255,193,71,.22); border: 1px solid rgba(255,193,71,.62); }
+.badge.heat[data-tier="4"]{
+  color: #fff; background: rgba(255,92,92,.28); border: 1px solid rgba(255,120,80,.85);
+  animation: heatBeat .7s ease-in-out infinite;
+}
+@keyframes heatBeat{ 0%,100%{ transform: scale(1) } 50%{ transform: scale(1.12) } }
+
+/* ── 边框 = 热度计 ──
+   全部只改 #board 已有的那四个 CSS 变量，以及 .board-aura 的 opacity/filter。
+   变量一变走的是 #board 自己的 box-shadow transition（0.55s），
+   而档位一局只跳几次，不是逐帧 —— 所以这里没有 box-shadow 动画。 */
+/* 边框的粗细和颜色由 JS 的 syncEdge 直接写内联变量 —— 在这里写
+   body[data-heat] #board{--bd-w:...} 是压不过内联样式的，别再试。
+   这一层只负责动画，因为 animation 不在内联里。 */
+body[data-heat="3"] .board-aura{ animation: auraPulse 1.5s ease-in-out infinite; }
+body[data-heat="4"] .board-aura{ animation: auraPulse .8s ease-in-out infinite, heatHue 3.2s linear infinite; }
+@keyframes heatHue{ from{ filter: hue-rotate(0deg) } to{ filter: hue-rotate(360deg) } }
+
 @media (prefers-reduced-motion: reduce){
   .shaker.shake, .shaker.shake-big{ animation: none; }
   .danger.on{ animation: none; opacity: .6; }
   .pop{ animation-duration: .01s; }
+  .badge.heat[data-tier="4"]{ animation: none; }
+  body[data-heat="3"] .board-aura,
+  body[data-heat="4"] .board-aura{ animation: none; opacity: .55; filter: none; }
 }
 
 /* 音乐 / 音效 三选一 */

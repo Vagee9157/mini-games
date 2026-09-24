@@ -152,8 +152,20 @@ const MAX_LEVEL = 20;
 // 提到 9 行之后满级重新变成「打得好才摸得到」。
 const LINES_PER_LEVEL = 9;
 const FALL_TOP = 1000;   // level 1：一秒一格 = 满屏 20 秒
-const FALL_END = 400;    // level 20：满屏 8 秒
+const FALL_END = 400;    // level 20：满屏 8 秒（标准版到此为止）
+
+// 疯狂版不封顶：指数逼近 200ms，永远在收紧、永远到不了。
+//   间隔 = 200 + 800 · e^(-(lvl-1)/16)
+// 中段和标准版几乎重合，20 级附近反而松一口气（444 vs 400），
+// 之后一路往下磨。要的就是「缓一点，但没有水平段」——
+// 标准版 20 级之后重力是条直线，高手会明确感到「不会更难了」。
+const CRAZY_FALL_FLOOR = 200;
+const CRAZY_FALL_K = 16;
 function gravityFor(lvl){
+  if (CRAZY){
+    const L = Math.max(1, lvl);
+    return CRAZY_FALL_FLOOR + (FALL_TOP - CRAZY_FALL_FLOOR) * Math.exp(-(L - 1) / CRAZY_FALL_K);
+  }
   const t = (clamp(lvl, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1);
   return FALL_TOP * Math.pow(FALL_END / FALL_TOP, t);
 }
@@ -173,9 +185,12 @@ function gravityFor(lvl){
 const GARBAGE = 'X';
 // 疯狂版灰线更凶：FEVER 的「灰线暂停」和行雨的「清灰线」都得有东西可对抗，
 // 取消灰线这两个机制就空转了
-const G_MAX = CRAZY ? 30000 : 45000;     // 开局周期
-const G_MIN = CRAZY ? 10000 : 15000;     // 压到这里就不再往下
-const G_TAU = 300000;    // 衰减时间常数，越大掉得越慢
+// 疯狂版这条比标准版松（36→12 秒 vs 45→15 秒的形状但拉得更长）：
+// 难度曲线负责「能活多久」，热度和事件负责「这一刻爽不爽」，
+// 两者分开之后曲线就可以放心摊平 —— 局够长，热度才来得及烧起来。
+const G_MAX = CRAZY ? 36000 : 45000;     // 开局周期
+const G_MIN = CRAZY ? 12000 : 15000;     // 压到这里就不再往下
+const G_TAU = CRAZY ? 420000 : 300000;   // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 
 // 满级（20 级）之后的加压：每再升一级，灰线周期再收 3%，没有上限。
@@ -183,7 +198,10 @@ const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 // 实测接近满分的 AI 能连打 100 分钟不死（12000 块上限都撑得到）。
 // 挂在消行数上而不是时间上：能活过 171 行的人必然在持续消行，
 // 等于「打得越好压得越快」—— 这条反向激励只在满级之后才生效。
-const G_OVER_RATE = .97;
+// 满级之后的加压。标准版是 20 级起每级 ×0.97 —— 一道悬崖。
+// 疯狂版改成 15 级起每级 ×0.985：开始得早一点、爬得慢得多，摊成一道缓坡。
+const G_OVER_FROM = CRAZY ? 15 : MAX_LEVEL;
+const G_OVER_RATE = CRAZY ? .985 : .97;
 const G_HARD_MIN = 1000;     // 再快也不低于 1 秒：到这份上谁都必死，
                              // 而且一帧塞进好几行会直接卡死
 
@@ -192,7 +210,7 @@ function garbageClock(){
 }
 function garbagePeriod(){
   let p = G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
-  const over = game.level - MAX_LEVEL;
+  const over = game.level - G_OVER_FROM;
   if (over > 0) p *= Math.pow(G_OVER_RATE, over);
   return Math.max(G_HARD_MIN, p);
 }
@@ -203,7 +221,9 @@ function garbagePeriod(){
 // 空字符串 = 不清任何东西。
 // 只在记分规则变了、老分数变得够不着的时候才动它，别跟着每次发版改。
 // 清档令牌按 NS 分开取值，否则为标准版 bump 会连带把疯狂版的最高分清掉
-const WIPE_TOKENS = { tetris: '2026-09-23-level20', crazy: '' };
+// 疯狂版加了热度倍率并解除等级封顶，中位分从 89 万跳到 736 万（8.3 倍），
+// 老纪录彻底够不着了，清一次。标准版记分规则没动，令牌保持原样。
+const WIPE_TOKENS = { tetris: '2026-09-23-level20', crazy: '2026-09-24-heat' };
 const WIPE_TOKEN = WIPE_TOKENS[NS];
 const WIPE_KEY = nsKey('wipe.v1');
 
@@ -285,6 +305,7 @@ function saveGame(force){
       b2b: game.b2b,
       garbage: game.garbage,
       elapsed: game.elapsed,
+      heat,
       at: Date.now(),
     }));
   } catch { /* 存不下就算了，不影响玩 */ }
@@ -317,6 +338,7 @@ function restoreGame(d){
   game.b2b = !!d.b2b;
   game.garbage = d.garbage || 0;
   game.elapsed = d.elapsed || 0;
+  heat = CRAZY ? (+d.heat || 0) : 0;
   syncEdge();
   garbageTimer = 0;
   game.over = false;
@@ -618,7 +640,7 @@ function lockPiece(){
   lastClearRows = full.slice();      // 必须在 scoreFor 之前，飘字要靠它定位
   lastLockY = p.y + 1;               // 空转 T-spin 没有消除行，飘字落在 T 的中心
   scoreFor(full.length, spin, perfect);
-  crazyOnClear(full.length);
+  crazyOnClear(full.length, spin, perfect);
 
   if (full.length){
     // 同理：先响，再去铺几十颗粒子和改 DOM
@@ -647,8 +669,11 @@ function lockPiece(){
 // 只打到 9、10 级，等于为了一个他们够不到的 20 级白亏分。
 // 凹曲线两头都保住：前中段贴着原来走，峰值仍然是 8 倍，一次 TETRIS
 // 最高还是 6400 分，跟改之前同一把尺子。
+// 疯狂版不封顶：20 级 ×8、30 级 ×10.6、50 级 ×15.3。涨得很慢但永远在涨，
+// 「活得久」本身就该是回报 —— 配合不封顶的分数，这是长局的主要奖励通道。
 function levelMult(lvl){
-  return 1 + 7 * Math.pow((clamp(lvl, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1), .75);
+  const L = CRAZY ? Math.max(1, lvl) : clamp(lvl, 1, MAX_LEVEL);
+  return 1 + 7 * Math.pow((L - 1) / (MAX_LEVEL - 1), .75);
 }
 
 let trails = [];        // 硬降残影 { cells:[[x,y]...], color, t }
@@ -998,15 +1023,20 @@ function edgeColor(lvl){
 function rgba(c, a){ const [r, g, b] = hex(c); return `rgba(${r},${g},${b},${a.toFixed(3)})`; }
 
 // 边框只在升级时重算一次，不进每帧的绘制循环
+const HEAT_EDGE = '#ff6a3c';     // 热度把边框往这个色推
 function syncEdge(){
   const L = game.level;
   const t = clamp((Math.min(L, MAX_LEVEL) - 1) / (MAX_LEVEL - 1), 0, 1);
-  const c = edgeColor(L);
+  // 等级定底色，热度定烈度，两者叠在同一组变量上。
+  // 注意这里写的是内联样式 —— CSS 里再写一套 body[data-heat] #board 是压不过的，
+  // 所以热度必须折进这个函数，不能单独走样式表。
+  const h = CRAZY ? clamp((heatMult() - 1) / 12, 0, 1) : 0;
+  const c = h > 0 ? mix(edgeColor(L), HEAT_EDGE, h) : edgeColor(L);
   const st = canvas.style;
-  st.setProperty('--bd-w',    (1 + t * 1.4).toFixed(2) + 'px');
-  st.setProperty('--bd-ring', rgba(c, .18 + t * .52));
-  st.setProperty('--bd-glow', rgba(c, .09 + t * .30));
-  st.setProperty('--bd-blur', Math.round(38 + t * 46) + 'px');
+  st.setProperty('--bd-w',    (1 + t * 1.4 + h * 1.6).toFixed(2) + 'px');
+  st.setProperty('--bd-ring', rgba(c, Math.min(.98, .18 + t * .52 + h * .28)));
+  st.setProperty('--bd-glow', rgba(c, Math.min(.85, .09 + t * .30 + h * .28)));
+  st.setProperty('--bd-blur', Math.round(38 + t * 46 + h * 40) + 'px');
 
   const over = Math.max(0, L - MAX_LEVEL);
   const box = canvas.parentElement;
@@ -1015,7 +1045,7 @@ function syncEdge(){
   if (aura){
     // 超出满级的每一级再亮一点点，让「还在变难」看得见
     aura.style.setProperty('--au-ring', rgba(c, .78));
-    aura.style.setProperty('--au-glow', rgba(c, Math.min(.60, .32 + over * .02)));
+    aura.style.setProperty('--au-glow', rgba(c, Math.min(.60, .32 + over * .02 + h * .2)));
     aura.style.setProperty('--au-blur', Math.min(150, 72 + over * 4) + 'px');
   }
 }
@@ -1418,7 +1448,7 @@ function syncHud(){
   rollScore(false);
   $('lines').textContent = game.lines;
   $('level').textContent = game.level;
-  $('best').textContent  = game.best.toLocaleString();
+  $('best').textContent  = fmtScore(game.best);
 }
 
 // 消行时让棋盘边框闪一下，四行给更重的那一版
@@ -1471,7 +1501,35 @@ function shake(big){
 }
 
 // B2B / 连击徽章。常驻显示，断了就灭 —— 一闪而过的 toast 教不会人这两个机制。
+// 热度可视化：一个常驻徽章报当前倍率，外加整体视觉跟着热度分档变。
+// 玩家全程盯着一个数字，那个数字能飙到自己都害怕 —— 这是疯狂版的主轴。
+let heatTier = -1, heatQuant = -1;
+function syncHeat(){
+  if (!CRAZY) return;
+  const el = $('badgeHeat');
+  if (!el) return;
+  const m = heatMult();
+  const on = m >= 1.15 && !game.over;
+  el.classList.toggle('on', on);
+  if (on) el.textContent = '×' + m.toFixed(1);
+  // 分档改 data 属性，不逐帧写样式 —— 档位没变就什么都不做
+  const t = !on ? 0 : m < 3 ? 1 : m < 6 ? 2 : m < 10 ? 3 : 4;
+  if (t !== heatTier){
+    heatTier = t;
+    document.body.dataset.heat = t;
+    el.dataset.tier = t;
+    syncEdge();               // 边框的烈度跟着档位走
+  }
+  // 倍率是连续的，边框每档内部也该跟着走一点，但别逐帧写 —— 每 0.5 档更新一次
+  const q = Math.round(m * 2);
+  if (q !== heatQuant){
+    heatQuant = q;
+    syncEdge();
+  }
+}
+
 function syncStreak(){
+  syncHeat();
   const b2b = $('badgeB2B'), cmb = $('badgeCombo');
   if (!b2b || !cmb) return;
   const onB = !!game.b2b && !game.over;
@@ -1501,16 +1559,27 @@ function topFilledRow(){
 
 // 分数滚动。自己跑一条 rAF，不依赖游戏循环 —— 结算那一刻循环已经停了。
 let shownScore = 0, rollId = 0;
+// 分数超过六位就换成「万」，不然 SCORE 框（56px 宽 / 14px 字号）装不下：
+// `1,036,800` 要 76px，会被 text-overflow 截成省略号。
+// 疯狂版解除等级封顶之后七位数是常态，这个必须一起改，
+// 否则「看着数字爆炸」这个核心爽点反而是看不见的。
+function fmtScore(v){
+  v = Math.round(v);
+  if (v < 1000000) return v.toLocaleString();
+  if (v < 100000000) return (v / 10000).toFixed(v < 10000000 ? 1 : 0) + '万';
+  return (v / 100000000).toFixed(2) + '亿';
+}
+
 function rollScore(snap){
   const el = $('score');
   if (!el) return;
-  if (snap){ shownScore = game.score; el.textContent = shownScore.toLocaleString(); return; }
+  if (snap){ shownScore = game.score; el.textContent = fmtScore(shownScore); return; }
   if (rollId) return;
   const tickRoll = () => {
     const d = game.score - shownScore;
-    if (Math.abs(d) < 1){ shownScore = game.score; el.textContent = shownScore.toLocaleString(); rollId = 0; return; }
+    if (Math.abs(d) < 1){ shownScore = game.score; el.textContent = fmtScore(shownScore); rollId = 0; return; }
     shownScore += d * .22;
-    el.textContent = Math.round(shownScore).toLocaleString();
+    el.textContent = fmtScore(shownScore);
     rollId = requestAnimationFrame(tickRoll);
   };
   rollId = requestAnimationFrame(tickRoll);
@@ -1966,13 +2035,47 @@ const RAIN_ROWS = 5;             // 一次冲掉几行。3 行实测只买回 1 
                                  // 盘面已经饱和，降 3 格下一块照样堵死
 const RAIN_TRIGGER = 4;          // 堆顶到了这一行（含）就算进危险区，可以提前下雨
 
+// ── 热度 HEAT：疯狂版的核心 ──
+// 一条不封顶的倍率条。消行往里注入热度，停手就按比例掉。
+//
+// 为什么要它：现在慢慢摆和飙着打拿一模一样的分，玩家没有任何理由冒险。
+// 热度奖励「快」，而快就会失误，失误才有心跳。这是原来整套机制里缺的那一环
+// —— 黄金和 FEVER 都是运气，你自己努力换不来。
+//
+// 不设上限是故意的：打得够猛它就该失控。实际会被衰减自然拉住，
+// 平衡点约等于「注入速率 × 45 秒」，所以上限由手速决定，不由代码决定。
+const HEAT_TAU = 45000;   // 衰减时间常数：停手 45 秒掉到三分之一
+const HEAT_DIV = 12;      // 倍率 = 1 + heat / HEAT_DIV
+let heat = 0;
+
+function heatMult(){ return CRAZY ? 1 + heat / HEAT_DIV : 1; }
+
+// 注入量按含金量给，不按行数摊：一次 TETRIS 给 16，拆成四次单行只给 8。
+// 想把倍率烧上去就得打大的。
+function heatGain(n, spin, perfect){
+  if (perfect) return 40;
+  if (spin === 'tspin') return [6, 10, 18, 26][n] ?? 26;
+  if (spin === 'mini')  return [3, 4, 7][n] ?? 7;
+  return [0, 2, 5, 9, 16][n] || 0;
+}
+
+// 钩子⑥：每帧衰减
+function crazyStep(dt){
+  if (!CRAZY || heat <= 0) return;
+  // FEVER 期间不衰减 —— 那二十秒变成「把热度冻住往上堆」的黄金窗口，
+  // 而不只是个 ×4
+  if (feverLeft > 0) return;
+  heat *= Math.exp(-dt / HEAT_TAU);
+  if (heat < .05) heat = 0;
+}
+
 let feverLeft = 0;               // 剩余 FEVER 时间（ms，游戏时间）
 let feverPity = 0;               // 保底计数：每次消行没中就 +1
 let rainLeft = RAIN_MAX;
 let goldPending = false;         // 这一杆锁下去的块是不是金的
 
 function crazyReset(){
-  feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false;
+  feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false; heat = 0; heatTier = -1; heatQuant = -1;
   activePal = null;
   document.body.classList.remove('fever');
   if (CRAZY) setTempo(baseBpm);
@@ -1995,7 +2098,7 @@ function crazyOnLock(p){
 // 钩子③：算分时的倍数。金块 ×2、FEVER ×3，两者相乘。
 function crazyScoreMult(){
   if (!CRAZY) return 1;
-  let m = 1;
+  let m = heatMult();
   if (goldPending) m *= GOLD_MULT;
   if (feverLeft > 0) m *= FEVER_MULT;
   return m;
@@ -2003,9 +2106,14 @@ function crazyScoreMult(){
 
 // 钩子④：每"次"消行掷一次骰（不是每行）。没中时按消行数加权 +n%，
 // 这样打单行和打 TETRIS 的触发频率都不吃亏。线性保底，期望约 12 次消行一次。
-function crazyOnClear(lines){
-  if (!CRAZY || lines <= 0) return;
+function crazyOnClear(lines, spin, perfect){
+  if (!CRAZY) return;
+  if (lines <= 0 && !spin) return;
   goldPending = false;
+  // 空转的 T-spin 也给热度：它是实打实的技术动作，只是没消到行
+  heat += heatGain(lines, spin, perfect);
+  syncHeat();     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
+  if (lines <= 0) return;                 // 但不推 FEVER 保底
   if (feverLeft > 0) return;
   feverPity += lines;
   if (rndFx() < feverPity / PITY_DIV){ feverPity = 0; feverStart(); }
@@ -2069,6 +2177,7 @@ function stepOnce(dt){
   stepParticles(dt);
   stepTrails(dt);
   stepFx(dt);
+  crazyStep(dt);
   handleAutoRepeat(dt);
 
   // 灰线倒计时（消行动画期间不推进，免得叠在一起）
@@ -2683,6 +2792,7 @@ function init(){
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
+  get heat(){ return heat; }, heatMult, heatGain,
   get fever(){ return feverLeft; }, get rainLeft(){ return rainLeft; }, get feverPity(){ return feverPity; },
   feverStart, crazyRescue, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,

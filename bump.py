@@ -52,6 +52,19 @@ def gen_crazy():
         io.open(p, 'w', encoding='utf-8').write(t)
         print('  已从 tetris/index.html 生成 crazy/index.html')
 
+    # manifest 同理，也从标准版生成。两份手工维护迟早漂，而漂了的表现是
+    # 「加到主屏幕之后还带浏览器栏」—— 这种问题在桌面上根本复现不出来。
+    m = io.open(os.path.join(ROOT, 'tetris/manifest.json'), encoding='utf-8').read()
+    m = m.replace('"俄罗斯方块"', '"疯狂俄罗斯方块"').replace('"方块"', '"疯狂方块"')
+    m = m.replace('浏览器里的俄罗斯方块，手机按键操作，竖屏横屏都能玩。',
+                  '加了 FEVER、黄金方块和行雨的俄罗斯方块，分数会爆。')
+    m = m.replace('icons/icon-', 'icons/crazy-')
+    mp = os.path.join(ROOT, 'crazy/manifest.json')
+    oldm = io.open(mp, encoding='utf-8').read() if os.path.exists(mp) else ''
+    if oldm != m:
+        io.open(mp, 'w', encoding='utf-8').write(m)
+        print('  已从 tetris/manifest.json 生成 crazy/manifest.json')
+
 gen_crazy()
 
 # 自检：HTML 里所有本地 src=/href= 都必须被 TARGETS 覆盖到，
@@ -127,7 +140,18 @@ for a in assets:
     if a not in seen:
         seen.add(a); uniq.append(a)
 
-ver = hashlib.sha1('|'.join(uniq).encode()).hexdigest()[:10]
+# 版本号要把「路径列表」和「没带哈希那些文件的内容」一起算进去。
+# 只算路径的话，改 manifest.json 或换图标都不会让版本变 —— 而 SW 对资源是
+# cache-first，版本不变就永远发旧的。manifest 改了却推不出去，表现是
+# 「加到主屏幕还带浏览器栏」，在桌面上根本查不出来。
+fingerprint = list(uniq)
+for a in uniq:
+    if '?v=' in a or a.endswith('/'):
+        continue                      # 已经带内容哈希，或是目录
+    real = os.path.join(ROOT, a[2:])
+    if os.path.isfile(real):
+        fingerprint.append(a + '#' + digest(real))
+ver = hashlib.sha1('|'.join(fingerprint).encode()).hexdigest()[:10]
 tpl = io.open(os.path.join(ROOT, 'sw.js.tpl'), encoding='utf-8').read()
 sw = tpl.replace('__VERSION__', ver).replace('__ASSETS__', json.dumps(uniq, ensure_ascii=False, indent=2))
 swp = os.path.join(ROOT, 'sw.js')
