@@ -358,16 +358,9 @@ body{
   transition: transform .08s, background .12s, border-color .12s;
 }
 .k svg{ width: 24px; height: 24px; display: block; color: var(--ink); }
-/* 落底比旁边三个小一圈，而且贴着自己格子的下沿放，于是上方和左右都留出死区：
-   手指从变换或右移滑过来、或者按偏一点，落在空处而不是落在这个不可撤销的键上。
-   只缩视觉不缩点击区是防不住误触的，所以是真的把按钮做小。 */
-.k-drop{
-  min-height: 46px;
-  align-self: end;
-  margin: 0 6px;
-  border-radius: 15px;
-}
-.k-drop svg{ width: 21px; height: 21px; }
+/* 落底和其他三个等高、上下对齐，只在左右各留 6px 死区。
+   高度压矮那版看着一排不齐，防误触换成横向留白这一条。 */
+.k-drop{ margin: 0 6px; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);
@@ -522,8 +515,7 @@ body{
   .pad-g{ gap: 7px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
-  .k-drop{ min-height: 40px; margin: 0 6px; }
-  .k-drop svg{ width: 18px; height: 18px; }
+  .k-drop{ margin: 0 6px; }
 
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 5px 4px; text-align: left; }
@@ -568,9 +560,6 @@ body{
   .pads{ gap: 8px; }
   .pad{ gap: 5px; }
   .k{ min-height: 50px; }
-  /* 这条 .k 排在 .k-drop 后面、特异度又相同，会把落底的高度盖回去，
-     所以窄屏得把它再压一次，不然上方那道死区就没了 */
-  .k-drop{ min-height: 40px; }
   .slot.next canvas{ width: 98px; }
   .stat b{ font-size: 12.5px; }
   .tbtn{ font-size: 10px; padding: 5px 7px; }
