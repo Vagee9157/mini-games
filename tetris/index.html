@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=b78ded1c">
+<link rel="stylesheet" href="tetris.css?v=67bb2f71">
 </head>
 <body>
 <div class="topline"></div>
@@ -130,6 +130,10 @@
         <button class="row-btn" id="musicBtn">音乐：开</button>
         <button class="row-btn" id="buzzBtn">震动：开</button>
       </div>
+      <span class="sheet-lb">背景音乐</span>
+      <div class="seg seg-3" id="trackOpts"></div>
+      <span class="sheet-lb">音效风格</span>
+      <div class="seg seg-3" id="packOpts"></div>
       <span class="sheet-lb">配色</span>
       <div class="seg" id="palOpts"></div>
       <span class="sheet-lb">画法</span>
@@ -141,7 +145,7 @@
 
 </div>
 
-<script src="tetris.js?v=5cc1987f"></script>
+<script src="tetris.js?v=4730cb95"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

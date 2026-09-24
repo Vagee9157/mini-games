@@ -206,6 +206,8 @@ const EDGE_STOPS = [
 const STORE_KEY = 'tetris.best.v1';
 const BUZZ_KEY  = 'tetris.buzz.v1';
 const MUSIC_KEY = 'tetris.music.v1';
+const TRACK_KEY = 'tetris.track.v1';
+const PACK_KEY  = 'tetris.sfxpack.v1';
 const SKIN_KEY  = 'tetris.skin.v1';
 const SAVE_KEY  = 'tetris.save.v1';
 
@@ -1337,25 +1339,57 @@ function buzz(pattern){
 //   2) 阶梯式跳音代替 glide —— 一串离散的音快速走完，才有"叮叮叮"的颗粒感
 //   3) 落底另开一路噪声，当作老主机的噪声通道，砸下去那一下才有质感
 // 频率全部保持在 260Hz 以上，手机外放才放得出来。
-const SPECS = {
-  // 转一下：低两档的「咚」，像按实体键那一下。
-  // 频率往下走 + 半方波（50% 占空）音色更闷，再配一路低频噪声当撞击体。
-  rotate: { duty:.5,   v:.105, step:.026, notes:[415, 277], noise:{ v:.055, d:.05, hp:320 } },
-  // 自然落地：闷一点的两段下跳
-  lock:   { duty:.125, v:.060, step:.024, notes:[392, 294] },
-  // 落底：快速滑梯 + 噪声撞击
-  drop:   { duty:.25,  v:.115, step:.016, notes:[1047, 784, 587, 392, 294], noise:{ v:.075, d:.07, hp:900 } },
-  // 消行：上行琶音
-  clear:  { duty:.25,  v:.100, step:.044, notes:[523, 659, 784, 1047] },
-  // 四行：更长的号角，加一层上方五度
-  tetris: { duty:.25,  v:.115, step:.052, notes:[523, 659, 784, 1047, 1319, 1568, 2093], harm:true },
-  level:  { duty:.25,  v:.090, step:.055, notes:[784, 1047, 1319, 1568] },
-  hold:   { duty:.25,  v:.070, step:.024, notes:[440, 587] },
-  // T-spin：专属的高亮上行，跟普通消行明显区分开
-  tspin:  { duty:.125, v:.115, step:.046, notes:[659, 880, 1175, 1568, 2093], harm:true },
-  // 结束：一路掉下去
-  over:   { duty:.125, v:.100, step:.105, notes:[523, 392, 330, 262, 196, 147] },
+// 三套音效。duty=占空比（脉冲波的音色），notes 是阶梯跳音的音序，
+// noise 是另开的噪声通道。全部保持在 260Hz 以上 —— 手机外放放不出更低的。
+const SFX_PACKS = {
+  // 8-bit 经典：脉冲波 + 阶梯跳音 + 噪声，老主机那一套
+  bit: {
+    name: '8-bit',
+    rotate: { duty:.5,   v:.105, step:.026, notes:[415, 277], noise:{ v:.055, d:.05, hp:320 } },
+    lock:   { duty:.125, v:.060, step:.024, notes:[392, 294] },
+    drop:   { duty:.25,  v:.115, step:.016, notes:[1047, 784, 587, 392, 294], noise:{ v:.075, d:.07, hp:900 } },
+    clear:  { duty:.25,  v:.100, step:.044, notes:[523, 659, 784, 1047] },
+    tetris: { duty:.25,  v:.115, step:.052, notes:[523, 659, 784, 1047, 1319, 1568, 2093], harm:true },
+    tspin:  { duty:.125, v:.115, step:.046, notes:[659, 880, 1175, 1568, 2093], harm:true },
+    level:  { duty:.25,  v:.090, step:.055, notes:[784, 1047, 1319, 1568] },
+    hold:   { duty:.25,  v:.070, step:.024, notes:[440, 587] },
+    over:   { duty:.125, v:.100, step:.105, notes:[523, 392, 330, 262, 196, 147] },
+  },
+  // 柔和：接近正弦的高占空比、音序更短、去掉噪声，办公室能听
+  soft: {
+    name: '柔和',
+    rotate: { duty:.5,   v:.075, step:.034, notes:[523, 587] },
+    lock:   { duty:.5,   v:.048, step:.030, notes:[392, 330] },
+    drop:   { duty:.5,   v:.085, step:.028, notes:[784, 587, 440] },
+    clear:  { duty:.5,   v:.080, step:.056, notes:[523, 659, 784] },
+    tetris: { duty:.5,   v:.095, step:.062, notes:[523, 659, 784, 988, 1175], harm:true },
+    tspin:  { duty:.5,   v:.095, step:.056, notes:[587, 784, 988, 1319] },
+    level:  { duty:.5,   v:.075, step:.066, notes:[659, 880, 1047] },
+    hold:   { duty:.5,   v:.058, step:.030, notes:[440, 523] },
+    over:   { duty:.5,   v:.080, step:.120, notes:[440, 349, 294, 220] },
+  },
+  // 厚重电子：占空比压到 12.5%（谐波最多、最"锐"），音更低，噪声给得足
+  deep: {
+    name: '厚重',
+    rotate: { duty:.125, v:.115, step:.030, notes:[330, 262], noise:{ v:.080, d:.06, hp:260 } },
+    lock:   { duty:.125, v:.070, step:.028, notes:[330, 262], noise:{ v:.045, d:.04, hp:300 } },
+    drop:   { duty:.125, v:.130, step:.020, notes:[784, 523, 392, 294, 262], noise:{ v:.110, d:.10, hp:500 } },
+    clear:  { duty:.125, v:.110, step:.048, notes:[392, 523, 659, 784], noise:{ v:.05, d:.05, hp:700 } },
+    tetris: { duty:.125, v:.125, step:.056, notes:[392, 523, 659, 784, 1047, 1319], harm:true, noise:{ v:.09, d:.12, hp:400 } },
+    tspin:  { duty:.125, v:.125, step:.048, notes:[523, 698, 880, 1175, 1568], harm:true },
+    level:  { duty:.125, v:.100, step:.058, notes:[523, 784, 1047] },
+    hold:   { duty:.125, v:.075, step:.028, notes:[349, 466] },
+    over:   { duty:.125, v:.110, step:.115, notes:[392, 294, 233, 175, 131] },
+  },
 };
+let sfxPack = 'bit';
+let SPECS = SFX_PACKS.bit;
+function setPack(k){
+  if (!SFX_PACKS[k]) return;
+  sfxPack = k; SPECS = SFX_PACKS[k];
+  try { localStorage.setItem(PACK_KEY, k); } catch { /* 忽略 */ }
+}
+
 
 // 脉冲波要自己合成。占空比 d 的方波，第 n 次谐波幅度 = 2/(nπ)·sin(nπd)，
 // 建一次缓存起来，别每个音效都算一遍。
@@ -1463,38 +1497,84 @@ function sfx(kind, pitch){
 // 《Korobeiniki》，1861 年的俄罗斯民谣，公有领域。这里是自己合成的版本，
 // 不加载任何音频文件——离线能放，也不占缓存。
 // 时值单位是八分音符；0 表示休止。
-const BPM = 170;
-const EIGHTH = 60 / BPM / 2;
-
+// ── 曲库 ──
+// 三首都是现场合成，不加载任何音频文件 —— 离线能放，也不占缓存。
+// 时值单位是八分音符；0 表示休止。BASS 是每小节的低音根音。
 const A4 = 69, B4 = 71, C5 = 72, D5 = 74, E5 = 76, F5 = 77, G5 = 79, A5 = 81, GS5 = 80;
-const A3 = 57, B3 = 59, C4 = 60, D4 = 62, E4 = 64, GS4 = 68;
-// 低音也得待在手机喇叭放得出来的区间：A2 才 110Hz，外放等于没有，
-// 整条低音线往上挪一个八度。
-const A2 = 57, E2 = 52, D3 = 62;
+const A3 = 57, B3 = 59, C4 = 60, D4 = 62, E4 = 64, F4 = 65, G4 = 67, GS4 = 68;
+const A2 = 57, E2 = 52, D3 = 62, C3 = 60, F3 = 65, G3 = 67;
 
-const MELODY = [
-  // A 段
-  [E5,2],[B4,1],[C5,1],[D5,2],[C5,1],[B4,1],
-  [A4,2],[A4,1],[C5,1],[E5,2],[D5,1],[C5,1],
-  [B4,3],[C5,1],[D5,2],[E5,2],
-  [C5,2],[A4,2],[A4,4],
-  [D5,3],[F5,1],[A5,2],[G5,1],[F5,1],
-  [E5,3],[C5,1],[E5,2],[D5,1],[C5,1],
-  [B4,2],[B4,1],[C5,1],[D5,2],[E5,2],
-  [C5,2],[A4,2],[A4,4],
-  // B 段：低一个八度的长音
-  [E4,4],[C4,4],
-  [D4,4],[B3,4],
-  [C4,4],[A3,4],
-  [GS4,4],[B3,3],[0,1],
-  [E4,4],[C4,4],
-  [D4,4],[B3,4],
-  [C4,4],[E4,4],
-  [A4,4],[GS4,4],
+const TRACKS = [
+  {
+    name: 'Korobeiniki',
+    bpm: 170,
+    // 1861 年的俄罗斯民谣，公有领域。就是大家认的那首「俄罗斯方块主题曲」。
+    melody: [
+      [E5,2],[B4,1],[C5,1],[D5,2],[C5,1],[B4,1],
+      [A4,2],[A4,1],[C5,1],[E5,2],[D5,1],[C5,1],
+      [B4,3],[C5,1],[D5,2],[E5,2],
+      [C5,2],[A4,2],[A4,4],
+      [D5,3],[F5,1],[A5,2],[G5,1],[F5,1],
+      [E5,3],[C5,1],[E5,2],[D5,1],[C5,1],
+      [B4,2],[B4,1],[C5,1],[D5,2],[E5,2],
+      [C5,2],[A4,2],[A4,4],
+      [E4,4],[C4,4],
+      [D4,4],[B3,4],
+      [C4,4],[A3,4],
+      [GS4,4],[B3,3],[0,1],
+      [E4,4],[C4,4],
+      [D4,4],[B3,4],
+      [C4,4],[E4,4],
+      [A4,4],[GS4,4],
+    ],
+    bass: [A2,A2,E2,A2,D3,A2,E2,A2, A2,A2,A2,E2,A2,A2,A2,E2],
+  },
+  {
+    name: '民谣快板',
+    bpm: 186,
+    // 原创。小调、密集八分音符的跑动，节奏比上面那首更赶。
+    melody: [
+      [A4,1],[C5,1],[E5,1],[C5,1],[A4,1],[C5,1],[E5,2],
+      [G4,1],[B4,1],[D5,1],[B4,1],[G4,1],[B4,1],[D5,2],
+      [F4,1],[A4,1],[C5,1],[A4,1],[F4,1],[A4,1],[C5,2],
+      [E4,1],[GS4,1],[B4,1],[GS4,1],[E4,2],[B4,2],
+      [A4,2],[E5,2],[D5,1],[C5,1],[B4,1],[A4,1],
+      [G4,2],[D5,2],[C5,1],[B4,1],[A4,1],[G4,1],
+      [F4,2],[C5,2],[B4,1],[A4,1],[G4,1],[F4,1],
+      [E4,2],[B4,2],[A4,4],
+    ],
+    bass: [A2,G3,F3,E2, A2,G3,F3,E2],
+  },
+  {
+    name: '电子疾行',
+    bpm: 200,
+    // 原创。五声小调的riff，一直往前推，给疯狂版留的。
+    melody: [
+      [A4,1],[A4,1],[C5,1],[D5,1],[A4,1],[D5,1],[E5,2],
+      [A4,1],[A4,1],[C5,1],[D5,1],[E5,1],[G5,1],[E5,2],
+      [D5,1],[C5,1],[A4,1],[C5,1],[D5,1],[E5,1],[D5,2],
+      [C5,1],[A4,1],[G4,1],[A4,1],[C5,2],[A4,2],
+      [E5,1],[E5,1],[G5,1],[A5,1],[E5,1],[A5,1],[G5,2],
+      [E5,1],[D5,1],[C5,1],[D5,1],[E5,1],[D5,1],[C5,2],
+      [A4,1],[C5,1],[D5,1],[E5,1],[G5,1],[E5,1],[D5,2],
+      [C5,1],[A4,1],[E4,1],[A4,1],[A4,4],
+    ],
+    bass: [A2,A2,C3,C3, D3,D3,E2,E2],
+  },
 ];
 
-// 每小节的低音根音，一小节 8 个八分
-const BASS = [A2,A2,E2,A2,D3,A2,E2,A2, A2,A2,A2,E2,A2,A2,A2,E2];
+let trackIdx = 0;
+let MELODY = TRACKS[0].melody;
+let BASS = TRACKS[0].bass;
+let EIGHTH = 60 / TRACKS[0].bpm / 2;
+let baseBpm = TRACKS[0].bpm;
+
+// 变速必须走这个独立入口。
+// 千万别用「改完 BPM 再调 musicStart」那种写法 —— musicStart 的
+// `if (mTimer) return` 挡在 mAt 赋值之前，音乐已在放时它只会拉音量，
+// 整个变速会静默失效。这里只改步长，绝不碰 mAt（往回调 mAt 会让新音符
+// 叠在已排期的旧音符上）。已排期的 0.35 秒撤不回来，所以变速有延迟是正常的。
+function setTempo(bpm){ EIGHTH = 60 / Math.max(40, bpm) / 2; }
 
 let musicOn = true;
 let musicGain = null;     // 音乐总线，暂停时淡出
@@ -1524,8 +1604,17 @@ function musicBus(){
 }
 
 // 一个音：主音 + 低五度的薄薄一层，听着不那么单薄
-function playNote(m, t, dur, kind){
+// 每首曲子挂自己的 sub-gain。切歌时旧的单独淡出，不会和新曲子撞在一起 ——
+// 音符是 fire-and-forget 的，musicStop 只对总线淡出管不到已排期的振荡器。
+let trackGain = null;
+function trackBus(){
   const bus = musicBus();
+  if (!trackGain){ trackGain = actx.createGain(); trackGain.gain.value = 1; trackGain.connect(bus); }
+  return trackGain;
+}
+
+function playNote(m, t, dur, kind){
+  const bus = trackBus();
   // 音尾收得早 = 断奏，比拖满音符时值轻快得多。
   // atk 是起音时长：低音原来 12ms 起，四下一小节听着像敲鼓，拉到 34ms 就柔了。
   const cfg = kind === 'bass'
@@ -1547,11 +1636,21 @@ function playNote(m, t, dur, kind){
 
 // 提前 0.35 秒排好后面的音，setInterval 抖动就不会听出来
 function scheduleMusic(){
+  try { scheduleInner(); }
+  catch (e){
+    // 出错就降级静音，别让它在 setInterval 里每 120ms 抛一次 ——
+    // 那种情况音乐彻底没了但页面照常跑，只有控制台看得出来
+    if (mTimer){ clearInterval(mTimer); mTimer = 0; }
+  }
+}
+function scheduleInner(){
   if (!actx || actx.state !== 'running') return;
   const ahead = actx.currentTime + .35;
   let guard = 0;
   while (mAt < ahead && guard++ < 64){
-    const [note, len] = MELODY[mIdx];
+    const cur = MELODY[mIdx % MELODY.length];
+    if (!cur) { mIdx = 0; break; }
+    const [note, len] = cur;
     if (note) playNote(note, mAt, len * EIGHTH, 'lead');
     // 低音走「根音—五度」的蹦跳型，一小节四下，比压两个长根音跳脱
     for (let k = 0; k < len; k++){
@@ -1581,6 +1680,30 @@ function musicStart(){
   mAt = actx.currentTime + .12;
   scheduleMusic();
   mTimer = setInterval(scheduleMusic, 120);
+}
+
+// 切歌统一走这里：重置指针（不重置的话新旋律比旧的短会让 MELODY[mIdx]
+// 解构 undefined）、旧 sub-gain 单独淡出后断开，避免两首重叠。
+function switchTrack(i){
+  trackIdx = clamp(i, 0, TRACKS.length - 1);
+  const t = TRACKS[trackIdx];
+  MELODY = t.melody; BASS = t.bass; baseBpm = t.bpm;
+  setTempo(t.bpm);
+  mIdx = 0; mBar = 0; mBeat = 0;
+  try { localStorage.setItem(TRACK_KEY, String(trackIdx)); } catch { /* 忽略 */ }
+  if (actx && trackGain){
+    const old = trackGain, now = actx.currentTime;
+    old.gain.cancelScheduledValues(now);
+    old.gain.setValueAtTime(old.gain.value, now);
+    old.gain.linearRampToValueAtTime(.0001, now + .05);
+    // 断开时机按「最后一个已排期音符的结束」推，别写死
+    const safe = Math.max(.45, (mAt - now) + .3);
+    setTimeout(() => { try { old.disconnect(); } catch { /* 已经断了 */ } }, safe * 1000);
+    trackGain = null;
+  }
+  if (mTimer){ clearInterval(mTimer); mTimer = 0; }
+  if (actx) mAt = actx.currentTime + .12;
+  syncMusic();
 }
 
 function musicStop(fade = .35){
@@ -2064,6 +2187,28 @@ function syncMuteBtn(){
   b.setAttribute('aria-pressed', muted ? 'true' : 'false');
 }
 
+// 设置面板里的两排三选一
+function buildAudioPanel(){
+  const tw = $('trackOpts'), pw = $('packOpts');
+  if (!tw || !pw) return;
+  tw.innerHTML = '';
+  TRACKS.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg-btn' + (i === trackIdx ? ' on' : '');
+    b.textContent = t.name;
+    b.addEventListener('click', () => { switchTrack(i); buildAudioPanel(); });
+    tw.appendChild(b);
+  });
+  pw.innerHTML = '';
+  Object.keys(SFX_PACKS).forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'seg-btn' + (k === sfxPack ? ' on' : '');
+    b.textContent = SFX_PACKS[k].name;
+    b.addEventListener('click', () => { setPack(k); buildAudioPanel(); sfx('clear'); });
+    pw.appendChild(b);
+  });
+}
+
 // ───────────────────────── 启动 ─────────────────────────
 
 // 返回「这次真的清掉了一个成绩」，只有那样才值得弹提示
@@ -2087,6 +2232,8 @@ function init(){
     muted = localStorage.getItem('tetris.muted.v1') === '1';
     buzzOn = localStorage.getItem(BUZZ_KEY) !== '0';
     musicOn = localStorage.getItem(MUSIC_KEY) !== '0';
+    const tk = +localStorage.getItem(TRACK_KEY); if (tk >= 0 && tk < TRACKS.length) trackIdx = tk;
+    const pk = localStorage.getItem(PACK_KEY); if (pk && SFX_PACKS[pk]) sfxPack = pk;
   } catch { /* 忽略 */ }
   game.board = newBoard();
   game.best = readBest();
@@ -2107,6 +2254,11 @@ function init(){
     }
   };
   for (const ev of KICK_EVENTS) window.addEventListener(ev, kickAudio, { passive: true });
+
+  MELODY = TRACKS[trackIdx].melody; BASS = TRACKS[trackIdx].bass;
+  baseBpm = TRACKS[trackIdx].bpm; setTempo(baseBpm);
+  SPECS = SFX_PACKS[sfxPack];
+  buildAudioPanel();
 
   const mb = $('musicBtn');
   if (mb) mb.addEventListener('click', toggleMusic);
@@ -2187,7 +2339,8 @@ function init(){
 }
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
-window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
+window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, switchTrack, setPack, setTempo,
+  get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
 
