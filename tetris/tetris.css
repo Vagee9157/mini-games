@@ -711,3 +711,41 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 /* 音乐 / 音效 三选一 */
 .seg-3{ grid-template-columns: repeat(3, 1fr); }
 .seg-3 .seg-btn{ padding: 8px 4px; font-size: 11.5px; gap: 0; }
+
+/* ── FEVER ── */
+/* 只动 opacity / transform 的东西放这层；盘面配色由 JS 换 activePal 处理 */
+body.fever .board-aura{
+  --au-ring: rgba(255,210,63,.9);
+  --au-glow: rgba(255,140,0,.55);
+  animation: auraPulse 0.55s ease-in-out infinite !important;
+  opacity: 1;
+}
+body.fever .hud .cell.hi b{ color: #ffd23f; }
+body.fever .topline{ animation: feverLine 1.1s linear infinite; }
+@keyframes feverLine{ 0%{ filter: hue-rotate(0deg) } 100%{ filter: hue-rotate(360deg) } }
+
+/* FEVER 横幅：只动 transform/opacity，走合成层 */
+.feverbar{
+  position: absolute; left: 0; right: 0; top: 38%;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: clamp(22px, 9vw, 44px);
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: #ffd23f;
+  text-shadow: 0 0 24px rgba(255,160,0,.8);
+  pointer-events: none;
+  opacity: 0;
+}
+body.fever .feverbar{ animation: feverIn 1.2s ease-out forwards; }
+@keyframes feverIn{
+  0%   { opacity: 0; transform: scale(.6) }
+  25%  { opacity: 1; transform: scale(1.1) }
+  55%  { opacity: 1; transform: scale(1) }
+  100% { opacity: 0; transform: scale(1.04) translateY(-14px) }
+}
+@media (prefers-reduced-motion: reduce){
+  body.fever .board-aura{ animation: none !important; }
+  body.fever .topline{ animation: none; }
+  body.fever .feverbar{ animation: none; opacity: .9; }
+}

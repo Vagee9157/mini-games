@@ -1,0 +1,17 @@
+{
+  "name": "疯狂俄罗斯方块",
+  "short_name": "疯狂方块",
+  "description": "加了 FEVER、黄金方块和行雨的俄罗斯方块，分数会爆。",
+  "start_url": "./?mode=app",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#080b14",
+  "theme_color": "#080b14",
+  "icons": [
+    { "src": "../assets/icons/crazy-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../assets/icons/crazy-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "../assets/icons/crazy-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

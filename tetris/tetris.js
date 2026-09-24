@@ -6,6 +6,13 @@
 
 // ───────────────────────── 常量 ─────────────────────────
 
+// 疯狂版跟标准版同一份代码，靠这个开关分流。页面在加载 tetris.js 之前设它。
+const CRAZY = !!window.TETRIS_CRAZY;
+const NS = CRAZY ? 'crazy' : 'tetris';
+// 所有 localStorage 访问统一走这里，禁止写裸字符串 —— 之前就漏过
+// 内联的 'tetris.muted.v1'（不在常量块里，按常量块改会漏掉）
+const nsKey = (name) => `${NS}.${name}`;
+
 const COLS = 10;
 const ROWS = 20;        // 可见行
 const BUFFER = 2;       // 顶部隐藏行，方块在这里出生
@@ -43,7 +50,8 @@ const STYLES = {
 };
 
 const skin = { pal: 'clear', style: 'plain' };
-function colorOf(type){ return type === GARBAGE ? '#93a4c4' : PALETTES[skin.pal][type]; }
+let activePal = null;   // FEVER 期间临时换肤用，不落盘
+function colorOf(type){ return type === GARBAGE ? '#93a4c4' : PALETTES[activePal || skin.pal][type]; }
 
 // 每种方块的四个旋转态，坐标是它在自己 box 里的格子位置 [x, y]。
 // 直接写死每一态，比用旋转矩阵算更不容易在旋转中心上出错。
@@ -160,8 +168,10 @@ function gravityFor(lvl){
 // 模拟发现它专门惩罚打得好的人：熟练档一局消 150 行，等于白送难度钟 180 秒，
 // 越会玩、灰线来得越凶。去掉之后难度钟就是纯已玩时长，对谁都一样。
 const GARBAGE = 'X';
-const G_MAX = 45000;     // 开局周期
-const G_MIN = 15000;     // 压到这里就不再往下
+// 疯狂版灰线更凶：FEVER 的「灰线暂停」和行雨的「清灰线」都得有东西可对抗，
+// 取消灰线这两个机制就空转了
+const G_MAX = CRAZY ? 30000 : 45000;     // 开局周期
+const G_MIN = CRAZY ? 10000 : 15000;     // 压到这里就不再往下
 const G_TAU = 300000;    // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 
@@ -189,8 +199,10 @@ function garbagePeriod(){
 // 清完把新值写回本地，之后再刷新就不会再清，新成绩正常保存。
 // 空字符串 = 不清任何东西。
 // 只在记分规则变了、老分数变得够不着的时候才动它，别跟着每次发版改。
-const WIPE_TOKEN = '2026-09-23-level20';
-const WIPE_KEY = 'tetris.wipe.v1';
+// 清档令牌按 NS 分开取值，否则为标准版 bump 会连带把疯狂版的最高分清掉
+const WIPE_TOKENS = { tetris: '2026-09-23-level20', crazy: '' };
+const WIPE_TOKEN = WIPE_TOKENS[NS];
+const WIPE_KEY = nsKey('wipe.v1');
 
 // 棋盘边框的「温度」。等级越高越往热的一头走：青 → 绿 → 琥珀 → 橙 → 红 → 品红，
 // 同时描边更粗、辉光更亮更散。满级之后换成常亮脉动的光环。
@@ -203,13 +215,16 @@ const EDGE_STOPS = [
   [20, '#ff3ec8'],
 ];
 
-const STORE_KEY = 'tetris.best.v1';
+const STORE_KEY = nsKey('best.v1');       // 隔离：两个模式各有各的最高分
+const SAVE_KEY  = nsKey('save.v1');       // 隔离：疯狂版的存档不能被标准版 restore
+const LEGACY_KEY = nsKey('best.legacy');  // 清档时把旧纪录留一份
+// 下面这些是偏好，两个页面共用
 const BUZZ_KEY  = 'tetris.buzz.v1';
 const MUSIC_KEY = 'tetris.music.v1';
 const TRACK_KEY = 'tetris.track.v1';
 const PACK_KEY  = 'tetris.sfxpack.v1';
 const SKIN_KEY  = 'tetris.skin.v1';
-const SAVE_KEY  = 'tetris.save.v1';
+const MUTE_KEY  = 'tetris.muted.v1';
 
 // ───────────────────────── 工具 ─────────────────────────
 
@@ -419,6 +434,7 @@ function spawn(type){
   needsDraw = true;
   const def = PIECES[type];
   const p = { type, x: def.spawnX, y: 0, rot: 0 };
+  crazyOnSpawn(p);
   game.piece = p;
   game.holdUsed = false;
   game.lastWasRot = false;
@@ -556,6 +572,7 @@ function detectTSpin(){
 function lockPiece(){
   const p = game.piece;
   if (!p) return;
+  crazyOnLock(p);
   const spin = detectTSpin();
 
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
@@ -578,6 +595,7 @@ function lockPiece(){
     game.board.every((row, y) => full.includes(y) || row.every(c => !c));
   lastClearRows = full.slice();      // 必须在 scoreFor 之前，飘字要靠它定位
   scoreFor(full.length, spin, perfect);
+  crazyOnClear(full.length);
 
   if (full.length){
     // 同理：先响，再去铺几十颗粒子和改 DOM
@@ -648,7 +666,7 @@ function scoreFor(n, spin, perfect){
     buzz([40, 50, 60, 50, 90]);
   }
 
-  const gain = Math.round(base * mult);
+  const gain = Math.round(base * mult * crazyScoreMult());
   game.score += gain;
 
   // 飘字落在被消掉那几行的中间
@@ -691,7 +709,10 @@ function applyClear(rows){
 
 // 底部塞一行带缺口的灰线，整盘往上顶一格
 function riseGarbage(){
-  if (game.board[0].some(Boolean)){ endGame('灰线顶出'); return; }   // 顶出去了
+  if (game.board[0].some(Boolean)){
+    if (crazyRescue()) return;                 // 疯狂版：濒死豁免
+    endGame('灰线顶出'); return;
+  }
   game.board.shift();
   const row = new Array(COLS).fill(GARBAGE);
   row[(rndGame() * COLS) | 0] = null;                   // 留个缺口，不然没法消
@@ -1030,10 +1051,14 @@ function draw(){
     }
     // 快锁定的提示：以前是整块洗白，颜色全丢了，现在改成同色光边
     const lockPulse = grounded ? Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0) / 4 : 0;
+    // 金块：本色往金里混七成 + 常驻亮边，一眼认得出来
+    const gold = p.mod === 'gold';
+    const pc = gold ? mix(color, '#ffd23f', .72) : color;
     for (const [cx, cy] of cellsOf(p.type, p.rot)){
       const by = p.y + cy;
       if (by < BUFFER) continue;
-      drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, color, { glow: lockPulse });
+      drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, pc,
+               { glow: Math.max(lockPulse, gold ? .55 : 0) });
     }
   }
 
@@ -1733,6 +1758,106 @@ function toggleMusic(){
   syncMusic();
 }
 
+// ───────────────────────── 疯狂版 ─────────────────────────
+// 所有疯狂逻辑收在这一段里。核心函数只允许留一个钩子调用，
+// 不往 lockPiece / scoreFor / spawn 里散 `if (CRAZY)` ——
+// 否则半年后没人分得清哪行是给谁的。
+
+// 这几个数是按「疯狂版中位 = 标准版的 2~3 倍」反推出来的。
+// 第一版（1/16、10 秒、×3）实测只有 1.24 倍 —— FEVER 十秒只盖得住三次消行，
+// 一局三百行里被加成的占比太小。
+const GOLD_RATE = 1 / 10;        // 黄金方块出现概率
+const GOLD_MULT = 3;
+const FEVER_MS = 20000;          // 一次 FEVER 多长（走 game.elapsed，不是墙钟）
+const FEVER_MULT = 4;
+const PITY_DIV = 55;             // 保底斜率：越小触发越勤
+const RAIN_MAX = 3;              // 行雨一局最多几次
+const RAIN_ROWS = 3;
+
+let feverLeft = 0;               // 剩余 FEVER 时间（ms，游戏时间）
+let feverPity = 0;               // 保底计数：每次消行没中就 +1
+let rainLeft = RAIN_MAX;
+let goldPending = false;         // 这一杆锁下去的块是不是金的
+
+function crazyReset(){
+  feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false;
+  activePal = null;
+  document.body.classList.remove('fever');
+  if (CRAZY) setTempo(baseBpm);
+}
+
+// 钩子①：出块时摇黄金。只挂在 piece 实例上 ——
+// holdPiece 只搬 game.piece.type，实例属性天然丢失，白送一个「进 hold 就掉金」。
+// 盘面格子和 queue 都是字符串，一个字节都不用动。
+function crazyOnSpawn(p){
+  if (!CRAZY) return;
+  p.mod = rndFx() < GOLD_RATE ? 'gold' : null;
+}
+
+// 钩子②：锁定时记下这块是不是金的（scoreFor 里 game.piece 已经是 null 了）
+function crazyOnLock(p){
+  if (!CRAZY) return;
+  goldPending = p.mod === 'gold';
+}
+
+// 钩子③：算分时的倍数。金块 ×2、FEVER ×3，两者相乘。
+function crazyScoreMult(){
+  if (!CRAZY) return 1;
+  let m = 1;
+  if (goldPending) m *= GOLD_MULT;
+  if (feverLeft > 0) m *= FEVER_MULT;
+  return m;
+}
+
+// 钩子④：每"次"消行掷一次骰（不是每行）。没中时按消行数加权 +n%，
+// 这样打单行和打 TETRIS 的触发频率都不吃亏。线性保底，期望约 12 次消行一次。
+function crazyOnClear(lines){
+  if (!CRAZY || lines <= 0) return;
+  goldPending = false;
+  if (feverLeft > 0) return;
+  feverPity += lines;
+  if (rndFx() < feverPity / PITY_DIV){ feverPity = 0; feverStart(); }
+}
+
+function feverStart(){
+  feverLeft = FEVER_MS;
+  activePal = 'classic';
+  staticDirty = true; previewDirty = true; needsDraw = true;
+  document.body.classList.add('fever');
+  showToast('FEVER  ×' + FEVER_MULT);
+  buzz([40, 30, 40, 30, 90]);
+  sfx('tetris', 1.26);
+  if (musicOn && !muted) setTempo(Math.round(baseBpm * 1.22));
+}
+function feverEnd(){
+  feverLeft = 0;
+  activePal = null;
+  staticDirty = true; previewDirty = true; needsDraw = true;
+  document.body.classList.remove('fever');
+  setTempo(baseBpm);
+}
+
+// 钩子⑤：行雨 = 濒死豁免。灰线马上要顶出去时才触发，一局最多三次。
+// 不计 lines、不给分、不动 combo/b2b —— 它是纯清障，不是奖励，
+// 否则「赖在危险区刷免费消行」会变成最优解。
+// 优先清最底下的灰线行，清不满就补普通行。
+function crazyRescue(){
+  if (!CRAZY || rainLeft <= 0) return false;
+  rainLeft--;
+  const rows = [];
+  for (let y = TOTAL_ROWS - 1; y >= 0 && rows.length < RAIN_ROWS; y--)
+    if (game.board[y].some(c => c === GARBAGE)) rows.push(y);
+  for (let y = TOTAL_ROWS - 1; y >= 0 && rows.length < RAIN_ROWS; y--)
+    if (!rows.includes(y) && game.board[y].some(Boolean)) rows.push(y);
+  if (!rows.length) return false;
+  for (const y of rows) burstRow(y);
+  applyClear(rows);                 // 直接塌陷，不走 scoreFor
+  showToast(`行雨！剩 ${rainLeft} 次`);
+  sfx('tetris', .84);
+  buzz([60, 40, 60]);
+  return true;
+}
+
 // ───────────────────────── 主循环 ─────────────────────────
 
 // 一步逻辑。不画、不排 rAF —— 这样 harness 能脱离真实时钟高速驱动。
@@ -1744,11 +1869,16 @@ function stepOnce(dt){
   handleAutoRepeat(dt);
 
   // 灰线倒计时（消行动画期间不推进，免得叠在一起）
+  if (feverLeft > 0){
+    feverLeft -= dt;
+    if (feverLeft <= 0) feverEnd();
+  }
   if (!clearing && game.piece){
     game.elapsed += dt;
-    garbageTimer += dt;
+    // FEVER 期间灰线暂停 —— 这比「重力减半」有感知得多（重力本来就不痛）
+    if (feverLeft <= 0) garbageTimer += dt;
     const period = garbagePeriod();
-    if (!game.noGarbage && garbageTimer >= period){
+    if (!game.noGarbage && feverLeft <= 0 && garbageTimer >= period){
       garbageTimer -= period;
       riseGarbage();
     }
@@ -2007,6 +2137,7 @@ function applySkin(){
 }
 
 function toggleStylePanel(open){
+  if (feverLeft > 0 && $('styleSheet').hidden){ showToast('FEVER 期间不能开面板'); return; }
   const el = $('styleSheet');
   const show = open === undefined ? el.hidden : open;
   if (show){
@@ -2134,6 +2265,7 @@ function restart(){
   bestBeaten = false;
   dangerOn = false;
   shownScore = 0;
+  crazyReset();
   syncEdge();
   garbageTimer = 0;
   staticDirty = true;
@@ -2157,6 +2289,7 @@ function restart(){
 
 function togglePause(){
   if (!game.started || game.over) return;
+  if (feverLeft > 0){ showToast('FEVER 期间不能暂停'); return; }
   game.paused = !game.paused;
   $('pauseTx').textContent = game.paused ? '继续' : '暂停';
   // 暂停时图标换成播放三角，一眼知道再点一下是继续
@@ -2177,7 +2310,7 @@ function toggleMute(){
   muted = !muted;
   syncMuteBtn();
   syncMusic();
-  try { localStorage.setItem('tetris.muted.v1', muted ? '1' : '0'); } catch { /* 忽略 */ }
+  try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch { /* 忽略 */ }
 }
 
 function syncMuteBtn(){
@@ -2217,6 +2350,10 @@ function applyWipe(){
   try {
     if (localStorage.getItem(WIPE_KEY) === WIPE_TOKEN) return false;
     const had = parseInt(localStorage.getItem(STORE_KEY) || '0', 10) || 0;
+    // 旧纪录留一份：个人小游戏里最高分就是全部的意义，别直接抹掉。
+    // 加条件，免得第二次清档把 legacy 覆盖成 0
+    const oldLegacy = parseInt(localStorage.getItem(LEGACY_KEY) || '0', 10) || 0;
+    if (had > 0 && had > oldLegacy) localStorage.setItem(LEGACY_KEY, String(had));
     localStorage.removeItem(STORE_KEY);
     localStorage.removeItem(SAVE_KEY);
     localStorage.setItem(WIPE_KEY, WIPE_TOKEN);
@@ -2229,7 +2366,7 @@ function init(){
   const savedSkin = readSkin();
   if (savedSkin) { skin.pal = savedSkin.pal; skin.style = savedSkin.style; }
   try {
-    muted = localStorage.getItem('tetris.muted.v1') === '1';
+    muted = localStorage.getItem(MUTE_KEY) === '1';
     buzzOn = localStorage.getItem(BUZZ_KEY) !== '0';
     musicOn = localStorage.getItem(MUSIC_KEY) !== '0';
     const tk = +localStorage.getItem(TRACK_KEY); if (tk >= 0 && tk < TRACKS.length) trackIdx = tk;
@@ -2339,7 +2476,9 @@ function init(){
 }
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
-window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, switchTrack, setPack, setTempo,
+window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
+  get fever(){ return feverLeft; }, get rainLeft(){ return rainLeft; }, get feverPity(){ return feverPity; },
+  feverStart, crazyRescue, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
