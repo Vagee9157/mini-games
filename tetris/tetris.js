@@ -190,12 +190,11 @@ const GARBAGE = 'X';
 const FROZEN  = 'F';   // 冰冻格：整行要消两次才掉
 // 疯狂版灰线更凶：FEVER 的「灰线暂停」和行雨的「清灰线」都得有东西可对抗，
 // 取消灰线这两个机制就空转了
-// 疯狂版这条比标准版松（36→12 秒 vs 45→15 秒的形状但拉得更长）：
-// 难度曲线负责「能活多久」，热度和事件负责「这一刻爽不爽」，
-// 两者分开之后曲线就可以放心摊平 —— 局够长，热度才来得及烧起来。
-const G_MAX = CRAZY ? 36000 : 45000;     // 开局周期
-const G_MIN = CRAZY ? 12000 : 15000;     // 压到这里就不再往下
-const G_TAU = CRAZY ? 420000 : 300000;   // 衰减时间常数，越大掉得越慢
+// 疯狂版比标准版凶得多。灰线钟走的是绝对时间、跟手速无关，所以它是唯一
+// 真正决定一局多长的旋钮 —— 摊平那一版各档手速全被钉在 9~19 分钟，太久。
+const G_MAX = CRAZY ? 24000 : 45000;     // 开局周期
+const G_MIN = CRAZY ?  7000 : 15000;     // 压到这里就不再往下
+const G_TAU = CRAZY ? 260000 : 300000;   // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 
 // 满级（20 级）之后的加压：每再升一级，灰线周期再收 3%，没有上限。
@@ -481,11 +480,8 @@ function spawn(type){
   lockTimer = 0;
   lockResets = 0;
   grounded = false;
-  // 出生位置就被占 → 结束。疯狂版先给行雨一次机会：清掉底下几行、整盘落下来，
-  // 出生位可能就腾出来了。清完还是被占就是真没救了。
-  if (collides(p.type, p.x, p.y, p.rot)){
-    if (!crazyRescue() || collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
-  }
+  // 出生位置就被占 → 结束
+  if (collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
 
   // IHS 优先于 IRS：按住暂存键就先换块，否则按住旋转键就先转好
   if (!armPre) return;
@@ -670,7 +666,7 @@ function lockPiece(){
     if (!hardLocking) sfx('lock');
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
-    if (topOut && !crazyRescue()){ endGame('锁在隐藏区'); return; }
+    if (topOut){ endGame('锁在隐藏区'); return; }
     armPre = true; spawnNext(); saveGame();
   }
 }
@@ -826,15 +822,7 @@ function applyClear(rows){
 
 // 底部塞一行带缺口的灰线，整盘往上顶一格
 function riseGarbage(){
-  // 疯狂版：顶之前先看堆高。等到堵死再救是救不回来的 —— 那时盘面已经饱和，
-  // 清几行也只是降几格，下一块立刻又堵上（实测每次只买回 1 秒）。
-  // 提前到「堆顶进了危险区」就下雨，玩家才有空间打出去。
-  // 不用额外加冷却：冲掉五行之后得重新堆满五行才会再次进危险区，间隔是自带的。
-  if (CRAZY && stackTopRow() <= RAIN_TRIGGER && crazyRescue()) return;
-  if (game.board[0].some(Boolean)){
-    if (crazyRescue()) return;                 // 兜底：真堵死了再试一次
-    endGame('灰线顶出'); return;
-  }
+  if (game.board[0].some(Boolean)){ endGame('灰线顶出'); return; }
   game.board.shift();
   const row = new Array(COLS).fill(GARBAGE);
   row[(rndGame() * COLS) | 0] = null;                   // 留个缺口，不然没法消
@@ -2107,10 +2095,10 @@ const GOLD_MULT = 3;
 const FEVER_MS = 20000;          // 一次 FEVER 多长（走 game.elapsed，不是墙钟）
 const FEVER_MULT = 4;
 const PITY_DIV = 55;             // 保底斜率：越小触发越勤
-const RAIN_MAX = 3;              // 行雨一局最多几次
-const RAIN_ROWS = 5;             // 一次冲掉几行。3 行实测只买回 1 秒 —— 死的那一刻
-                                 // 盘面已经饱和，降 3 格下一块照样堵死
-const RAIN_TRIGGER = 4;          // 堆顶到了这一行（含）就算进危险区，可以提前下雨
+// 行雨（濒死豁免）已删：顶到顶就该死。留着复活机会一局怎么都收不住 ——
+// 实测它一局买回三十多秒，而且让人敢往危险区赖。
+// 事件的「濒死只发好事」还要用危险区这个判据，门槛留着。
+const DANGER_ROW = 4;            // 堆顶到了这一行（含）算进危险区
 
 // ── 热度 HEAT：疯狂版的核心 ──
 // 一条不封顶的倍率条。消行往里注入热度，停手就按比例掉。
@@ -2167,11 +2155,10 @@ function crazyClocks(dt){
 
 let feverLeft = 0;               // 剩余 FEVER 时间（ms，游戏时间）
 let feverPity = 0;               // 保底计数：每次消行没中就 +1
-let rainLeft = RAIN_MAX;
 let goldPending = false;         // 这一杆锁下去的块是不是金的
 
 function crazyReset(){
-  feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false;
+  feverLeft = 0; feverPity = 0; goldPending = false;
   heat = 0; heatTier = -1; heatQuant = -1;
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
@@ -2542,7 +2529,7 @@ function evPeriod(){
 
 function pickEvent(){
   // 濒死时只发好事。这时候再来一发地震就是耍赖，不是难度。
-  const safe = stackTopRow() > RAIN_TRIGGER + 3;
+  const safe = stackTopRow() > DANGER_ROW + 3;
   const pool = EVENTS.filter(e => safe || !e.bad);
   let total = pool.reduce((a, e) => a + e.w, 0), r = rndFx() * total;
   for (const e of pool){ if ((r -= e.w) < 0) return e; }
@@ -2615,8 +2602,22 @@ function doQuake(){
   staticDirty = true; needsDraw = true; shake(true);
 }
 
+// 只压最漏的几列，不是全盘。全盘压实等于把所有洞一次填平，一大片行同时凑满、
+// 当场全清 —— 实测 18 层的满屏盘面一下压到 9 层、白送 9 行。
+// 那不叫「帮你一把」，那是把局面重置了。
+const COMPACT_COLS = 3;
 function doCompact(){
-  collapseCols(new Set(Array.from({ length: COLS }, (_, i) => i)));
+  const holes = [];
+  for (let x = 0; x < COLS; x++){
+    let seen = false, h = 0;
+    for (let y = 0; y < TOTAL_ROWS; y++){
+      if (game.board[y][x]) seen = true; else if (seen) h++;
+    }
+    if (h > 0) holes.push([x, h]);
+  }
+  if (!holes.length) return;
+  holes.sort((a, b) => b[1] - a[1]);
+  collapseCols(new Set(holes.slice(0, COMPACT_COLS).map(v => v[0])));
   shake(false);
 }
 
@@ -2668,36 +2669,6 @@ function betStep(dt){
       sfx('over', .8); buzz([90, 60, 90]);
     }
   }
-}
-
-// 钩子⑤：行雨 = 濒死豁免，一局最多三次。
-//
-// 原来只挂在「灰线往上顶、最顶那行已经有东西」这一个点上。实测 60 局，
-// 98% 的局它一次都没触发过 —— 因为死因分布是 出生撞死 68% / 锁在隐藏区 32% /
-// 灰线顶出 0%。所有人都死在放方块的那一刻，而它守着一扇没人走的门。
-// 现在三条死路都接上了：清掉最底下几行、整盘落下来，往往就能再喘一口。
-//
-// 没有加「灰线堆得够多才救」这类附加条件：一共就三次、又不给分，
-// 滥用不起来；而不可预测的施舍比没有施舍更难受。
-// 不计 lines、不给分、不动 combo/b2b —— 它是纯清障，不是奖励，
-// 否则「赖在危险区刷免费消行」会变成最优解。
-// 优先清最底下的灰线行，清不满就补普通行。
-function crazyRescue(){
-  if (!CRAZY || rainLeft <= 0) return false;
-  rainLeft--;
-  const rows = [];
-  for (let y = TOTAL_ROWS - 1; y >= 0 && rows.length < RAIN_ROWS; y--)
-    if (game.board[y].some(c => c === GARBAGE)) rows.push(y);
-  for (let y = TOTAL_ROWS - 1; y >= 0 && rows.length < RAIN_ROWS; y--)
-    if (!rows.includes(y) && game.board[y].some(Boolean)) rows.push(y);
-  if (!rows.length) return false;
-  for (const y of rows) burstRow(y);
-  sweepRows(rows, '#7fe3ff');       // 一局最多见三次的时刻，得让它看得出来
-  applyClear(rows);                 // 直接塌陷，不走 scoreFor
-  showToast(`行雨！剩 ${rainLeft} 次`);
-  sfx('tetris', .84);
-  buzz([60, 40, 60]);
-  return true;
 }
 
 // ───────────────────────── 主循环 ─────────────────────────
@@ -3361,8 +3332,8 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; needsDraw = true; },
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
-  get fever(){ return feverLeft; }, get rainLeft(){ return rainLeft; }, get feverPity(){ return feverPity; },
-  feverStart, crazyRescue, switchTrack, setPack, setTempo,
+  get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
+  feverStart, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length }) };
