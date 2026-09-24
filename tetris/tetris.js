@@ -212,6 +212,22 @@ const SAVE_KEY  = 'tetris.save.v1';
 // ───────────────────────── 工具 ─────────────────────────
 
 const $ = (id) => document.getElementById(id);
+
+// 玩法随机和特效随机分成两条流，不要合并。
+// 合成一条的话，同一个种子下「开音效」和「静音」会洗出不同的袋 ——
+// 因为静音时 sfx 直接 return，根本不消耗噪声那两次 random，A/B 对比就废了。
+// 粒子数量也随局面变化（burstLand 按方块底边格数），同理。
+// rndGame 只管 7-bag 洗牌和灰线缺口这两处真正影响结果的；没设种子时退回 Math.random。
+let gameSeed = 0;
+function setSeed(v){ gameSeed = (v | 0) || 0; }
+function rndGame(){
+  if (!gameSeed) return Math.random();
+  gameSeed = (gameSeed + 0x6D2B79F5) | 0;          // mulberry32
+  let t = Math.imul(gameSeed ^ (gameSeed >>> 15), 1 | gameSeed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const rndFx = () => Math.random();
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 function readBest(){
@@ -367,7 +383,7 @@ function newBoard(){
 function refillBag(){
   const bag = TYPES.slice();
   for (let i = bag.length - 1; i > 0; i--){
-    const j = (Math.random() * (i + 1)) | 0;
+    const j = (rndGame() * (i + 1)) | 0;
     [bag[i], bag[j]] = [bag[j], bag[i]];
   }
   return bag;
@@ -410,7 +426,7 @@ function spawn(type){
   lockResets = 0;
   grounded = false;
   // 出生位置就被占 → 结束
-  if (collides(p.type, p.x, p.y, p.rot)){ endGame(); return; }
+  if (collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
 
   // IHS 优先于 IRS：按住暂存键就先换块，否则按住旋转键就先转好
   if (!armPre) return;
@@ -572,7 +588,7 @@ function lockPiece(){
     if (!hardLocking) sfx('lock');
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
-    if (topOut) endGame(); else { armPre = true; spawnNext(); saveGame(); }
+    if (topOut) endGame('锁在隐藏区'); else { armPre = true; spawnNext(); saveGame(); }
   }
 }
 
@@ -650,25 +666,27 @@ function applyClear(rows){
 
 // 底部塞一行带缺口的灰线，整盘往上顶一格
 function riseGarbage(){
-  if (game.board[0].some(Boolean)){ endGame(); return; }   // 顶出去了
+  if (game.board[0].some(Boolean)){ endGame('灰线顶出'); return; }   // 顶出去了
   game.board.shift();
   const row = new Array(COLS).fill(GARBAGE);
-  row[(Math.random() * COLS) | 0] = null;                   // 留个缺口，不然没法消
+  row[(rndGame() * COLS) | 0] = null;                   // 留个缺口，不然没法消
   game.board.push(row);
   game.garbage++;
 
   const p = game.piece;
   if (p){
     if (!collides(p.type, p.x, p.y - 1, p.rot)) p.y--;      // 方块跟着上移
-    else if (collides(p.type, p.x, p.y, p.rot)){ endGame(); return; }
+    else if (collides(p.type, p.x, p.y, p.rot)){ endGame('灰线挤死'); return; }
   }
   staticDirty = true;
   needsDraw = true;
   sfx('lock');
 }
 
-function endGame(){
+// why 只给 harness 统计死因分布用，不影响玩法
+function endGame(why){
   game.over = true;
+  game.why = why || '?';
   game.piece = null;
   particles.length = 0;
   staticDirty = true;
@@ -1051,8 +1069,8 @@ function burst(p, power){
       particles.push({
         x: (p.x + cx + .5) * CELL,
         y: (by - BUFFER + .5) * CELL,
-        vx: (Math.random() - .5) * 90 * power,
-        vy: (Math.random() * -60 - 20) * power,
+        vx: (rndFx() - .5) * 90 * power,
+        vy: (rndFx() * -60 - 20) * power,
         life: 1, color, size: CELL * .16,
       });
     }
@@ -1071,10 +1089,10 @@ function burstLand(p){
     if (by < BUFFER) continue;
     for (let i = 0; i < 2; i++){
       particles.push({
-        x: (p.x + cx + .5 + (Math.random() - .5) * .7) * CELL,
+        x: (p.x + cx + .5 + (rndFx() - .5) * .7) * CELL,
         y: (by - BUFFER + 1) * CELL,
-        vx: (Math.random() - .5) * 70,
-        vy: Math.random() * -55 - 15,
+        vx: (rndFx() - .5) * 70,
+        vy: rndFx() * -55 - 15,
         life: .55, color, size: CELL * .11,
       });
     }
@@ -1090,8 +1108,8 @@ function burstRow(y){
       particles.push({
         x: (x + .5) * CELL,
         y: (y - BUFFER + .5) * CELL,
-        vx: (Math.random() - .5) * 220,
-        vy: (Math.random() - .5) * 160,
+        vx: (rndFx() - .5) * 220,
+        vy: (rndFx() - .5) * 160,
         life: 1, color, size: CELL * .2,
       });
     }
@@ -1225,7 +1243,7 @@ function noiseHit(t, cfg){
   if (!noiseBuf){
     noiseBuf = actx.createBuffer(1, actx.sampleRate * .3, actx.sampleRate);
     const d = noiseBuf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    for (let i = 0; i < d.length; i++) d[i] = rndFx() * 2 - 1;
   }
   const src = actx.createBufferSource();
   src.buffer = noiseBuf;
@@ -1236,7 +1254,7 @@ function noiseHit(t, cfg){
   const v = Math.min(.9, cfg.v * SFX_GAIN);
   g.gain.setValueAtTime(v, t);
   g.gain.exponentialRampToValueAtTime(.0001, t + cfg.d);
-  src.start(t, Math.random() * .2);
+  src.start(t, rndFx() * .2);
   src.stop(t + cfg.d + .02);
 }
 
@@ -1458,18 +1476,10 @@ function toggleMusic(){
 
 // ───────────────────────── 主循环 ─────────────────────────
 
-function tick(now){
-  rafId = requestAnimationFrame(tick);
-  dbg.frames++;
-  const dt = Math.min(now - lastFrame, 100);   // 切后台回来不要瞬移
-  lastFrame = now;
-  if (game.paused || game.over || game.frozen){
-    draw();
-    needsDraw = false;
-    cancelAnimationFrame(rafId);      // 停着就别空转了，恢复时再拉起来
-    rafId = 0;
-    return;
-  }
+// 一步逻辑。不画、不排 rAF —— 这样 harness 能脱离真实时钟高速驱动。
+// 返回 'stop' / 'clearing' / 'normal'，由调用方决定怎么画。
+function stepOnce(dt){
+  if (game.paused || game.over || game.frozen) return 'stop';
 
   stepParticles(dt);
   handleAutoRepeat(dt);
@@ -1479,7 +1489,7 @@ function tick(now){
     game.elapsed += dt;
     garbageTimer += dt;
     const period = garbagePeriod();
-    if (garbageTimer >= period){
+    if (!game.noGarbage && garbageTimer >= period){
       garbageTimer -= period;
       riseGarbage();
     }
@@ -1495,8 +1505,7 @@ function tick(now){
       spawnNext();
       saveGame();
     }
-    draw();
-    return;
+    return 'clearing';
   }
 
   if (game.piece){
@@ -1515,13 +1524,45 @@ function tick(now){
     touchGround(false);
     if (grounded){
       lockTimer += dt;
-      const step = Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0);
-      if (step !== lockStep){ lockStep = step; needsDraw = true; }
+      const phase = Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0);
+      if (phase !== lockStep){ lockStep = phase; needsDraw = true; }
       if (lockTimer >= LOCK_DELAY) lockPiece();
     } else lockStep = -1;
   }
 
   syncHud();
+  return 'normal';
+}
+
+// 外层切片：单步永远不超过 100ms（切后台回来不要瞬移），
+// 但允许一次喂进来一大段，harness 靠这个把一局压到毫秒级。
+function step(dt){
+  let left = Math.min(Math.max(dt, 0), 600000);
+  let r = 'normal';
+  do {
+    const d = Math.min(left, 100);
+    left -= d;
+    r = stepOnce(d);
+    if (r === 'stop') break;
+  } while (left > 0);
+  return r;
+}
+
+function tick(now){
+  rafId = requestAnimationFrame(tick);
+  dbg.frames++;
+  const dt = now - lastFrame;
+  lastFrame = now;
+
+  const r = step(dt);
+  if (r === 'stop'){
+    draw();
+    needsDraw = false;
+    cancelAnimationFrame(rafId);      // 停着就别空转了，恢复时再拉起来
+    rafId = 0;
+    return;
+  }
+  if (r === 'clearing'){ draw(); return; }
 
   // 方块匀速往下掉的时候，一秒里其实只有一帧画面变了。
   // 没变就别画——这是手机发烫的主因。
@@ -1830,6 +1871,7 @@ function restart(){
   game.started = true;
   game.garbage = 0;
   game.elapsed = 0;
+  game.why = '';
   syncEdge();
   garbageTimer = 0;
   staticDirty = true;
@@ -2007,6 +2049,7 @@ function init(){
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
+  step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
