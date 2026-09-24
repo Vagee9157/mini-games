@@ -453,8 +453,11 @@ function spawn(type){
   lockTimer = 0;
   lockResets = 0;
   grounded = false;
-  // 出生位置就被占 → 结束
-  if (collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
+  // 出生位置就被占 → 结束。疯狂版先给行雨一次机会：清掉底下几行、整盘落下来，
+  // 出生位可能就腾出来了。清完还是被占就是真没救了。
+  if (collides(p.type, p.x, p.y, p.rot)){
+    if (!crazyRescue() || collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
+  }
 
   // IHS 优先于 IRS：按住暂存键就先换块，否则按住旋转键就先转好
   if (!armPre) return;
@@ -631,7 +634,8 @@ function lockPiece(){
     if (!hardLocking) sfx('lock');
     // 锁在隐藏区之上 = 顶出局
     const topOut = cellsOf(p.type, p.rot).every(([, cy]) => p.y + cy < BUFFER);
-    if (topOut) endGame('锁在隐藏区'); else { armPre = true; spawnNext(); saveGame(); }
+    if (topOut && !crazyRescue()){ endGame('锁在隐藏区'); return; }
+    armPre = true; spawnNext(); saveGame();
   }
 }
 
@@ -762,6 +766,12 @@ function scoreFor(n, spin, perfect){
   syncStreak();
 }
 
+// 堆顶在第几行（越小越高）。空盘返回 TOTAL_ROWS。
+function stackTopRow(){
+  for (let y = 0; y < TOTAL_ROWS; y++) if (game.board[y].some(Boolean)) return y;
+  return TOTAL_ROWS;
+}
+
 function applyClear(rows){
   const set = new Set(rows);
   const kept = [];
@@ -774,8 +784,13 @@ function applyClear(rows){
 
 // 底部塞一行带缺口的灰线，整盘往上顶一格
 function riseGarbage(){
+  // 疯狂版：顶之前先看堆高。等到堵死再救是救不回来的 —— 那时盘面已经饱和，
+  // 清几行也只是降几格，下一块立刻又堵上（实测每次只买回 1 秒）。
+  // 提前到「堆顶进了危险区」就下雨，玩家才有空间打出去。
+  // 不用额外加冷却：冲掉五行之后得重新堆满五行才会再次进危险区，间隔是自带的。
+  if (CRAZY && stackTopRow() <= RAIN_TRIGGER && crazyRescue()) return;
   if (game.board[0].some(Boolean)){
-    if (crazyRescue()) return;                 // 疯狂版：濒死豁免
+    if (crazyRescue()) return;                 // 兜底：真堵死了再试一次
     endGame('灰线顶出'); return;
   }
   game.board.shift();
@@ -1947,7 +1962,9 @@ const FEVER_MS = 20000;          // 一次 FEVER 多长（走 game.elapsed，不
 const FEVER_MULT = 4;
 const PITY_DIV = 55;             // 保底斜率：越小触发越勤
 const RAIN_MAX = 3;              // 行雨一局最多几次
-const RAIN_ROWS = 3;
+const RAIN_ROWS = 5;             // 一次冲掉几行。3 行实测只买回 1 秒 —— 死的那一刻
+                                 // 盘面已经饱和，降 3 格下一块照样堵死
+const RAIN_TRIGGER = 4;          // 堆顶到了这一行（含）就算进危险区，可以提前下雨
 
 let feverLeft = 0;               // 剩余 FEVER 时间（ms，游戏时间）
 let feverPity = 0;               // 保底计数：每次消行没中就 +1
@@ -2012,7 +2029,15 @@ function feverEnd(){
   setTempo(baseBpm);
 }
 
-// 钩子⑤：行雨 = 濒死豁免。灰线马上要顶出去时才触发，一局最多三次。
+// 钩子⑤：行雨 = 濒死豁免，一局最多三次。
+//
+// 原来只挂在「灰线往上顶、最顶那行已经有东西」这一个点上。实测 60 局，
+// 98% 的局它一次都没触发过 —— 因为死因分布是 出生撞死 68% / 锁在隐藏区 32% /
+// 灰线顶出 0%。所有人都死在放方块的那一刻，而它守着一扇没人走的门。
+// 现在三条死路都接上了：清掉最底下几行、整盘落下来，往往就能再喘一口。
+//
+// 没有加「灰线堆得够多才救」这类附加条件：一共就三次、又不给分，
+// 滥用不起来；而不可预测的施舍比没有施舍更难受。
 // 不计 lines、不给分、不动 combo/b2b —— 它是纯清障，不是奖励，
 // 否则「赖在危险区刷免费消行」会变成最优解。
 // 优先清最底下的灰线行，清不满就补普通行。
@@ -2026,6 +2051,7 @@ function crazyRescue(){
     if (!rows.includes(y) && game.board[y].some(Boolean)) rows.push(y);
   if (!rows.length) return false;
   for (const y of rows) burstRow(y);
+  sweepRows(rows, '#7fe3ff');       // 一局最多见三次的时刻，得让它看得出来
   applyClear(rows);                 // 直接塌陷，不走 scoreFor
   showToast(`行雨！剩 ${rainLeft} 次`);
   sfx('tetris', .84);
