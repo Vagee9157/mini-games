@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=d9056f5e">
+<link rel="stylesheet" href="../tetris/tetris.css?v=b559f132">
 </head>
 <body>
 <div class="topline"></div>
@@ -59,7 +59,7 @@
           <div data-when="start">
             <h2>疯狂<span class="warn">方块</span></h2>
             <p>
-              下面四个键：<b>左移 · 右移 · 缓降 · 变换</b>，<b>落底</b>在右边 BEST 下方，点 HOLD 框暂存。<br>
+              下面四个键：<b>左移 · 右移 · 落底 · 变换</b>，点右边 HOLD 框暂存。<br>
               手机建议先点右上角<b>「游戏模式」</b>，横过来也能玩。
             </p>
             <button class="pbtn" id="resumeSaveBtn" data-save>接着上次玩 · <b id="resumeScore">0</b></button>
@@ -110,21 +110,17 @@
         <div class="stat"><span>BEST</span><b id="best">0</b></div>
       </div>
 
-      <!-- 落底放在右列最下面，正好在 BEST 之下、变换之上。
-           它和变换同在右侧、上下相邻，所以下面留了一道死区（见 .k-side 的 margin-bottom），
-           按变换往上滑出界时落在空处，不会误触这个不可撤销的键。 -->
-      <button class="k k-drop k-side" id="btnDrop" aria-label="直接落底"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6.4h8L12 13z"/><path d="M5.8 18.6h12.4" fill="none" stroke-width="2.8"/></svg><em>落底</em></button>
     </aside>
 
-    <!-- 按键区：左右各两个，全是可以随便按的键。
-         落底不在这里 —— 它挪到了右列 BEST 下方，离拇指的常走路线远一点。 -->
+    <!-- 按键区：一排四个。落底比旁边三个小一圈、贴着格子下沿，
+         四周留出死区 —— 它是这里唯一不可撤销的操作，不该和别的键一样好按。 -->
     <div class="pads">
       <div class="pad-g pad-l">
         <button class="k" id="btnLeft"  aria-label="左移"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.8 7 9.4 12l5.4 5z"/></svg><em>左移</em></button>
         <button class="k" id="btnRight" aria-label="右移"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 7l5.4 5-5.4 5z"/></svg><em>右移</em></button>
       </div>
       <div class="pad-g pad-r">
-        <button class="k" id="btnSoft" aria-label="缓慢下落"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.2v11.6"/><path d="M7.6 12.6 12 17.2l4.4-4.6"/></svg><em>缓降</em></button>
+        <button class="k k-drop" id="btnDrop" aria-label="直接落底"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6.4h8L12 13z"/><path d="M5.8 18.6h12.4" fill="none" stroke-width="2.8"/></svg><em>落底</em></button>
         <button class="k" id="btnCw" aria-label="顺时针旋转"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.3" y="9.5" width="11" height="11" rx="2.6"/><path d="M9.4 5.4h5.4a4.2 4.2 0 0 1 4.2 4.2v3.2"/><path d="M16.5 10.9 19 13.8l2.5-2.9"/></svg><em>变换</em></button>
       </div>
     </div>
@@ -154,7 +150,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=ed24db78"></script>
+<script src="../tetris/tetris.js?v=66f35b2e"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

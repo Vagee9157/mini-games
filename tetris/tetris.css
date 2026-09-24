@@ -358,17 +358,16 @@ body{
   transition: transform .08s, background .12s, border-color .12s;
 }
 .k svg{ width: 24px; height: 24px; display: block; color: var(--ink); }
-/* 落底：挪到右列 BEST 下方。margin-top:auto 把它顶到侧栏最下面（贴近变换、
-   拇指够得到），margin-bottom 留一道死区 —— 它和变换上下相邻又同在右侧，
-   按变换手指往上滑出界时得落在空处，不能落在这个不可撤销的键上。 */
-.k-side{
-  margin-top: auto;
-  margin-bottom: 18px;
-  min-height: 52px;
-  border-radius: 14px;
-  flex: none;
+/* 落底比旁边三个小一圈，而且贴着自己格子的下沿放，于是上方和左右都留出死区：
+   手指从变换或右移滑过来、或者按偏一点，落在空处而不是落在这个不可撤销的键上。
+   只缩视觉不缩点击区是防不住误触的，所以是真的把按钮做小。 */
+.k-drop{
+  min-height: 46px;
+  align-self: end;
+  margin: 0 6px;
+  border-radius: 15px;
 }
-.k-side svg{ width: 21px; height: 21px; }
+.k-drop svg{ width: 21px; height: 21px; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);
@@ -376,8 +375,7 @@ body{
   border-color: rgba(120,235,255,.42);
   color: var(--ink);
 }
-/* 高度由 .k-side 给。这里别再写 min-height —— .k-drop 排在 .k-side 后面，
-   同特异度后来者赢，会把它盖掉。 */
+/* 配色：落底是唯一不可撤销的操作，颜色上也和其他三个区分开 */
 .k-drop{
   background:
     linear-gradient(150deg, rgba(34,211,238,.28), rgba(168,85,247,.14)),
@@ -505,10 +503,9 @@ body{
     grid-template-areas:
       "hold  board next"
       "stats board bar"
-      "padl  board drop"
       "padl  board padr";
     grid-template-columns: minmax(140px, 1fr) minmax(170px, 250px) minmax(140px, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
     align-items: start;
   }
   .board-wrap{ align-self: stretch; }   /* 别跟着 align-items:start 缩掉 */
@@ -525,16 +522,8 @@ body{
   .pad-g{ gap: 7px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
-  /* 横屏下 .side 是 display:contents，落底得自己认领一个格子，
-     还是摆在变换正上方，死区照留 */
-  .k-side{
-    grid-area: drop;
-    align-self: end;
-    margin: 0 0 12px;
-    min-height: 44px;
-    width: 100%;
-  }
-  .k-side svg{ width: 18px; height: 18px; }
+  .k-drop{ min-height: 40px; margin: 0 6px; }
+  .k-drop svg{ width: 18px; height: 18px; }
 
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 5px 4px; text-align: left; }
@@ -579,6 +568,9 @@ body{
   .pads{ gap: 8px; }
   .pad{ gap: 5px; }
   .k{ min-height: 50px; }
+  /* 这条 .k 排在 .k-drop 后面、特异度又相同，会把落底的高度盖回去，
+     所以窄屏得把它再压一次，不然上方那道死区就没了 */
+  .k-drop{ min-height: 40px; }
   .slot.next canvas{ width: 98px; }
   .stat b{ font-size: 12.5px; }
   .tbtn{ font-size: 10px; padding: 5px 7px; }
@@ -609,9 +601,8 @@ body{
   .stat{ padding: 8px 10px 9px; text-align: left; }
   .stat span{ font-size: 9.5px; }
   .stat b{ font-size: 20px; }
-  /* 桌面用键盘，按键区和落底键都收起来（空格 = 落底） */
+  /* 桌面用键盘，按键区收起来（空格 = 落底） */
   .pads{ display: none; }
-  .k-side{ display: none; }
   .overlay h2{ font-size: 26px; }
   .overlay p{ font-size: 13px; }
 }

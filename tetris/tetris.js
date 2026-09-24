@@ -2246,8 +2246,6 @@ function bindButtons(){
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
     ['btnCw',    () => { preHeld.cw = true;  tryRotate(1);  }, () => { preHeld.cw = false;  }],
-    // 软降引擎里本来就有（20 倍重力、每格 +1 分），以前只有键盘 ↓ 能用
-    ['btnSoft',  () => { softDropping = true; },  () => { softDropping = false; }],
     ['btnDrop',  () => hardDrop(),      null],
     // HOLD 走同一套 touch 处理，不然它比别的键慢半拍（click 要等浏览器确认不是双击/滚动）
     ['holdSlot', () => { preHeld.hold = true; holdPiece(); }, () => { preHeld.hold = false; }],
