@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=482c3567">
+<link rel="stylesheet" href="../tetris/tetris.css?v=42ae09cc">
 </head>
 <body>
 <div class="topline"></div>
@@ -106,6 +106,9 @@
         <button class="allin-go" id="allinGo" type="button">接受</button>
       </div>
 
+      <!-- 灰线预告。事件都有三秒预告，偏偏真正杀你的灰线原来是无声的。 -->
+      <div class="gwarn" id="gwarn" aria-hidden="true"><i></i></div>
+
       <div class="toast" id="toast"></div>
      </div>
     </div>
@@ -170,7 +173,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=88804c8e"></script>
+<script src="../tetris/tetris.js?v=4ad308d4"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

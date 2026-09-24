@@ -54,6 +54,7 @@ let activePal = null;   // FEVER 期间临时换肤用，不落盘
 function colorOf(type){
   if (type === GARBAGE) return '#93a4c4';
   if (type === FROZEN)  return '#8fd8ff';
+  if (type === CHEST)   return '#ffd23f';
   return PALETTES[activePal || skin.pal][type];
 }
 
@@ -188,6 +189,7 @@ function gravityFor(lvl){
 // 越会玩、灰线来得越凶。去掉之后难度钟就是纯已玩时长，对谁都一样。
 const GARBAGE = 'X';
 const FROZEN  = 'F';   // 冰冻格：整行要消两次才掉
+const CHEST   = 'C';   // 灰线里的宝箱：消掉那一行就开
 // 疯狂版灰线更凶：FEVER 的「灰线暂停」和行雨的「清灰线」都得有东西可对抗，
 // 取消灰线这两个机制就空转了
 // 疯狂版比标准版凶得多。灰线钟走的是绝对时间、跟手速无关，所以它是唯一
@@ -642,9 +644,20 @@ function lockPiece(){
   crazyOnLock(p);
   const spin = detectTSpin();
 
+  // 这一下造了几个洞。countHoles 是 220 格扫描，只在锁定时跑两次 ——
+  // 一局八十几次，不进每帧循环。
+  const holesBefore = CRAZY ? countHoles() : 0;
+  const stalled = lockResets;
+
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
     const by = p.y + cy, bx = p.x + cx;
     if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
+  }
+  if (CRAZY){
+    const made = countHoles() - holesBefore;
+    // 自嘲比装作没看见舒服。这条休闲档很常见，本来就该有人说一句。
+    if (made >= 4) tip('……没事', 5000);
+    else if (stalled >= 10) tip('你在那磨蹭什么', 6000);
   }
   if (!hardLocking) burstLand(p);
   // 变异效果要在「已经盖进盘面」之后、「找满行」之前跑，
@@ -774,9 +787,44 @@ function fillRunLog(){
   box.hidden = false;
 }
 
+// 分数关口播报。一局能撞三四个，是频率最高的一条，顺带给「一局之内没有
+// 阶段感」补一个节点 —— 分数原来只是个一直涨的数字。
+const MILESTONES = [
+  [10000,   '一万'],
+  [50000,   '五万，还行'],
+  [100000,  '十万，有点东西'],
+  [500000,  '五十万，你认真的?'],
+  [1000000, '一百万'],
+  [5000000, '五百万，服了'],
+];
+function checkMilestone(){
+  const r = game.run;
+  if (!CRAZY || !r) return;
+  for (let i = r.mile; i < MILESTONES.length; i++){
+    if (game.score < MILESTONES[i][0]) break;
+    r.mile = i + 1;
+    tip(MILESTONES[i][1], 0);           // 里程碑不节流，它比什么都值得说
+    shake(i >= 3);
+    sfx('level', 1 + i * .04);
+  }
+}
+
+// 盘面上有几个「埋着的洞」（上方有方块、自己是空的）
+function countHoles(){
+  let h = 0;
+  for (let x = 0; x < COLS; x++){
+    let seen = false;
+    for (let y = 0; y < TOTAL_ROWS; y++){
+      if (game.board[y][x]) seen = true; else if (seen) h++;
+    }
+  }
+  return h;
+}
+
 function newRun(){
   return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0,
-           bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0 };
+           bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0,
+           mile: 0, wasDanger: false, saves: 0, chests: 0 };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -879,6 +927,9 @@ function scoreFor(n, spin, perfect){
   // toast 只留"够得上事件"的：常态的连击/B2B 交给常驻徽章，
   // 否则同一件事会有飘字 + 徽章 + toast 三个通道同时喊。
   if (label && (n === 4 || spin || perfect)) showToast(label.trim());
+  // 里程碑放在 label 的 toast 之后。放前面会被它当场盖掉 —— 而里程碑偏偏
+  // 总是和大消除同时发生，等于永远看不见。两者冲突时让里程碑赢，它更少见。
+  checkMilestone();
   if (game.score > game.best){
     if (game.best > 0 && !bestBeaten){ bestBeaten = true; showToast('破纪录！'); }
     game.best = game.score; writeBest(game.best);
@@ -893,6 +944,7 @@ function stackTopRow(){
 }
 
 function applyClear(rows){
+  if (CRAZY) claimChests(rows);      // 必须在盘面塌陷之前数，塌完那几行就没了
   const set = new Set(rows);
   const kept = [];
   for (let y = 0; y < TOTAL_ROWS; y++) if (!set.has(y)) kept.push(game.board[y]);
@@ -907,9 +959,18 @@ function riseGarbage(){
   if (game.board[0].some(Boolean)){ endGame('灰线顶出'); return; }
   game.board.shift();
   const row = new Array(COLS).fill(GARBAGE);
-  row[(rndGame() * COLS) | 0] = null;                   // 留个缺口，不然没法消
+  const gap = (rndGame() * COLS) | 0;
+  row[gap] = null;                                      // 留个缺口，不然没法消
+  // 宝箱：灰线现在只有坏处，这给了它第二个身份 —— 一个看得见、够得到的目标。
+  // 状态存在盘面格子里（和冰冻行同一套），塌陷、上顶、地震都会跟着走。
+  if (CRAZY && rndFx() < CHEST_RATE){
+    let x = (rndFx() * COLS) | 0;
+    if (x === gap) x = (x + 1) % COLS;
+    row[x] = CHEST;
+  }
   game.board.push(row);
   game.garbage++;
+  lastRiseAt = game.elapsed;
 
   const p = game.piece;
   if (p){
@@ -1709,6 +1770,20 @@ function syncStreak(){
 
 // 危险警戒带：堆到距顶三行以内就亮。加滞回，免得在边界上抖。
 let dangerOn = false;
+const GWARN_MS = 3000;
+let gwarnStep = -1;
+function syncGarbageWarn(left){
+  const el = $('gwarn');
+  if (!el) return;
+  const on = left >= 0 && left < GWARN_MS && !game.over;
+  // 进度量化成 12 档再写，不然每帧都在写自定义属性
+  const step = on ? Math.round((1 - left / GWARN_MS) * 12) : -1;
+  if (step === gwarnStep) return;
+  gwarnStep = step;
+  el.classList.toggle('on', on);
+  if (on) el.style.setProperty('--p', (step / 12).toFixed(3));
+}
+
 function syncDanger(){
   const el = $('danger');
   if (!el) return;
@@ -1771,6 +1846,20 @@ function rollScore(snap){
     rollId = requestAnimationFrame(tickRoll);
   };
   rollId = requestAnimationFrame(tickRoll);
+}
+
+// 高频彩蛋走这条。和事件/机制共用 toast，但自己节流 ——
+// 一局要说好几句，挨着挤出来就成了刷屏。
+let lastTip = -1e9;
+function tip(text, minGap){
+  const now = game.elapsed;
+  // minGap 要用 == null 判而不是 ||：传 0 表示「这条不节流」，
+  // 而 0 是 falsy，`minGap || 2600` 会把它变成 2600 —— 里程碑就是这么被自己吞掉的
+  const gap = minGap == null ? 2600 : minGap;
+  if (now - lastTip < gap) return false;
+  lastTip = now;
+  showToast(text);
+  return true;
 }
 
 function showToast(text){
@@ -2314,6 +2403,26 @@ function heatGain(n, spin, perfect){
   return [0, 2, 5, 9, 16][n] || 0;
 }
 
+const DANGER_HEAT = 2;           // 危险区里消行的热度倍数
+const CHEST_RATE = 1 / 4;        // 每条灰线带宝箱的概率，一局约 4~5 个
+let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压哨」用
+
+// 消掉带宝箱的行就开箱。三选一，都是当场能感觉到的东西。
+function claimChests(rows){
+  if (!CRAZY) return;
+  let n = 0;
+  for (const y of rows) for (let x = 0; x < COLS; x++) if (game.board[y][x] === CHEST) n++;
+  if (!n) return;
+  if (game.run) game.run.chests += n;
+  for (let i = 0; i < n; i++){
+    const r = rndFx();
+    if (r < .34 && feverLeft <= 0){ tip('开箱　FEVER！', 0); feverStart(); }
+    else if (r < .70){ heat += 30; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +30', 0); }
+    else { game.mods[0] = 'bomb'; previewDirty = true; tip('开箱　下一块是炸弹', 0); }
+  }
+  sfx('tetris', 1.34); buzz([30, 20, 30, 20, 60]);
+}
+
 // 钩子⑥：每帧衰减
 function crazyStep(dt){
   if (!CRAZY || heat <= 0) return;
@@ -2384,6 +2493,17 @@ function crazyOnClear(lines, spin, perfect){
   goldPending = false;
   // 空转的 T-spin 也给热度：它是实打实的技术动作，只是没消到行
   let gain = heatGain(lines, spin, perfect);
+  // 险区加成：危险区原来只有坏处，所以最优解永远是「尽快清下去」，没有选择。
+  // 在里面消行热度翻倍之后，才谈得上「敢不敢赖在高处多赚一点」。
+  if (lines > 0 && dangerOn){
+    gain *= DANGER_HEAT;
+    tip('险中取栗　热度 ×' + DANGER_HEAT, 4000);
+  }
+  // 压哨：灰线刚顶上来就立刻消掉一行
+  if (lines > 0 && game.elapsed - lastRiseAt < 1000){
+    gain += 8;
+    tip('压哨', 3000);
+  }
   if (lines > 0 && betLeft > 0){        // 赌赢：这一手的注入翻倍
     gain *= BET_MULT;
     betLeft = 0; betHide();
@@ -2961,7 +3081,15 @@ function stepOnce(dt){
   stepHeart(dt);
   // 危险区计时。蹭 syncDanger 已经算好的 dangerOn，不另外扫一遍盘面 ——
   // topFilledRow 是 220 格的扫描，不该每帧多跑一次
-  if (game.run && dangerOn) game.run.dangerMs += dt;
+  if (game.run){
+    if (dangerOn){ game.run.dangerMs += dt; game.run.wasDanger = true; }
+    // 险中求生：进过危险区，又清回安全线。这是真本事，值得被看见。
+    else if (game.run.wasDanger && dangerLeft >= 10){
+      game.run.wasDanger = false;
+      game.run.saves++;
+      if (CRAZY){ heat += 12; heatQuant = -1; syncHeat(); tip('活过来了', 3000); }
+    }
+  }
   crazyStep(dt);
   crazyClocks(dt);
   handleAutoRepeat(dt);
@@ -2976,6 +3104,12 @@ function stepOnce(dt){
     // FEVER 期间灰线暂停 —— 这比「重力减半」有感知得多（重力本来就不痛）
     if (feverLeft <= 0) garbageTimer += dt;
     const period = garbagePeriod();
+    // 所有事件都有三秒预告，偏偏真正杀你的灰线是无声的。补一道。
+    // 看着像削难度，其实是加紧张感 —— 你会盯着它倒数，然后决定这三秒
+    // 要不要再赌一块。也只有知道它什么时候来，「压哨」才谈得上抢。
+    // 只给疯狂版。这条其实对标准版也是好的（真正杀你的东西本来就该有预告），
+    // 但标准版的表现一直承诺不动，要加得单独说。
+    syncGarbageWarn(CRAZY && !game.noGarbage && feverLeft <= 0 ? period - garbageTimer : -1);
     if (!game.noGarbage && feverLeft <= 0 && garbageTimer >= period){
       garbageTimer -= period;
       riseGarbage();
@@ -3380,6 +3514,11 @@ function restart(){
   game.bag = [];
   clearTimeout(dieTimer);
   document.body.classList.remove('dying');
+  // 这两个都是拿 game.elapsed 比的，而 elapsed 重开会归零 —— 不跟着复位的话，
+  // 上一局留下的时刻会变成一个「很久以前」，新一局第一次消行就被判成压哨。
+  lastRiseAt = -1e9;
+  lastTip = -1e9;
+  gwarnStep = -1;
   game.run = newRun();
   game.queue = [];
   game.mods = [];
@@ -3603,6 +3742,7 @@ function init(){
     syncMusic();
   });
 
+  document.body.classList.toggle('crazy', CRAZY);
   if (launchedAsApp()) { document.body.classList.add('immersive'); keepAwake(true); }
   syncFsBtn();
   syncMuteBtn();
