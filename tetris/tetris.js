@@ -574,11 +574,14 @@ function lockPiece(){
   // 消完这几行之后整个盘就空了 = 全消，Guideline 里给大额奖励
   const perfect = full.length > 0 &&
     game.board.every((row, y) => full.includes(y) || row.every(c => !c));
+  lastClearRows = full.slice();      // 必须在 scoreFor 之前，飘字要靠它定位
   scoreFor(full.length, spin, perfect);
 
   if (full.length){
     // 同理：先响，再去铺几十颗粒子和改 DOM
-    sfx(full.length === 4 ? 'tetris' : 'clear');
+    // 连击 0~5 逐级升半音（2^(1/12) ≈ 1.0595）
+    const pitch = Math.pow(1.0595, Math.min(6, Math.max(0, game.combo)));
+    sfx(spin ? 'tspin' : (full.length === 4 ? 'tetris' : 'clear'), pitch);
     buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
@@ -603,6 +606,9 @@ function lockPiece(){
 function levelMult(lvl){
   return 1 + 7 * Math.pow((clamp(lvl, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1), .75);
 }
+
+let lastClearRows = [];
+let bestBeaten = false;
 
 function scoreFor(n, spin, perfect){
   const mult = levelMult(game.level);
@@ -640,7 +646,18 @@ function scoreFor(n, spin, perfect){
     buzz([40, 50, 60, 50, 90]);
   }
 
-  game.score += Math.round(base * mult);
+  const gain = Math.round(base * mult);
+  game.score += gain;
+
+  // 飘字落在被消掉那几行的中间
+  if (n > 0 && lastClearRows.length){
+    const mid = lastClearRows.reduce((a, b) => a + b, 0) / lastClearRows.length;
+    const py = (mid - BUFFER + .5) * CELL;
+    const big = n === 4 || spin || perfect;
+    popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), big ? '#ffd166' : '#cfe6ff');
+    if (big) shake(n === 4 || perfect);
+    else if (n >= 2) shake(false);
+  }
 
   if (n > 0){
     game.lines += n;
@@ -650,8 +667,14 @@ function scoreFor(n, spin, perfect){
     const newLevel = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
     if (newLevel > game.level){ game.level = newLevel; flashLevel(); syncEdge(); }
   }
-  if (label) showToast(label.trim());
-  if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
+  // toast 只留"够得上事件"的：常态的连击/B2B 交给常驻徽章，
+  // 否则同一件事会有飘字 + 徽章 + toast 三个通道同时喊。
+  if (label && (n === 4 || spin || perfect)) showToast(label.trim());
+  if (game.score > game.best){
+    if (game.best > 0 && !bestBeaten){ bestBeaten = true; showToast('破纪录！'); }
+    game.best = game.score; writeBest(game.best);
+  }
+  syncStreak();
 }
 
 function applyClear(rows){
@@ -946,17 +969,48 @@ function draw(){
   ctx.drawImage(bgCv, 0, 0, W, H);
 
   if (clearing){
-    // 消行动画：不重画整盘，只在要消掉的那几行盖一层白光。
-    // 原来逐格混色，满盘时每帧一百多个圆角矩形，纯属浪费。
-    const flash = 1 - clearing.t / clearing.dur;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = `rgba(255,255,255,${(.06 + .26 * flash).toFixed(3)})`;
-    for (const y of clearing.rows){
-      if (y < BUFFER) continue;
-      ctx.fillRect(0, (y - BUFFER) * CELL, W, CELL);
+    // 消行动画分两段，总时长仍是 260ms，不延长冻结：
+    //   0~140ms  要消的那几行盖白光（不重画整盘，只 fillRect 几条）
+    //   140~260  上方整块往下滑到位，消掉的行留空
+    const FLASH_MS = 140;
+    if (clearing.t < FLASH_MS){
+      const flash = 1 - clearing.t / FLASH_MS;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(255,255,255,${(.10 + .30 * flash).toFixed(3)})`;
+      for (const y of clearing.rows){
+        if (y < BUFFER) continue;
+        ctx.fillRect(0, (y - BUFFER) * CELL, W, CELL);
+      }
+      ctx.restore();
+    } else {
+      const k = Math.min(1, (clearing.t - FLASH_MS) / (clearing.dur - FLASH_MS));
+      const topRow = Math.min(...clearing.rows);
+      const drop = clearing.rows.length * CELL * k;
+      const cut = (topRow - BUFFER) * CELL;          // 塌陷区上沿
+      ctx.save();
+      // 先把塌陷区以下（含被消行）整段擦掉，再把上半部分按位移重贴一次
+      ctx.clearRect(0, Math.max(0, cut), W, H - Math.max(0, cut));
+      ctx.fillStyle = 'rgba(6, 10, 20, .72)';
+      ctx.fillRect(0, Math.max(0, cut), W, H - Math.max(0, cut));
+      if (cut > 0){
+        ctx.beginPath();
+        ctx.rect(0, 0, W, cut + drop);
+        ctx.clip();
+        ctx.drawImage(bgCv, 0, drop, W, H);
+      }
+      ctx.restore();
+      // 被消行下方的部分原样留着（bg 已经画过，clearRect 抹掉了，补回来）
+      ctx.save();
+      const below = (Math.max(...clearing.rows) - BUFFER + 1) * CELL;
+      if (below < H){
+        ctx.beginPath();
+        ctx.rect(0, below, W, H - below);
+        ctx.clip();
+        ctx.drawImage(bgCv, 0, 0, W, H);
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   // 落点虚影 + 当前方块
@@ -1149,10 +1203,13 @@ function drawParticles(){
 // ───────────────────────── HUD ─────────────────────────
 
 function syncHud(){
+  // 这两个跟分数无关（堆高、连击断掉都不改分），不能挡在下面的缓存早退后面
+  syncStreak();
+  syncDanger();
   const key = game.score + '/' + game.lines + '/' + game.level + '/' + game.best;
   if (key === hudCache) return;         // 每帧写 DOM 很浪费
   hudCache = key;
-  $('score').textContent = game.score.toLocaleString();
+  rollScore(false);
   $('lines').textContent = game.lines;
   $('level').textContent = game.level;
   $('best').textContent  = game.best.toLocaleString();
@@ -1167,6 +1224,81 @@ function flashBoard(n){
 }
 
 let toastTimer = 0;
+// ── 反馈层 ──
+// 全部走 DOM：结算页和暂停态整个 rAF 循环是停的（tick 的 stop 分支会
+// cancelAnimationFrame），任何依赖游戏帧的反馈在那两个状态下都不动。
+
+// 分数飘字。x/y 用棋盘内的像素坐标，落在 #fx 那层上。
+function popScore(px, py, text, color){
+  const fx = $('fx');
+  if (!fx || !CELL) return;
+  const W = CELL * COLS, H = CELL * ROWS;
+  const el = document.createElement('div');
+  el.className = 'pop';
+  el.textContent = text;
+  el.style.left = (px / W * 100) + '%';
+  el.style.top  = (py / H * 100) + '%';
+  el.style.color = color || '#cfe6ff';
+  el.style.fontSize = Math.max(13, Math.round(CELL * .62)) + 'px';
+  fx.appendChild(el);
+  setTimeout(() => el.remove(), 1050);
+}
+
+// 屏幕震动。挂在 .shaker 上，避开 .board-box 的居中 transform
+// 和 #board 上被 flash/flash-big 占住的 animation。
+function shake(big){
+  const el = $('shaker');
+  if (!el) return;
+  el.classList.remove('shake', 'shake-big');
+  void el.offsetWidth;
+  el.classList.add(big ? 'shake-big' : 'shake');
+}
+
+// B2B / 连击徽章。常驻显示，断了就灭 —— 一闪而过的 toast 教不会人这两个机制。
+function syncStreak(){
+  const b2b = $('badgeB2B'), cmb = $('badgeCombo');
+  if (!b2b || !cmb) return;
+  const onB = !!game.b2b && !game.over;
+  const onC = game.combo > 0 && !game.over;
+  b2b.classList.toggle('on', onB);
+  cmb.classList.toggle('on', onC);
+  if (onC) cmb.textContent = 'COMBO ×' + game.combo;
+}
+
+// 危险警戒带：堆到距顶三行以内就亮。加滞回，免得在边界上抖。
+let dangerOn = false;
+function syncDanger(){
+  const el = $('danger');
+  if (!el) return;
+  const top = topFilledRow();
+  const left = top < 0 ? 99 : top - BUFFER;
+  if (!dangerOn && left <= 3) dangerOn = true;
+  else if (dangerOn && left >= 5) dangerOn = false;
+  el.classList.toggle('on', dangerOn && !game.over && game.started);
+}
+function topFilledRow(){
+  for (let y = 0; y < TOTAL_ROWS; y++)
+    for (let x = 0; x < COLS; x++) if (game.board[y][x]) return y;
+  return -1;
+}
+
+// 分数滚动。自己跑一条 rAF，不依赖游戏循环 —— 结算那一刻循环已经停了。
+let shownScore = 0, rollId = 0;
+function rollScore(snap){
+  const el = $('score');
+  if (!el) return;
+  if (snap){ shownScore = game.score; el.textContent = shownScore.toLocaleString(); return; }
+  if (rollId) return;
+  const tickRoll = () => {
+    const d = game.score - shownScore;
+    if (Math.abs(d) < 1){ shownScore = game.score; el.textContent = shownScore.toLocaleString(); rollId = 0; return; }
+    shownScore += d * .22;
+    el.textContent = Math.round(shownScore).toLocaleString();
+    rollId = requestAnimationFrame(tickRoll);
+  };
+  rollId = requestAnimationFrame(tickRoll);
+}
+
 function showToast(text){
   const el = $('toast');
   el.textContent = text;
@@ -1219,6 +1351,8 @@ const SPECS = {
   tetris: { duty:.25,  v:.115, step:.052, notes:[523, 659, 784, 1047, 1319, 1568, 2093], harm:true },
   level:  { duty:.25,  v:.090, step:.055, notes:[784, 1047, 1319, 1568] },
   hold:   { duty:.25,  v:.070, step:.024, notes:[440, 587] },
+  // T-spin：专属的高亮上行，跟普通消行明显区分开
+  tspin:  { duty:.125, v:.115, step:.046, notes:[659, 880, 1175, 1568, 2093], harm:true },
   // 结束：一路掉下去
   over:   { duty:.125, v:.100, step:.105, notes:[523, 392, 330, 262, 196, 147] },
 };
@@ -1291,10 +1425,12 @@ function unlockAudio(){
 // 音效总音量。手机外放偏小，之前那一档在车厢、路上基本听不见。
 const SFX_GAIN = 1.9;
 
-function sfx(kind){
+// pitch：整体移调的倍数。连击越高调越高 —— 所有消除类游戏里最上瘾的那个反馈。
+function sfx(kind, pitch){
   if (muted) return;
   const spec = SPECS[kind];
   if (!spec) return;
+  const mul0 = pitch || 1;
   try {
     unlockAudio();
     if (!actx || actx.state !== 'running') return;
@@ -1305,7 +1441,7 @@ function sfx(kind){
       const o = actx.createOscillator(), g = actx.createGain();
       o.setPeriodicWave(wave);
       // 一个振荡器走完整串音：频率按格子跳，不做插值
-      spec.notes.forEach((f, i) => o.frequency.setValueAtTime(f * mul, t0 + i * spec.step));
+      spec.notes.forEach((f, i) => o.frequency.setValueAtTime(f * mul * mul0, t0 + i * spec.step));
       o.connect(g); g.connect(actx.destination);
       const v = Math.min(.9, vol * SFX_GAIN);
       g.gain.setValueAtTime(.0001, t0);
@@ -1872,6 +2008,9 @@ function restart(){
   game.garbage = 0;
   game.elapsed = 0;
   game.why = '';
+  bestBeaten = false;
+  dangerOn = false;
+  shownScore = 0;
   syncEdge();
   garbageTimer = 0;
   staticDirty = true;
