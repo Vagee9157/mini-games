@@ -118,6 +118,17 @@ body{
 /* 触屏走 touchstart 加 .active，:active 在 touch 上不一定跟手 */
 .slot.hold.active{ background: rgba(34,211,238,.13); border-color: var(--n-cyan); }
 
+/* NEXT 槽在疯狂版里可以点（花热度换牌）。热度够了才亮边，
+   不够的时候看起来就是个普通展示框 —— 免得点了没反应还扣不掉。 */
+.slot.next{ -webkit-tap-highlight-color: transparent; transition: border-color .16s, background .16s; }
+.slot.next.ready{
+  border-color: rgba(255,193,71,.5);
+  background: linear-gradient(150deg, rgba(255,193,71,.10), rgba(255,193,71,.02)), var(--panel);
+  cursor: pointer;
+}
+.slot.next.ready .slot-label::after{ content: '　换牌'; color: #ffd166; letter-spacing: 0; }
+.slot.next.active{ background: rgba(255,193,71,.16); border-color: rgba(255,193,71,.8); }
+
 /* 统计 */
 .stats{
   display: grid;

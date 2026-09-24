@@ -298,6 +298,8 @@ function saveGame(force){
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       board: game.board,
       queue: game.queue,
+      mods: game.mods,
+      holdMod: game.holdMod,
       bag: game.bag,
       hold: game.hold,
       holdUsed: game.holdUsed,
@@ -331,6 +333,11 @@ function clearSave(){
 function restoreGame(d){
   game.board = d.board;
   game.queue = d.queue || [];
+  // 旧存档没有 mods 字段，或者长度对不上，就地补齐 —— 两条数组必须严格同长，
+  // 错位一格会让所有方块的变异都跟着错
+  game.mods = Array.isArray(d.mods) ? d.mods.slice(0, game.queue.length) : [];
+  while (game.mods.length < game.queue.length) game.mods.push(CRAZY ? rollMod() : null);
+  game.holdMod = d.holdMod || null;
   game.bag = d.bag || [];
   game.hold = d.hold || null;
   game.holdUsed = !!d.holdUsed;
@@ -393,6 +400,8 @@ const game = {
   holdUsed: false,
   bag: [],
   queue: [],          // 预览队列，保持 5 个
+  mods: [],           // 和 queue 一一对应的变异，入队时摇好
+  holdMod: null,
   score: 0,
   lines: 0,
   level: 1,
@@ -448,7 +457,13 @@ function nextType(){
 }
 
 function fillQueue(){
-  while (game.queue.length < 5) game.queue.push(nextType());
+  while (game.queue.length < 5){
+    game.queue.push(nextType());
+    // 变异在入队时就摇好，NEXT 里能提前看见。原来是出生那一刻才摇 ——
+    // 于是炸弹永远是惊喜，而惊喜经常被浪费（盘面刚好很干净时来一个炸弹）。
+    // 看得见才谈得上规划：「下一个是激光，我先把这列堆起来等着穿」。
+    game.mods.push(CRAZY ? rollMod() : null);
+  }
 }
 
 function cellsOf(type, rot){
@@ -466,12 +481,11 @@ function collides(type, x, y, rot){
   return false;
 }
 
-function spawn(type){
+function spawn(type, mod){
   previewDirty = true;
   needsDraw = true;
   const def = PIECES[type];
-  const p = { type, x: def.spawnX, y: 0, rot: 0 };
-  crazyOnSpawn(p);
+  const p = { type, x: def.spawnX, y: 0, rot: 0, mod: CRAZY ? (mod || null) : null };
   game.piece = p;
   game.holdUsed = false;
   game.lastWasRot = false;
@@ -493,8 +507,9 @@ function spawn(type){
 
 function spawnNext(){
   fillQueue();
-  spawn(game.queue.shift());
+  const t = game.queue.shift(), m = game.mods.shift();
   fillQueue();
+  spawn(t, m);
 }
 
 // ───────────────────────── 操作 ─────────────────────────
@@ -561,13 +576,13 @@ function hardDrop(){
 
 function holdPiece(){
   if (!game.piece || game.holdUsed) return;
-  const cur = game.piece.type;
+  const cur = game.piece.type, curMod = game.piece.mod || null;
   if (game.hold){
-    const h = game.hold;
-    game.hold = cur;
-    spawn(h);
+    const h = game.hold, hm = game.holdMod || null;
+    game.hold = cur; game.holdMod = curMod;
+    spawn(h, hm);
   } else {
-    game.hold = cur;
+    game.hold = cur; game.holdMod = curMod;
     spawnNext();
   }
   game.holdUsed = true;   // spawn 会把它清掉，所以放在后面
@@ -1175,7 +1190,7 @@ function draw(){
       }
     }
     // 快锁定的提示：以前是整块洗白，颜色全丢了，现在改成同色光边
-    const lockPulse = grounded ? Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0) / 4 : 0;
+    const lockPulse = grounded ? Math.min(4, (lockTimer / lockDelay() * 5) | 0) / 4 : 0;
     // 变异块：本色往对应色里混七成 + 常驻亮边，一眼认得出是哪种
     const tint = CRAZY && p.mod ? MOD_TINT[p.mod] : null;
     const gold = !!tint;
@@ -1293,18 +1308,18 @@ function drawPreview(){
   // 上面一整行放马上要来的那个，下面并排放之后的两个
   const topH = Math.round(nh * 0.54);
   const botH = nh - topH;
-  if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1);
-  if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62);
-  if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62);
+  if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1, game.mods[0]);
+  if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62, game.mods[1]);
+  if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62, game.mods[2]);
 
   // hold
   const hw = holdCv.clientWidth, hh = holdCv.clientHeight;
   holdCtx.clearRect(0, 0, hw, hh);
-  if (game.hold) drawMini(holdCtx, game.hold, 0, 0, hw, hh, game.holdUsed ? .28 : 1);
+  if (game.hold) drawMini(holdCtx, game.hold, 0, 0, hw, hh, game.holdUsed ? .28 : 1, game.holdMod);
   else drawHoldHint(holdCtx, hw, hh);
 }
 
-function drawMini(c, type, ox, oy, w, h, alpha){
+function drawMini(c, type, ox, oy, w, h, alpha, mod){
   const def = PIECES[type];
   const cells = def.states[0];
   const xs = cells.map(v => v[0]), ys = cells.map(v => v[1]);
@@ -1314,8 +1329,24 @@ function drawMini(c, type, ox, oy, w, h, alpha){
   const cell = Math.min(w / (bw + 1.1), h / (bh + 1.0));
   const px = ox + (w - bw * cell) / 2;
   const py = oy + (h - bh * cell) / 2;
+  const tint = CRAZY && mod ? MOD_TINT[mod] : null;
+  const mcolor = tint ? mix(colorOf(type), tint, .72) : colorOf(type);
   for (const [cx, cy] of cells){
-    drawCell(c, px + (cx - minX) * cell, py + (cy - minY) * cell, cell, colorOf(type), { alpha });
+    drawCell(c, px + (cx - minX) * cell, py + (cy - minY) * cell, cell, mcolor, { alpha });
+  }
+  // 变异角标。光靠染色不够：七种方块本色里，O 是黄、Z 是红、I 是青、T 是紫，
+  // 正好把金/炸弹/激光/重锤四种染色各撞掉一个 —— 撞上就跟普通块长得一样。
+  // 落下的那块有辉光圈能区分，预览里没有，所以这里补一个点。
+  if (tint){
+    const r = Math.max(2.5, cell * .26);
+    const bx = px + bw * cell - r * .4, by = py + r * .4;
+    c.save();
+    c.globalAlpha = alpha;
+    c.beginPath(); c.arc(bx, by, r, 0, Math.PI * 2);
+    c.fillStyle = tint; c.fill();
+    c.lineWidth = Math.max(1, r * .34);
+    c.strokeStyle = 'rgba(255,255,255,.92)'; c.stroke();
+    c.restore();
   }
 }
 
@@ -1572,6 +1603,7 @@ function syncHeat(){
 
 function syncStreak(){
   syncHeat();
+  syncReroll();
   const b2b = $('badgeB2B'), cmb = $('badgeCombo');
   if (!b2b || !cmb) return;
   const onB = !!game.b2b && !game.over;
@@ -2192,13 +2224,6 @@ function crazyReset(){
   if (CRAZY) setTempo(baseBpm);
 }
 
-// 钩子①：出块时摇黄金。只挂在 piece 实例上 ——
-// holdPiece 只搬 game.piece.type，实例属性天然丢失，白送一个「进 hold 就掉金」。
-// 盘面格子和 queue 都是字符串，一个字节都不用动。
-function crazyOnSpawn(p){
-  if (!CRAZY) return;
-  p.mod = rollMod();
-}
 
 // 钩子②：锁定时记下这块是不是金的（scoreFor 里 game.piece 已经是 null 了）
 function crazyOnLock(p){
@@ -2260,14 +2285,14 @@ function feverEnd(){
 
 // ═══════════ 第二批：方块变异 ═══════════
 //
-// 概率是按实测的「一局约 770~1000 块」反推的，不是拍脑袋定的。
-// 第一版我提的 1/40、1/60、1/30 换算下来一局会出五十几个特殊块，
-// 那就不叫天降救兵了，叫常规配置。
+// 概率跟着「一局多少块」走，不是拍脑袋定的。
+// 难度提上去之后一局只剩 97~160 块（原来 770），旧概率下休闲档六局才见一次
+// 炸弹 —— 最带感的两个东西等于白做。按新的块数重新反推。
 const MOD_RATES = [
-  ['laser',  1 / 350],   // 一局约 3 个
-  ['bomb',   1 / 250],   // 一局约 4 个
-  ['hammer', 1 / 120],   // 一局约 8 个
-  ['gold',   GOLD_RATE], // 一局约 90 个
+  ['laser',  1 / 90],    // 一局约 1~2 个
+  ['bomb',   1 / 70],    // 一局约 1.5~2 个
+  ['hammer', 1 / 45],    // 一局约 2~3 个
+  ['gold',   GOLD_RATE], // 一局约 10~16 个
 ];
 const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
 
@@ -2500,6 +2525,7 @@ const EVENTS = [
   { key:'freeze',   name:'冰冻',   tip:'有一行要冻住了', bad:true,  ms:0,    w:2 },
   { key:'wind',     name:'狂风',   tip:'方块要被吹偏了', bad:true,  ms:7000, w:2 },
   { key:'wall',     name:'封锁',   tip:'有一列要封了',   bad:true,  ms:9000, w:2 },
+  { key:'slam',     name:'瞬落',   tip:'方块要直接砸到底', bad:true,  ms:6000, w:2 },
 ];
 let evTimer = 0, evWarnLeft = 0, evPending = null, evActive = null, evLeft = 0, evBeep = 0;
 let wallCol = -1;        // 列封锁：这一列当墙，collides 里直接判撞
@@ -2644,6 +2670,52 @@ function doCompact(){
 const evBlackout = () => CRAZY && evActive && evActive.key === 'blackout';
 // 镜像：左右键对调。挂在 press 上，DAS 连发也跟着换向
 const evMirror   = () => CRAZY && evActive && evActive.key === 'mirror';
+// 瞬落 = 20G：方块一出生就贴到底。
+// 锁定延迟照旧，所以落地之后仍然能左右滑、能转 —— 失去的只是「边落边调整」
+// 那一段，你得提前想好落点。做成真正的零控制没意义：六秒等于随机砸三四块，
+// 那不是难度，是判定。
+const evSlam     = () => CRAZY && evActive && evActive.key === 'slam';
+// 瞬落时放宽锁定延迟。20G 本身不难，难的是「贴底之后只剩半秒调整」——
+// 那半秒里你既要看清落点又要滑过去，配 500ms 就不是难度是反应力测试。
+// 标准的 20G 玩法都会给更长的锁定窗口，这里给 1.8 倍。
+function lockDelay(){ return evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY; }
+
+// ═══════════ 换牌 ═══════════
+//
+// 点 NEXT 槽，花热度把当前这块换成下一块。
+//
+// 热度原来只能攒，是个纯被动的数字。让它同时是货币之后，每隔几秒就多一个
+// 真决策：这块 S 我放不下，换不换？换了倍率掉一截，不换就得挖个洞。
+// 梭哈十秒才来一次，这个每块都在。
+//
+// 被换下来的那块塞回队列尾部而不是丢掉 —— 丢掉等于白嫖 7-bag 的保证，
+// 而且你还能看见它什么时候回来。
+const REROLL_COST = 15;
+
+function canReroll(){
+  return CRAZY && game.started && !game.over && !game.paused && !clearing && !!game.piece;
+}
+
+function rerollPiece(){
+  if (!canReroll()) return;
+  if (heat < REROLL_COST){ showToast(`热度不够　换牌要 ${REROLL_COST}`); sfx('lock', .8); return; }
+  heat -= REROLL_COST;
+  const t = game.queue.shift(), m = game.mods.shift();
+  game.queue.push(game.piece.type);
+  game.mods.push(game.piece.mod || null);
+  spawn(t, m);
+  fillQueue();
+  heatQuant = -1; syncHeat(); syncEdge(); syncReroll();
+  showToast(`换牌　−${REROLL_COST} 热度`);
+  sfx('hold', 1.22); buzz(18);
+}
+
+// 够不够换，让 NEXT 槽自己看得出来
+function syncReroll(){
+  if (!CRAZY) return;
+  const el = $('nextSlot');
+  if (el) el.classList.toggle('ready', canReroll() && heat >= REROLL_COST);
+}
 
 // ═══════════ 梭哈 ALL-IN ═══════════
 //
@@ -2735,6 +2807,15 @@ function stepOnce(dt){
   }
 
   if (game.piece){
+    // 瞬落：每帧先把方块推到底。放在重力前面，下面那段自然就空转了。
+    // 每帧都做而不是只在出生时做 —— 横移到一个坑上方时它要立刻掉进去，
+    // 这才是 20G 的手感。
+    if (evSlam()){
+      const q = game.piece;
+      let d = 0;
+      while (!collides(q.type, q.x, q.y + d + 1, q.rot)) d++;
+      if (d > 0){ q.y += d; game.lastWasRot = false; needsDraw = true; }
+    }
     const g = gravityFor(game.level);
     const speed = softDropping ? g / SOFT_DROP_FACTOR : g;
     dropTimer += dt;
@@ -2750,9 +2831,9 @@ function stepOnce(dt){
     touchGround(false);
     if (grounded){
       lockTimer += dt;
-      const phase = Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0);
+      const phase = Math.min(4, (lockTimer / lockDelay() * 5) | 0);
       if (phase !== lockStep){ lockStep = phase; needsDraw = true; }
-      if (lockTimer >= LOCK_DELAY) lockPiece();
+      if (lockTimer >= lockDelay()) lockPiece();
     } else lockStep = -1;
   }
 
@@ -2903,6 +2984,8 @@ function bindButtons(){
     ['btnDrop',  () => hardDrop(),      null],
     // HOLD 走同一套 touch 处理，不然它比别的键慢半拍（click 要等浏览器确认不是双击/滚动）
     ['holdSlot', () => { preHeld.hold = true; holdPiece(); }, () => { preHeld.hold = false; }],
+    // 点 NEXT 换牌。标准版里 rerollPiece 开头就 !CRAZY 早退，等于没绑。
+    ['nextSlot', () => rerollPiece(), null],
   ];
   for (const [id, down, up] of map){
     const el = $(id);
@@ -3107,6 +3190,8 @@ function restart(){
   game.board = newBoard();
   game.bag = [];
   game.queue = [];
+  game.mods = [];
+  game.holdMod = null;
   game.hold = null;
   game.holdUsed = false;
   game.score = 0;
@@ -3349,8 +3434,9 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
+  rerollPiece, canReroll, REROLL_COST,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
-  redraw: () => { staticDirty = true; needsDraw = true; },
+  redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },

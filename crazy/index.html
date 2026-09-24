@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=4d11e967">
+<link rel="stylesheet" href="../tetris/tetris.css?v=2949625e">
 </head>
 <body>
 <div class="topline"></div>
@@ -106,7 +106,8 @@
 
     <!-- 右侧：下一个 / 暂存 / 计分 -->
     <aside class="side">
-      <div class="slot next">
+      <!-- 疯狂版里点它换牌（花热度）。标准版 rerollPiece 早退，点了没反应。 -->
+      <div class="slot next" id="nextSlot" role="button" tabindex="0" aria-label="花热度换牌">
         <span class="slot-label">NEXT</span>
         <canvas id="nextCv"></canvas>
       </div>
@@ -163,7 +164,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=e5f0150a"></script>
+<script src="../tetris/tetris.js?v=80704601"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
