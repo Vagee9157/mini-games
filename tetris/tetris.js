@@ -131,6 +131,9 @@ const LOCK_RESET_LIMIT = 15; // 靠移动/旋转续命的次数上限
 const DAS = 150;             // 按住方向键多久开始连发
 const ARR = 40;              // 连发间隔
 const SOFT_DROP_FACTOR = 20; // 软降速度倍率
+const TRAIL_MS = 130;        // 硬降残影存活时间
+const TRAIL_MIN_DROP = 4;    // 落差不到这么多格就不留残影
+const TRAIL_MAX = 2;         // 同时最多几道
 
 // 下落速度按等级加快。
 //
@@ -321,6 +324,9 @@ function restoreGame(d){
   game.frozen = false;
   game.started = true;
   particles.length = 0;
+  sweeps.length = 0;
+  rings.length = 0;
+  trails.length = 0;
   clearing = null;
   softDropping = false;
   held.left = held.right = false;
@@ -508,13 +514,14 @@ function hardDrop(){
   // 排在它们后头就是按下去过一会儿才响。
   sfx('drop');
   buzz(14);
-  // 拖尾：从起点到落点之间留一道残影
-  if (d >= 2){
+  // 拖尾：从起点到落点之间留一道残影。掉两三格也留一道，残影就成了糊在
+  // 盘面上的装饰；只有真砸下来的那种落差才值得画。
+  if (d >= TRAIL_MIN_DROP){
     const cells = [];
     for (const [cx, cy] of cellsOf(p.type, p.rot))
       cells.push([p.x + cx, p.y + cy, p.y + cy + d]);
     trails.push({ cells, color: p.mod === 'gold' ? '#ffd23f' : colorOf(p.type), t: 0 });
-    if (trails.length > 4) trails.shift();
+    while (trails.length > TRAIL_MAX) trails.shift();
   }
   p.y += d;
   game.score += d * 2;
@@ -606,6 +613,7 @@ function lockPiece(){
   const perfect = full.length > 0 &&
     game.board.every((row, y) => full.includes(y) || row.every(c => !c));
   lastClearRows = full.slice();      // 必须在 scoreFor 之前，飘字要靠它定位
+  lastLockY = p.y + 1;               // 空转 T-spin 没有消除行，飘字落在 T 的中心
   scoreFor(full.length, spin, perfect);
   crazyOnClear(full.length);
 
@@ -641,11 +649,38 @@ function levelMult(lvl){
 
 let trails = [];        // 硬降残影 { cells:[[x,y]...], color, t }
 let lastClearRows = [];
+let lastLockY = 0;
 let bestBeaten = false;
+
+// 消除的视觉分级。三条轴分开表达：
+//   颜色 = 哪一种消除（普通走冷色梯度，T-spin 系走品红，四行走金）
+//   字号 = 这一下有多重
+//   附加特效 = 有多稀有（金光横扫 / 环形爆开 / 全屏白闪）
+// 以前只有"大不大"一个开关，所以 TETRIS 和 T-SPIN TRIPLE 长得一模一样。
+const FALLBACK_STYLE = { name: 'CLEAR', cls: 't1', scale: 1 };
+function clearStyle(n, spin, perfect){
+  if (perfect) return { name: '全消 PERFECT CLEAR', cls: 'pc', scale: 1.9 };
+  if (spin === 'tspin')
+    return [{ name: 'T-SPIN',        cls: 'ts',  scale: 1.25 },
+            { name: 'T-SPIN SINGLE', cls: 'ts',  scale: 1.40 },
+            { name: 'T-SPIN DOUBLE', cls: 'ts',  scale: 1.55 },
+            { name: 'T-SPIN TRIPLE', cls: 'ts3', scale: 1.70 }][n] || FALLBACK_STYLE;
+  if (spin === 'mini')
+    // mini 最多只能消两行，第四格纯属防御
+    return [{ name: 'MINI T-SPIN',        cls: 'tm', scale: 1.10 },
+            { name: 'MINI T-SPIN SINGLE', cls: 'tm', scale: 1.20 },
+            { name: 'MINI T-SPIN DOUBLE', cls: 'tm', scale: 1.30 }][n] || FALLBACK_STYLE;
+  return [null,
+          { name: 'SINGLE', cls: 't1', scale: 1.00 },
+          { name: 'DOUBLE', cls: 't2', scale: 1.15 },
+          { name: 'TRIPLE', cls: 't3', scale: 1.30 },
+          { name: 'TETRIS', cls: 't4', scale: 1.60 }][n] || null;
+}
 
 function scoreFor(n, spin, perfect){
   const mult = levelMult(game.level);
   let base = 0, label = '';
+  let b2bApplied = false;   // game.b2b 下面就会被覆盖，飘字得靠这个才知道加成生没生效
 
   if (spin === 'tspin'){
     base = [400, 800, 1200, 1600][n] || 400;
@@ -661,7 +696,7 @@ function scoreFor(n, spin, perfect){
   // back-to-back：连续的 Tetris 或 T-spin 消行，额外五成
   const isHard = n > 0 && (n === 4 || spin);
   if (n > 0){
-    if (isHard && game.b2b){ base = Math.floor(base * 1.5); label = 'B2B ' + label; }
+    if (isHard && game.b2b){ base = Math.floor(base * 1.5); label = 'B2B ' + label; b2bApplied = true; }
     game.b2b = isHard;
     game.combo++;
     if (game.combo > 0){
@@ -682,14 +717,29 @@ function scoreFor(n, spin, perfect){
   const gain = Math.round(base * mult * crazyScoreMult());
   game.score += gain;
 
-  // 飘字落在被消掉那几行的中间
-  if (n > 0 && lastClearRows.length){
-    const mid = lastClearRows.reduce((a, b) => a + b, 0) / lastClearRows.length;
-    const py = (mid - BUFFER + .5) * CELL;
-    const big = n === 4 || spin || perfect;
+  // 飘字落在被消掉那几行的中间；空转的 T-spin 没有消除行，落在方块自己身上
+  const st = clearStyle(n, spin, perfect);
+  if (st && (n > 0 ? lastClearRows.length : !!spin)){
+    const row = n > 0
+      ? lastClearRows.reduce((a, b) => a + b, 0) / lastClearRows.length
+      : lastLockY;
+    const py = (row - BUFFER + .5) * CELL;
     const hot = CRAZY && feverLeft > 0;
-    popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(),
-             hot ? '#ffe066' : (big ? '#ffd166' : '#cfe6ff'), hot ? 1.7 : 1);
+
+    let label = st.name, cls = st.cls;
+    if (b2bApplied){ label = 'B2B ' + label; cls += ' b2b'; }
+    if (game.combo >= 1){ label += ` ×${game.combo}`; if (game.combo >= 5) cls += ' cmb'; }
+    if (hot) cls += ' hot';
+
+    popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), label, cls,
+             st.scale * (hot ? 1.25 : 1));
+
+    // 附加特效按稀有度给：四行和全消横扫一道金光，T-spin 消行从中心爆开一圈紫环。
+    // 两者可以叠（T-spin 打出的全消），但不是必然一起来。
+    if (n === 4 || perfect) sweepRows(lastClearRows, '#ffd166');
+    if (spin && n > 0) burstRing(lastClearRows, spin === 'tspin' ? '#ff6bd6' : '#c9a6ff');
+
+    const big = n === 4 || spin || perfect;
     if (big) shake(n === 4 || perfect);
     else if (n >= 2) shake(false);
   }
@@ -750,6 +800,9 @@ function endGame(why){
   game.why = why || '?';
   game.piece = null;
   particles.length = 0;
+  sweeps.length = 0;
+  rings.length = 0;
+  trails.length = 0;
   staticDirty = true;
   needsDraw = true;
   clearSave();
@@ -1082,20 +1135,27 @@ function draw(){
     }
   }
 
-  // 硬降拖尾：从起点到落点之间拉一道渐隐的竖条
+  // 硬降拖尾：落点那端最浓，往起点方向渐隐到透明。
+  // 通体一个亮度的话，画出来不是残影，是一根杵在盘面上的色棒。
+  // 渐变的起点用同色零透明而不是 'transparent'——后者在部分浏览器里
+  // 会经由透明黑插值，边上会浮一道脏边。
   for (const tr of trails){
-    const a = Math.max(0, 1 - tr.t / 220);
+    const a = Math.max(0, 1 - tr.t / TRAIL_MS);
     ctx.save();
-    ctx.globalAlpha = a * .38;
-    ctx.fillStyle = tr.color;
+    ctx.globalAlpha = a * .32;
     for (const [x, y0, y1] of tr.cells){
       const top = Math.max(y0, BUFFER) - BUFFER;
       const bot = Math.max(y1, BUFFER) - BUFFER;
       if (bot <= top) continue;
-      ctx.fillRect(x * CELL + CELL * .26, top * CELL, CELL * .48, (bot - top) * CELL);
+      const g = ctx.createLinearGradient(0, top * CELL, 0, bot * CELL);
+      g.addColorStop(0, rgba(tr.color, 0));
+      g.addColorStop(1, tr.color);
+      ctx.fillStyle = g;
+      ctx.fillRect(x * CELL + CELL * .34, top * CELL, CELL * .32, (bot - top) * CELL);
     }
     ctx.restore();
   }
+  if (sweeps.length || rings.length) drawFx();
   if (particles.length) drawParticles();
 
   // 底边那道线：满了就从下面顶一行灰线上来
@@ -1231,10 +1291,72 @@ function burstRow(y){
   }
 }
 
+// ── 消除的附加特效：四行金光横扫 / T-spin 紫环爆开 ──
+// 两样都不走粒子数组。粒子有 110 颗硬上限，四行消除光 burstRow 就吃掉 80 颗，
+// 再往里塞只会把先爆的挤掉，等于拿旧特效换新特效。各自一条数组，
+// 每帧固定一两次绘制，跟粒子数量无关。
+let sweeps = [];   // { y0, y1, color, t }
+let rings  = [];   // { x, y, color, t }
+const SWEEP_MS = 340, RING_MS = 420;
+
+function sweepRows(rows, color){
+  if (!rows.length || !CELL) return;
+  const y0 = Math.max(Math.min(...rows), BUFFER), y1 = Math.max(...rows);
+  if (y1 < BUFFER) return;
+  sweeps.push({ y0, y1, color, t: 0 });
+  while (sweeps.length > 2) sweeps.shift();
+}
+
+function burstRing(rows, color){
+  if (!rows.length || !CELL) return;
+  const mid = rows.reduce((a, b) => a + b, 0) / rows.length;
+  if (mid < BUFFER) return;
+  rings.push({ x: COLS * CELL / 2, y: (mid - BUFFER + .5) * CELL, color, t: 0 });
+  while (rings.length > 2) rings.shift();
+}
+
+function stepFx(dt){
+  for (let i = sweeps.length - 1; i >= 0; i--)
+    if ((sweeps[i].t += dt) > SWEEP_MS) sweeps.splice(i, 1);
+  for (let i = rings.length - 1; i >= 0; i--)
+    if ((rings[i].t += dt) > RING_MS) rings.splice(i, 1);
+  if (sweeps.length || rings.length) needsDraw = true;
+}
+
+function drawFx(){
+  const W = COLS * CELL;
+  for (const s of sweeps){
+    const k = s.t / SWEEP_MS;
+    const top = (s.y0 - BUFFER) * CELL, h = (s.y1 - s.y0 + 1) * CELL;
+    // 一道有拖尾的光带从左扫到右。fillRect 只填渐变自己那一段——
+    // 填满整行的话，渐变范围之外会被端点颜色铺成一块实心。
+    const bandW = W * .38;
+    const headX = -bandW + k * (W + bandW * 2);
+    const g = ctx.createLinearGradient(headX - bandW, 0, headX, 0);
+    g.addColorStop(0, rgba(s.color, 0));
+    g.addColorStop(1, rgba(s.color, .8 * (1 - k)));
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(headX - bandW, top, bandW, h);
+    ctx.restore();
+  }
+  for (const r of rings){
+    const k = r.t / RING_MS;
+    ctx.save();
+    ctx.globalAlpha = (1 - k) * .7;
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = Math.max(1.5, CELL * .16 * (1 - k));
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, CELL * (.6 + k * 4.2), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function stepTrails(dt){
   for (let i = trails.length - 1; i >= 0; i--){
     trails[i].t += dt;
-    if (trails[i].t > 220) trails.splice(i, 1);
+    if (trails[i].t > TRAIL_MS) trails.splice(i, 1);
   }
   if (trails.length) needsDraw = true;
 }
@@ -1298,17 +1420,27 @@ let toastTimer = 0;
 // cancelAnimationFrame），任何依赖游戏帧的反馈在那两个状态下都不动。
 
 // 分数飘字。x/y 用棋盘内的像素坐标，落在 #fx 那层上。
-function popScore(px, py, text, color, scale){
+// 飘字：上面一行大数字，下面一行小字说这是哪种消除。
+// 颜色交给 cls 对应的 CSS 类，不在这里写死——渐变字（TETRIS 的金、全消的彩虹）
+// 得靠 background-clip，用 style.color 表达不了。
+function popScore(px, py, text, label, cls, scale){
   const fx = $('fx');
   if (!fx || !CELL) return;
   const W = CELL * COLS, H = CELL * ROWS;
   const el = document.createElement('div');
-  el.className = 'pop';
-  el.textContent = text;
+  el.className = 'pop ' + (cls || 't1');
   el.style.left = (px / W * 100) + '%';
   el.style.top  = (py / H * 100) + '%';
-  el.style.color = color || '#cfe6ff';
-  el.style.fontSize = Math.max(13, Math.round(CELL * .62 * (scale || 1))) + 'px';
+  el.style.fontSize = Math.max(13, Math.round(CELL * .58 * (scale || 1))) + 'px';
+
+  const num = document.createElement('b');
+  num.textContent = text;
+  el.appendChild(num);
+  if (label){
+    const tag = document.createElement('i');
+    tag.textContent = label;
+    el.appendChild(tag);
+  }
   fx.appendChild(el);
   setTimeout(() => el.remove(), 1050);
 }
@@ -1910,6 +2042,7 @@ function stepOnce(dt){
 
   stepParticles(dt);
   stepTrails(dt);
+  stepFx(dt);
   handleAutoRepeat(dt);
 
   // 灰线倒计时（消行动画期间不推进，免得叠在一起）
@@ -2086,8 +2219,13 @@ function bindButtons(){
   const map = [
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
-    ['btnCw',    () => { preHeld.cw = true; tryRotate(1); }, () => { preHeld.cw = false; }],
+    ['btnCw',    () => { preHeld.cw = true;  tryRotate(1);  }, () => { preHeld.cw = false;  }],
+    ['btnCcw',   () => { preHeld.ccw = true; tryRotate(-1); }, () => { preHeld.ccw = false; }],
+    // 软降引擎里本来就有（20 倍重力、每格 +1 分），以前只有键盘 ↓ 能用
+    ['btnSoft',  () => { softDropping = true; },  () => { softDropping = false; }],
     ['btnDrop',  () => hardDrop(),      null],
+    // HOLD 走同一套 touch 处理，不然它比别的键慢半拍（click 要等浏览器确认不是双击/滚动）
+    ['holdSlot', () => { preHeld.hold = true; holdPiece(); }, () => { preHeld.hold = false; }],
   ];
   for (const [id, down, up] of map){
     const el = $(id);
@@ -2311,6 +2449,8 @@ function restart(){
   shownScore = 0;
   crazyReset();
   trails.length = 0;
+  sweeps.length = 0;
+  rings.length = 0;
   syncEdge();
   garbageTimer = 0;
   staticDirty = true;
@@ -2474,10 +2614,8 @@ function init(){
     syncBuzz();
   }
 
+  // 点按走上面的映射表（touch 优先），这里只补键盘可达性
   const hs = $('holdSlot');
-  hs.addEventListener('click', () => {
-    if (game.started && !game.over && !game.paused) holdPiece();
-  });
   hs.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); holdPiece(); }
   });
@@ -2524,9 +2662,9 @@ function init(){
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get fever(){ return feverLeft; }, get rainLeft(){ return rainLeft; }, get feverPity(){ return feverPity; },
   feverStart, crazyRescue, switchTrack, setPack, setTempo,
-  get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
+  get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
-  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length }) };
+  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();

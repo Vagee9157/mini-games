@@ -115,6 +115,8 @@ body{
 .slot.hold{ cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color .14s, background .14s; }
 .slot.hold:hover, .slot.hold:focus-visible{ border-color: var(--line-2); background: rgba(120,160,255,.07); outline: none; }
 .slot.hold:active{ background: rgba(34,211,238,.13); border-color: var(--n-cyan); }
+/* 触屏走 touchstart 加 .active，:active 在 touch 上不一定跟手 */
+.slot.hold.active{ background: rgba(34,211,238,.13); border-color: var(--n-cyan); }
 
 /* 统计 */
 .stats{
@@ -322,8 +324,8 @@ body{
   gap: 9px;
   align-items: start;
 }
-/* 左组两个（左移右移）、右组三个（软落 变换 / 落底跨两格）。
-   合起来上排正好四个等宽键，左下空着，右下是落底。 */
+/* 左右各三个：上排两个主力键，下排一个跨满两格的矮键。
+   左下是逆转，右下是落底 —— 都属于"想清楚再按"的操作，压矮下移防误触。 */
 .pad-g{
   display: grid;
   gap: 9px;
@@ -356,6 +358,16 @@ body{
   transition: transform .08s, background .12s, border-color .12s;
 }
 .k svg{ width: 24px; height: 24px; display: block; color: var(--ink); }
+/* 下排的矮键：跨满两格保证点得中，但纵向压到 40px 且贴最下沿，
+   拇指自然位置够不到。图标和字改并排，不然 40px 塞不下两行。 */
+.k-wide{
+  grid-column: 1 / -1;
+  min-height: 40px;
+  flex-direction: row;
+  gap: 7px;
+  border-radius: 14px;
+}
+.k-wide svg{ width: 19px; height: 19px; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);
@@ -363,8 +375,9 @@ body{
   border-color: rgba(120,235,255,.42);
   color: var(--ink);
 }
+/* 高度由 .k-wide 给（40px）。这里再写 min-height 会盖掉它 —— 
+   .k-drop 在文件里排在 .k-wide 后面，同特异度后来者赢。 */
 .k-drop{
-  min-height: 58px;
   background:
     linear-gradient(150deg, rgba(34,211,238,.28), rgba(168,85,247,.14)),
     rgba(18, 34, 52, .86);
@@ -510,7 +523,8 @@ body{
   .pad-g{ gap: 7px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
-  .k-drop{ min-height: 44px; }
+  .k-wide{ min-height: 36px; }
+  .k-wide svg{ width: 17px; height: 17px; }
 
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 5px 4px; text-align: left; }
@@ -667,15 +681,74 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
   font-family: var(--mono);
   font-weight: 600;
   white-space: nowrap;
-  text-shadow: 0 2px 10px rgba(0,0,0,.6);
+  text-align: center;
+  line-height: 1.04;
   animation: popUp 1s cubic-bezier(.2,.7,.3,1) forwards;
   will-change: transform, opacity;
+}
+.pop b{ display: block; font-weight: 600; }
+/* 类型名固定小号：它是说明，不该跟着分数一起长大抢戏 */
+.pop i{
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: .14em;
+  opacity: .92;
 }
 @keyframes popUp{
   0%   { opacity: 0; transform: translate(-50%, -50%) scale(.7) }
   18%  { opacity: 1; transform: translate(-50%, -62%) scale(1.12) }
   35%  { transform: translate(-50%, -66%) scale(1) }
   100% { opacity: 0; transform: translate(-50%, -128%) scale(.96) }
+}
+
+/* ── 飘字分级 ──
+   颜色只说"这是哪种消除"：普通消除走冷色梯度，T-spin 系走品红，四行走金，
+   全消走彩虹。字号和附加特效在 JS 那边给，三条轴各管各的，
+   所以 TETRIS 和 T-SPIN TRIPLE 不会再长成一个样。
+   渐变字统一 background-clip；不支持的浏览器退回 color，不会变透明。 */
+.pop.t1{ color: #b8c6da; text-shadow: 0 2px 10px rgba(0,0,0,.6); }
+.pop.t2{ color: #5fe0c8; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 14px rgba(95,224,200,.45); }
+.pop.t3{ color: #7aa8ff; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 18px rgba(122,168,255,.55); }
+.pop.tm{ color: #c9a6ff; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 14px rgba(201,166,255,.45); }
+.pop.ts{ color: #ff6bd6; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 20px rgba(255,107,214,.6); }
+
+.pop.t4, .pop.ts3, .pop.pc{
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,.7));
+}
+.pop.t4 b, .pop.ts3 b, .pop.pc b{
+  background-clip: text; -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.pop.t4{ color: #ffd166; }
+.pop.t4 b{ background-image: linear-gradient(100deg, #fff3c4, #ffc247 42%, #ff9a3c); }
+.pop.t4 i{ color: #ffd9a0; }
+
+.pop.ts3{ color: #ff8ae0; }
+.pop.ts3 b{ background-image: linear-gradient(100deg, #ffffff, #ff6bd6 55%, #a855f7); }
+.pop.ts3 i{ color: #ffb3ea; }
+
+.pop.pc{ color: #fff; }
+.pop.pc b{ background-image: linear-gradient(100deg, #ff6b9d, #ffd166 30%, #5fe0c8 58%, #7aa8ff 82%, #c9a6ff); }
+.pop.pc i{ color: #ffe9b8; }
+
+/* B2B：给字镀一圈金边，和底色无关，任何类型都能叠 */
+.pop.b2b i{ color: #ffe1a0; }
+.pop.b2b b{ -webkit-text-stroke: .6px rgba(255,209,102,.75); }
+.pop.b2b.t4 b, .pop.b2b.ts3 b, .pop.b2b.pc b{ -webkit-text-stroke: 0; }
+.pop.b2b.t4, .pop.b2b.ts3, .pop.b2b.pc{
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,.7)) drop-shadow(0 0 7px rgba(255,209,102,.7));
+}
+/* 连击到 5 往橙红推 */
+.pop.cmb i{ color: #ff9d5c; letter-spacing: .18em; }
+/* 疯狂版 FEVER：只压色调，底下是哪种消除还认得出来。
+   写成 .fx .pop.hot 是为了压过上面那些双类选择器，否则 B2B+FEVER 时它不生效。 */
+.fx .pop.hot{
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,.7))
+          drop-shadow(0 0 11px rgba(255,208,70,.7))
+          saturate(1.5);
 }
 
 /* B2B / 连击 常驻徽章。绝对定位贴在棋盘左上角外沿 */
