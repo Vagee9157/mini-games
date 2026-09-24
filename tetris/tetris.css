@@ -749,3 +749,36 @@ body.fever .feverbar{ animation: feverIn 1.2s ease-out forwards; }
   body.fever .topline{ animation: none; }
   body.fever .feverbar{ animation: none; opacity: .9; }
 }
+
+/* ── 阶段 4：疯狂版特效层 ── */
+
+/* FEVER 时背景流动。不能画进 canvas —— 格线烘在离屏 bgCv 里，
+   让它动等于每帧重画两百个圆角矩形，正是当初优化掉的开销。
+   这里用 #board 底下一层伪元素推平铺图，只动 transform。 */
+.shaker::before{
+  content: '';
+  position: absolute; inset: -40% -10%;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    repeating-linear-gradient(115deg, rgba(255,180,40,.10) 0 8px, transparent 8px 34px);
+  will-change: transform, opacity;
+}
+body.fever .shaker::before{
+  opacity: .5;                 /* 太浓会盖住方块，压到一半刚好是"有东西在动"的程度 */
+  animation: feverFlow 1.6s linear infinite;
+}
+@keyframes feverFlow{ from{ transform: translate(0,0) } to{ transform: translate(0, 38px) } }
+
+/* 连击 5+ 盘面边缘霓虹呼吸。复用光环层，只动 opacity。 */
+body.hotcombo .board-aura{
+  --au-ring: rgba(120,235,255,.85);
+  --au-glow: rgba(34,211,238,.45);
+  animation: auraPulse 0.85s ease-in-out infinite;
+}
+body.hotcombo .badge.cmb{ box-shadow: 0 0 14px rgba(34,211,238,.55); }
+
+@media (prefers-reduced-motion: reduce){
+  body.fever .shaker::before{ animation: none; opacity: .5; }
+  body.hotcombo .board-aura{ animation: none; opacity: .7; }
+}

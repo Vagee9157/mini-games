@@ -218,6 +218,10 @@ const EDGE_STOPS = [
 const STORE_KEY = nsKey('best.v1');       // 隔离：两个模式各有各的最高分
 const SAVE_KEY  = nsKey('save.v1');       // 隔离：疯狂版的存档不能被标准版 restore
 const LEGACY_KEY = nsKey('best.legacy');  // 清档时把旧纪录留一份
+function readLegacy(){
+  try { return parseInt(localStorage.getItem(LEGACY_KEY) || '0', 10) || 0; }
+  catch { return 0; }
+}
 // 下面这些是偏好，两个页面共用
 const BUZZ_KEY  = 'tetris.buzz.v1';
 const MUSIC_KEY = 'tetris.music.v1';
@@ -504,6 +508,14 @@ function hardDrop(){
   // 排在它们后头就是按下去过一会儿才响。
   sfx('drop');
   buzz(14);
+  // 拖尾：从起点到落点之间留一道残影
+  if (d >= 2){
+    const cells = [];
+    for (const [cx, cy] of cellsOf(p.type, p.rot))
+      cells.push([p.x + cx, p.y + cy, p.y + cy + d]);
+    trails.push({ cells, color: p.mod === 'gold' ? '#ffd23f' : colorOf(p.type), t: 0 });
+    if (trails.length > 4) trails.shift();
+  }
   p.y += d;
   game.score += d * 2;
   needsDraw = true;
@@ -627,6 +639,7 @@ function levelMult(lvl){
   return 1 + 7 * Math.pow((clamp(lvl, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1), .75);
 }
 
+let trails = [];        // 硬降残影 { cells:[[x,y]...], color, t }
 let lastClearRows = [];
 let bestBeaten = false;
 
@@ -674,7 +687,9 @@ function scoreFor(n, spin, perfect){
     const mid = lastClearRows.reduce((a, b) => a + b, 0) / lastClearRows.length;
     const py = (mid - BUFFER + .5) * CELL;
     const big = n === 4 || spin || perfect;
-    popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), big ? '#ffd166' : '#cfe6ff');
+    const hot = CRAZY && feverLeft > 0;
+    popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(),
+             hot ? '#ffe066' : (big ? '#ffd166' : '#cfe6ff'), hot ? 1.7 : 1);
     if (big) shake(n === 4 || perfect);
     else if (n >= 2) shake(false);
   }
@@ -744,6 +759,11 @@ function endGame(why){
   $('overLines').textContent = game.lines;
   $('overLevel').textContent = game.level;
   $('overBest').textContent = game.best.toLocaleString();
+  // 清过档的话把旧规则下的纪录也摆出来 —— 个人小游戏里最高分就是全部的意义，
+  // 光写进 localStorage 没人看得见等于没留
+  const lg = readLegacy();
+  $('legacyCell').hidden = !lg;
+  if (lg) $('overLegacy').textContent = lg.toLocaleString();
   $('overlay').classList.add('show');
   $('overlay').dataset.mode = 'over';
   syncHud();
@@ -1062,6 +1082,20 @@ function draw(){
     }
   }
 
+  // 硬降拖尾：从起点到落点之间拉一道渐隐的竖条
+  for (const tr of trails){
+    const a = Math.max(0, 1 - tr.t / 220);
+    ctx.save();
+    ctx.globalAlpha = a * .38;
+    ctx.fillStyle = tr.color;
+    for (const [x, y0, y1] of tr.cells){
+      const top = Math.max(y0, BUFFER) - BUFFER;
+      const bot = Math.max(y1, BUFFER) - BUFFER;
+      if (bot <= top) continue;
+      ctx.fillRect(x * CELL + CELL * .26, top * CELL, CELL * .48, (bot - top) * CELL);
+    }
+    ctx.restore();
+  }
   if (particles.length) drawParticles();
 
   // 底边那道线：满了就从下面顶一行灰线上来
@@ -1197,6 +1231,14 @@ function burstRow(y){
   }
 }
 
+function stepTrails(dt){
+  for (let i = trails.length - 1; i >= 0; i--){
+    trails[i].t += dt;
+    if (trails[i].t > 220) trails.splice(i, 1);
+  }
+  if (trails.length) needsDraw = true;
+}
+
 function stepParticles(dt){
   for (let i = particles.length - 1; i >= 0; i--){
     const q = particles[i];
@@ -1256,7 +1298,7 @@ let toastTimer = 0;
 // cancelAnimationFrame），任何依赖游戏帧的反馈在那两个状态下都不动。
 
 // 分数飘字。x/y 用棋盘内的像素坐标，落在 #fx 那层上。
-function popScore(px, py, text, color){
+function popScore(px, py, text, color, scale){
   const fx = $('fx');
   if (!fx || !CELL) return;
   const W = CELL * COLS, H = CELL * ROWS;
@@ -1266,7 +1308,7 @@ function popScore(px, py, text, color){
   el.style.left = (px / W * 100) + '%';
   el.style.top  = (py / H * 100) + '%';
   el.style.color = color || '#cfe6ff';
-  el.style.fontSize = Math.max(13, Math.round(CELL * .62)) + 'px';
+  el.style.fontSize = Math.max(13, Math.round(CELL * .62 * (scale || 1))) + 'px';
   fx.appendChild(el);
   setTimeout(() => el.remove(), 1050);
 }
@@ -1288,6 +1330,7 @@ function syncStreak(){
   const onB = !!game.b2b && !game.over;
   const onC = game.combo > 0 && !game.over;
   b2b.classList.toggle('on', onB);
+  document.body.classList.toggle('hotcombo', game.combo >= 5 && !game.over);
   cmb.classList.toggle('on', onC);
   if (onC) cmb.textContent = 'COMBO ×' + game.combo;
 }
@@ -1866,6 +1909,7 @@ function stepOnce(dt){
   if (game.paused || game.over || game.frozen) return 'stop';
 
   stepParticles(dt);
+  stepTrails(dt);
   handleAutoRepeat(dt);
 
   // 灰线倒计时（消行动画期间不推进，免得叠在一起）
@@ -1956,7 +2000,7 @@ function tick(now){
   // 方块匀速往下掉的时候，一秒里其实只有一帧画面变了。
   // 没变就别画——这是手机发烫的主因。
   // 逻辑跑满 60，画面限到 30——这个游戏看不出差别，功耗直接减半
-  if ((needsDraw || particles.length || clearing) && now - lastDrawAt >= 32){
+  if ((needsDraw || particles.length || trails.length || clearing) && now - lastDrawAt >= 32){
     draw();
     lastDrawAt = now;
     needsDraw = false;
@@ -2266,6 +2310,7 @@ function restart(){
   dangerOn = false;
   shownScore = 0;
   crazyReset();
+  trails.length = 0;
   syncEdge();
   garbageTimer = 0;
   staticDirty = true;
@@ -2352,7 +2397,7 @@ function applyWipe(){
     const had = parseInt(localStorage.getItem(STORE_KEY) || '0', 10) || 0;
     // 旧纪录留一份：个人小游戏里最高分就是全部的意义，别直接抹掉。
     // 加条件，免得第二次清档把 legacy 覆盖成 0
-    const oldLegacy = parseInt(localStorage.getItem(LEGACY_KEY) || '0', 10) || 0;
+    const oldLegacy = readLegacy();
     if (had > 0 && had > oldLegacy) localStorage.setItem(LEGACY_KEY, String(had));
     localStorage.removeItem(STORE_KEY);
     localStorage.removeItem(SAVE_KEY);

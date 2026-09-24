@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=a97e8363">
+<link rel="stylesheet" href="tetris.css?v=9bfea317">
 </head>
 <body>
 <div class="topline"></div>
@@ -79,6 +79,7 @@
               <div><span>BEST</span><b id="overBest">0</b></div>
               <div><span>LINES</span><b id="overLines">0</b></div>
               <div><span>LEVEL</span><b id="overLevel">1</b></div>
+              <div id="legacyCell" hidden><span>旧版纪录</span><b id="overLegacy">0</b></div>
             </div>
             <button class="pbtn" id="againBtn">再来一局</button>
           </div>
@@ -146,7 +147,7 @@
 
 </div>
 
-<script src="tetris.js?v=495b2e6a"></script>
+<script src="tetris.js?v=bb1202c3"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
