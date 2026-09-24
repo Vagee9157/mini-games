@@ -51,7 +51,11 @@ const STYLES = {
 
 const skin = { pal: 'clear', style: 'plain' };
 let activePal = null;   // FEVER 期间临时换肤用，不落盘
-function colorOf(type){ return type === GARBAGE ? '#93a4c4' : PALETTES[activePal || skin.pal][type]; }
+function colorOf(type){
+  if (type === GARBAGE) return '#93a4c4';
+  if (type === FROZEN)  return '#8fd8ff';
+  return PALETTES[activePal || skin.pal][type];
+}
 
 // 每种方块的四个旋转态，坐标是它在自己 box 里的格子位置 [x, y]。
 // 直接写死每一态，比用旋转矩阵算更不容易在旋转中心上出错。
@@ -183,6 +187,7 @@ function gravityFor(lvl){
 // 模拟发现它专门惩罚打得好的人：熟练档一局消 150 行，等于白送难度钟 180 秒，
 // 越会玩、灰线来得越凶。去掉之后难度钟就是纯已玩时长，对谁都一样。
 const GARBAGE = 'X';
+const FROZEN  = 'F';   // 冰冻格：整行要消两次才掉
 // 疯狂版灰线更凶：FEVER 的「灰线暂停」和行雨的「清灰线」都得有东西可对抗，
 // 取消灰线这两个机制就空转了
 // 疯狂版这条比标准版松（36→12 秒 vs 45→15 秒的形状但拉得更长）：
@@ -455,6 +460,7 @@ function collides(type, x, y, rot){
   for (const [cx, cy] of cellsOf(type, rot)){
     const bx = x + cx, by = y + cy;
     if (bx < 0 || bx >= COLS) return true;
+    if (bx === wallCol) return true;        // 列封锁：这一列当墙用
     if (by >= TOTAL_ROWS) return true;
     if (by >= 0 && game.board[by][bx]) return true;
   }
@@ -633,10 +639,13 @@ function lockPiece(){
   needsDraw = true;
 
   // 找满行
-  const full = [];
+  // 凑满的行分两路：带冰的只解冻不消（要消两次才掉），其余正常清。
+  const full = [], thaw = [];
   for (let y = 0; y < TOTAL_ROWS; y++){
-    if (game.board[y].every(c => c)) full.push(y);
+    if (!game.board[y].every(c => c)) continue;
+    if (CRAZY && game.board[y].some(c => c === FROZEN)) thaw.push(y); else full.push(y);
   }
+  if (thaw.length) crazyThaw(thaw);
 
   // 消完这几行之后整个盘就空了 = 全消，Guideline 里给大额奖励
   const perfect = full.length > 0 &&
@@ -654,6 +663,7 @@ function lockPiece(){
     buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
     clearing = { rows: full, t: 0, dur: 260 };
     for (const y of full) burstRow(y);
+    if (CRAZY) addEmbers(full, full.length === 4 ? '#ffd166' : '#7fe3ff');
     flashBoard(full.length);
   } else {
     // 硬降自己已经响过 drop 了，再补一声 lock 会叠成一团糊音
@@ -1224,7 +1234,26 @@ function draw(){
       ctx.restore();
     }
   }
+  if (CRAZY && embers.length) drawEmbers();
   if (sweeps.length || rings.length) drawFx();
+  if (CRAZY && wallCol >= 0){
+    // 封锁列：斜纹一片，和「这里不能放」这件事对得上
+    ctx.save();
+    ctx.globalAlpha = .30;
+    ctx.fillStyle = '#ff5c6e';
+    ctx.fillRect(wallCol * CELL, 0, CELL, ROWS * CELL);
+    ctx.globalAlpha = .55;
+    ctx.strokeStyle = '#ffd0d6';
+    ctx.lineWidth = Math.max(1, CELL * .05);
+    ctx.beginPath();
+    for (let y = -CELL; y < ROWS * CELL; y += CELL * .5){
+      ctx.moveTo(wallCol * CELL, y);
+      ctx.lineTo(wallCol * CELL + CELL, y + CELL);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (CRAZY) drawCracks();
   if (particles.length) drawParticles();
 
   // 底边那道线：满了就从下面顶一行灰线上来
@@ -1549,6 +1578,7 @@ function syncHeat(){
   if (q !== heatQuant){
     heatQuant = q;
     syncEdge();
+    syncTempo();
   }
 }
 
@@ -1884,6 +1914,16 @@ let baseBpm = TRACKS[0].bpm;
 // 叠在已排期的旧音符上）。已排期的 0.35 秒撤不回来，所以变速有延迟是正常的。
 function setTempo(bpm){ EIGHTH = 60 / Math.max(40, bpm) / 2; }
 
+// 曲速跟着热度连续走，不再是 FEVER 固定 ×1.22。
+// 热度本来就是「你打得多猛」的读数，让耳朵也听得见它 ——
+// 倍率越高鼓点越急，人会不自觉地跟着加速，然后失误。
+function syncTempo(){
+  if (!CRAZY || !musicOn || muted) return;
+  let k = 1 + Math.min(.42, (heatMult() - 1) * .05);
+  if (feverLeft > 0) k *= 1.12;
+  setTempo(Math.round(baseBpm * k));
+}
+
 let musicOn = true;
 let musicGain = null;     // 音乐总线，暂停时淡出
 let mTimer = 0;           // 调度器
@@ -1894,6 +1934,7 @@ let mBeat = 0;            // 当前小节内走了几个八分
 
 const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
+let musicLP = null;       // 低通句柄，暗幕时扫下去把音乐压闷
 function musicBus(){
   if (!musicGain){
     musicGain = actx.createGain();
@@ -1903,12 +1944,24 @@ function musicBus(){
     lp.type = 'lowpass';
     // 2000 太闷了，手机喇叭本来就放不出低频，再把高次谐波削光就什么都不剩。
     // 「不尖锐」靠的是下面那个 34ms 的慢起音，不是靠削高频。
-    lp.frequency.value = 2600;
+    lp.frequency.value = LP_OPEN;
     lp.Q.value = .4;
     musicGain.connect(lp);
     lp.connect(actx.destination);
+    musicLP = lp;
   }
   return musicGain;
+}
+
+const LP_OPEN = 2600, LP_MUFFLE = 560;
+// 暗幕时把音乐闷下去。看不见方块已经够慌了，声音再一起蒙住，
+// 那五秒的压迫感是加倍的 —— 一个滤波器参数换来的。
+function setMuffle(on){
+  if (!musicLP || !actx) return;
+  const t = actx.currentTime;
+  musicLP.frequency.cancelScheduledValues(t);
+  musicLP.frequency.setValueAtTime(musicLP.frequency.value, t);
+  musicLP.frequency.linearRampToValueAtTime(on ? LP_MUFFLE : LP_OPEN, t + (on ? .35 : .6));
 }
 
 // 一个音：主音 + 低五度的薄薄一层，听着不那么单薄
@@ -2098,11 +2151,18 @@ function crazyStep(dt){
 // 事件和赌局的钟要一直走，热度是 0 也得走 —— 上面那个函数会提前 return
 function crazyClocks(dt){
   if (!CRAZY) return;
+  // 狂风：每隔一会儿把下落中的方块吹偏一格。撞墙就算了，不硬推。
+  if (evActive && evActive.key === 'wind' && game.piece && !clearing){
+    windTimer += dt;
+    if (windTimer >= 850){ windTimer = 0; tryMove(rndFx() < .5 ? -1 : 1, 0); }
+  }
   evStepSchedule(dt);
   betStep(dt);
   for (let i = beams.length - 1; i >= 0; i--)
     if ((beams[i].t += dt) > BEAM_MS) beams.splice(i, 1);
-  if (beams.length) needsDraw = true;
+  for (let i = embers.length - 1; i >= 0; i--)
+    if ((embers[i].t += dt) > EMBER_MS) embers.splice(i, 1);
+  if (beams.length || embers.length) needsDraw = true;
 }
 
 let feverLeft = 0;               // 剩余 FEVER 时间（ms，游戏时间）
@@ -2114,6 +2174,7 @@ function crazyReset(){
   feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false;
   heat = 0; heatTier = -1; heatQuant = -1;
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
+  wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; beams.length = 0;
   delete document.body.dataset.ev;
   document.body.classList.remove('betting');
@@ -2178,10 +2239,11 @@ function feverStart(){
   showToast('FEVER  ×' + FEVER_MULT);
   buzz([40, 30, 40, 30, 90]);
   sfx('tetris', 1.26);
-  if (musicOn && !muted) setTempo(Math.round(baseBpm * 1.22));
+  syncTempo();
 }
 function feverEnd(){
   feverLeft = 0;
+  syncTempo();
   activePal = null;
   staticDirty = true; previewDirty = true; needsDraw = true;
   document.body.classList.remove('fever');
@@ -2324,6 +2386,97 @@ function boom(x, y, color){
 let beams = [];                 // 激光柱 { x, t }
 const BEAM_MS = 260;
 
+// ── 消行余烬 ──
+// 消掉的行以前是「一下没了」。留几百毫秒的余烬，那一下才有重量。
+// 不走粒子数组（110 颗的预算已经被 burstRow 吃掉一大半），自己一条。
+let embers = [];                // { y0, y1, color, t, dots:[[x,y,r]...] }
+const EMBER_MS = 820;
+
+function addEmbers(rows, color){
+  if (!rows.length || !CELL) return;
+  const y0 = Math.max(Math.min(...rows), BUFFER), y1 = Math.max(...rows);
+  if (y1 < BUFFER) return;
+  const dots = [];
+  for (let i = 0; i < 14; i++)
+    dots.push([rndFx(), rndFx(), .25 + rndFx() * .5]);   // 归一化坐标，画的时候再乘尺寸
+  embers.push({ y0, y1, color, t: 0, dots });
+  while (embers.length > 3) embers.shift();
+}
+
+function drawEmbers(){
+  const W = COLS * CELL;
+  for (const e of embers){
+    const k = e.t / EMBER_MS, a = (1 - k) * (1 - k);     // 平方衰减，尾巴收得干净
+    const top = (e.y0 - BUFFER) * CELL, h = (e.y1 - e.y0 + 1) * CELL;
+    ctx.save();
+    const g = ctx.createLinearGradient(0, top, 0, top + h);
+    g.addColorStop(0,  rgba(e.color, 0));
+    g.addColorStop(.5, rgba(e.color, .30 * a));
+    g.addColorStop(1,  rgba(e.color, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, W, h);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = e.color;
+    for (const [dx, dy, dr] of e.dots){
+      const sz = CELL * dr * (1 - k * .6);
+      ctx.fillRect(dx * W - sz / 2, top + dy * h - sz / 2 - k * CELL * .7, sz, sz);
+    }
+    ctx.restore();
+  }
+}
+
+// ── 屏幕裂纹 ──
+// 堆到危险区时棋盘顶上裂开，越危险裂得越深。
+// 走向一次性生成，不是每帧随机 —— 每帧重抖会变成噪点，不像裂纹。
+// 第一版画成了横贯全盘的长直线，看着像划痕：现在只从顶边往下短促地裂，
+// 长度随危险度增长，而且越往下越淡。
+const CRACKS = (() => {
+  let seed = 0x9e3779b9;
+  const r = () => { seed = (seed * 1664525 + 1013904223) | 0; return ((seed >>> 8) & 0xffff) / 0xffff; };
+  const out = [];
+  for (let i = 0; i < 7; i++){
+    const pts = [[.06 + r() * .88, 0]];
+    let x = pts[0][0], y = 0;
+    for (let k = 0; k < 7; k++){
+      x = Math.min(.98, Math.max(.02, x + (r() - .5) * .17));
+      y += .09 + r() * .07;
+      pts.push([x, y]);
+    }
+    out.push(pts);
+  }
+  return out;
+})();
+
+// 只给疯狂版。标准版这一版之后的表现要保持不变，纯视觉也不例外。
+function drawCracks(){
+  const top = topFilledRow();
+  if (top < 0) return;
+  const left = top - BUFFER;              // 离顶还有几行
+  if (left > 6) return;
+  const k = Math.min(1, (6 - left) / 6);  // 0 → 1，越危险越开
+  const W = COLS * CELL, H = ROWS * CELL;
+  const reach = H * (.10 + k * .24);      // 最深也只到三分之一板高
+  const n = Math.max(1, Math.round(k * CRACKS.length));
+  const line = (pts, upto, alpha, wide) => {
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = Math.max(.8, CELL * wide);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0] * W, 0);
+    for (let j = 1; j <= upto; j++) ctx.lineTo(pts[j][0] * W, pts[j][1] * reach);
+    ctx.stroke();
+  };
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#ff5c6e';
+  for (let i = 0; i < n; i++){
+    const pts = CRACKS[i];
+    line(pts, pts.length - 1, .07 + k * .13, .030);   // 整条，很淡
+    line(pts, 3,              .14 + k * .26, .050);   // 近顶那段，浓一点
+  }
+  ctx.restore();
+}
+
 // ═══════════ 第三批：盘面事件 ═══════════
 //
 // 硬规则：所有捣乱事件必须提前预告。没预告的随机惩罚不是疯狂，是耍赖 ——
@@ -2337,8 +2490,51 @@ const EVENTS = [
   { key:'mirror',   name:'镜像',   tip:'左右要对调了', bad:true,  ms:8000, w:3 },
   { key:'quake',    name:'地震',   tip:'整堆要平移了', bad:true,  ms:0,    w:2 },
   { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:3 },
+  { key:'freeze',   name:'冰冻',   tip:'有一行要冻住了', bad:true,  ms:0,    w:2 },
+  { key:'wind',     name:'狂风',   tip:'方块要被吹偏了', bad:true,  ms:7000, w:2 },
+  { key:'wall',     name:'封锁',   tip:'有一列要封了',   bad:true,  ms:9000, w:2 },
 ];
 let evTimer = 0, evWarnLeft = 0, evPending = null, evActive = null, evLeft = 0, evBeep = 0;
+let wallCol = -1;        // 列封锁：这一列当墙，collides 里直接判撞
+let windTimer = 0;       // 狂风：每隔一会儿把下落中的方块吹偏一格
+
+// 列封锁只挑边上那几列。出生区在 3~6 列，封在那儿会让新方块一出来就撞死 ——
+// 那不是难度，是判定 bug。
+const WALL_COLS = [0, 1, 2, 7, 8, 9];
+
+function doWall(){
+  const busy = new Set(game.piece ? cellsOf(game.piece.type, game.piece.rot).map(c => game.piece.x + c[0]) : []);
+  const pool = WALL_COLS.filter(x => !busy.has(x));
+  if (!pool.length) return false;
+  wallCol = pool[(rndFx() * pool.length) | 0];
+  needsDraw = true;
+  return true;
+}
+
+// 冰冻行：把某一行已有的格子冻住。冻住的行凑满时不消，只解冻 ——
+// 要消两次才掉。状态直接存在盘面格子里（FROZEN 这个类型），
+// 所以塌陷、灰线上顶、地震平移它都会跟着走，不用另维护一张表。
+function doFreeze(){
+  const rows = [];
+  for (let y = BUFFER; y < TOTAL_ROWS; y++)
+    if (game.board[y].some(Boolean) && !game.board[y].some(c => c === FROZEN)) rows.push(y);
+  if (!rows.length) return false;
+  const y = rows[(rndFx() * Math.min(rows.length, 6)) | 0];   // 从最上面几行里挑，别冻在深处看不见
+  for (let x = 0; x < COLS; x++) if (game.board[y][x]) game.board[y][x] = FROZEN;
+  staticDirty = true; needsDraw = true;
+  return true;
+}
+
+// 解冻：凑满的冰冻行不消，变回普通灰块，下一次凑满才真的掉
+function crazyThaw(rows){
+  for (const y of rows){
+    for (let x = 0; x < COLS; x++) if (game.board[y][x] === FROZEN) game.board[y][x] = GARBAGE;
+    burstRow(y);
+  }
+  staticDirty = true; needsDraw = true;
+  showToast('冰裂！再消一次才掉');
+  sfx('rotate', .72); buzz([25, 20, 25]);
+}
 
 function evPeriod(){
   return EV_MIN + (EV_FIRST - EV_MIN) * Math.exp(-game.elapsed / EV_TAU);
@@ -2381,13 +2577,23 @@ function evFire(){
   if (!e) return;
   if (e.key === 'quake')   doQuake();
   if (e.key === 'compact') doCompact();
-  if (e.ms > 0){ evActive = e; evLeft = e.ms; document.body.dataset.ev = e.key; staticDirty = true; needsDraw = true; }
+  if (e.key === 'freeze' && !doFreeze()) return;    // 空盘冻不了，当没发生
+  if (e.key === 'wall'   && !doWall())   return;
+  if (e.ms > 0){
+    evActive = e; evLeft = e.ms;
+    document.body.dataset.ev = e.key; staticDirty = true; needsDraw = true;
+    if (e.key === 'blackout') setMuffle(true);      // 看不见 + 听不清，压迫感翻倍
+    if (e.key === 'wind') windTimer = 0;
+  }
   sfx(e.bad ? 'over' : 'level', 1);
   buzz(e.bad ? [60, 40, 60] : 40);
 }
 
 function evEnd(){
+  const was = evActive && evActive.key;
   evActive = null; evLeft = 0;
+  if (was === 'blackout') setMuffle(false);
+  if (was === 'wall') wallCol = -1;
   delete document.body.dataset.ev;
   staticDirty = true; needsDraw = true;
 }
@@ -3131,12 +3337,14 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
-  evFire, pickEvent, MOD_RATES, EVENTS,
+  evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
+  redraw: () => { staticDirty = true; needsDraw = true; },
+  get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get rainLeft(){ return rainLeft; }, get feverPity(){ return feverPity; },
   feverStart, crazyRescue, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
-  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length }) };
+  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();
