@@ -624,6 +624,10 @@ function lockPiece(){
     if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
   }
   if (!hardLocking) burstLand(p);
+  // 变异效果要在「已经盖进盘面」之后、「找满行」之前跑，
+  // 炸出来的空档才能算进这一次的消行判定。
+  // 它们会把 staticDirty 置上，下面的 stampToStatic 自然会空转。
+  crazyApplyMod(p);
   stampToStatic(p);        // 只补这一块，不整盘重画
   game.piece = null;
   needsDraw = true;
@@ -699,6 +703,7 @@ function clearStyle(n, spin, perfect){
     return [{ name: 'MINI T-SPIN',        cls: 'tm', scale: 1.10 },
             { name: 'MINI T-SPIN SINGLE', cls: 'tm', scale: 1.20 },
             { name: 'MINI T-SPIN DOUBLE', cls: 'tm', scale: 1.30 }][n] || FALLBACK_STYLE;
+  if (n > 4) return { name: `${n} LINES`, cls: 't4', scale: 1.7 };
   return [null,
           { name: 'SINGLE', cls: 't1', scale: 1.00 },
           { name: 'DOUBLE', cls: 't2', scale: 1.15 },
@@ -718,8 +723,10 @@ function scoreFor(n, spin, perfect){
     base = n ? (n === 1 ? 200 : 400) : 100;
     label = n ? 'MINI T-SPIN' : '';
   } else if (n){
-    base = [0, 100, 300, 500, 800][n];
-    label = ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS'][n];
+    // n 理论上不会超过 4，但压实/爆炸曾经把满行攒到下一次锁定，凑出过 5、6 行。
+    // 表外取值是 undefined，乘一下整局分数就变 NaN —— 这里兜住，别再让它发生。
+    base = n <= 4 ? [0, 100, 300, 500, 800][n] : 800 + (n - 4) * 300;
+    label = n <= 4 ? ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS'][n] : `${n} LINES`;
   }
 
   // back-to-back：连续的 Tetris 或 T-spin 消行，额外五成
@@ -738,7 +745,7 @@ function scoreFor(n, spin, perfect){
 
   // 全消：Guideline 给的分比一次 Tetris 还高，而且很难碰上，值得给个大的
   if (perfect){
-    base += [0, 800, 1200, 1800, 2000][n] || 800;
+    base += (n <= 4 ? [0, 800, 1200, 1800, 2000][n] : 2000) || 800;
     label = '全消 PERFECT CLEAR';
     buzz([40, 50, 60, 50, 90]);
   }
@@ -1095,7 +1102,9 @@ function drawStatic(){
     for (let x = 0; x < COLS; x++){
       const t = row[x];
       if (!t) continue;
-      drawCell(bgCtx, x * CELL, (y - BUFFER) * CELL, CELL, colorOf(t), { garbage: t === GARBAGE });
+      // 暗幕：只剩轮廓，逼你记棋盘。走 ghost 那套画法，不另写一份。
+      drawCell(bgCtx, x * CELL, (y - BUFFER) * CELL, CELL, colorOf(t),
+               evBlackout() ? { ghost: true } : { garbage: t === GARBAGE });
     }
   }
   staticDirty = false;
@@ -1169,9 +1178,10 @@ function draw(){
     }
     // 快锁定的提示：以前是整块洗白，颜色全丢了，现在改成同色光边
     const lockPulse = grounded ? Math.min(4, (lockTimer / LOCK_DELAY * 5) | 0) / 4 : 0;
-    // 金块：本色往金里混七成 + 常驻亮边，一眼认得出来
-    const gold = p.mod === 'gold';
-    const pc = gold ? mix(color, '#ffd23f', .72) : color;
+    // 变异块：本色往对应色里混七成 + 常驻亮边，一眼认得出是哪种
+    const tint = CRAZY && p.mod ? MOD_TINT[p.mod] : null;
+    const gold = !!tint;
+    const pc = tint ? mix(color, tint, .72) : color;
     for (const [cx, cy] of cellsOf(p.type, p.rot)){
       const by = p.y + cy;
       if (by < BUFFER) continue;
@@ -1199,6 +1209,20 @@ function draw(){
       ctx.fillRect(x * CELL + CELL * .34, top * CELL, CELL * .32, (bot - top) * CELL);
     }
     ctx.restore();
+  }
+  if (beams.length){
+    for (const bm of beams){
+      const k = bm.t / BEAM_MS;
+      const g = ctx.createLinearGradient(0, 0, 0, ROWS * CELL);
+      g.addColorStop(0, rgba('#7cf4ff', 0));
+      g.addColorStop(.5, rgba('#7cf4ff', .85 * (1 - k)));
+      g.addColorStop(1, rgba('#7cf4ff', 0));
+      ctx.save();
+      ctx.fillStyle = g;
+      const w = CELL * (1 - k * .5);
+      ctx.fillRect(bm.x * CELL + (CELL - w) / 2, 0, w, ROWS * CELL);
+      ctx.restore();
+    }
   }
   if (sweeps.length || rings.length) drawFx();
   if (particles.length) drawParticles();
@@ -2056,6 +2080,8 @@ function heatGain(n, spin, perfect){
   if (perfect) return 40;
   if (spin === 'tspin') return [6, 10, 18, 26][n] ?? 26;
   if (spin === 'mini')  return [3, 4, 7][n] ?? 7;
+  // 压实可能一次凑满四行以上，表只到 4，超出的按每行 +4 续
+  if (n > 4) return 16 + (n - 4) * 4;
   return [0, 2, 5, 9, 16][n] || 0;
 }
 
@@ -2069,13 +2095,30 @@ function crazyStep(dt){
   if (heat < .05) heat = 0;
 }
 
+// 事件和赌局的钟要一直走，热度是 0 也得走 —— 上面那个函数会提前 return
+function crazyClocks(dt){
+  if (!CRAZY) return;
+  evStepSchedule(dt);
+  betStep(dt);
+  for (let i = beams.length - 1; i >= 0; i--)
+    if ((beams[i].t += dt) > BEAM_MS) beams.splice(i, 1);
+  if (beams.length) needsDraw = true;
+}
+
 let feverLeft = 0;               // 剩余 FEVER 时间（ms，游戏时间）
 let feverPity = 0;               // 保底计数：每次消行没中就 +1
 let rainLeft = RAIN_MAX;
 let goldPending = false;         // 这一杆锁下去的块是不是金的
 
 function crazyReset(){
-  feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false; heat = 0; heatTier = -1; heatQuant = -1;
+  feverLeft = 0; feverPity = 0; rainLeft = RAIN_MAX; goldPending = false;
+  heat = 0; heatTier = -1; heatQuant = -1;
+  evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
+  betOffer = 0; betLeft = 0; beams.length = 0;
+  delete document.body.dataset.ev;
+  document.body.classList.remove('betting');
+  const ew = $('evwarn'); if (ew) ew.classList.remove('on');
+  betHide();
   activePal = null;
   document.body.classList.remove('fever');
   if (CRAZY) setTempo(baseBpm);
@@ -2086,7 +2129,7 @@ function crazyReset(){
 // 盘面格子和 queue 都是字符串，一个字节都不用动。
 function crazyOnSpawn(p){
   if (!CRAZY) return;
-  p.mod = rndFx() < GOLD_RATE ? 'gold' : null;
+  p.mod = rollMod();
 }
 
 // 钩子②：锁定时记下这块是不是金的（scoreFor 里 game.piece 已经是 null 了）
@@ -2111,8 +2154,16 @@ function crazyOnClear(lines, spin, perfect){
   if (lines <= 0 && !spin) return;
   goldPending = false;
   // 空转的 T-spin 也给热度：它是实打实的技术动作，只是没消到行
-  heat += heatGain(lines, spin, perfect);
-  syncHeat();     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
+  let gain = heatGain(lines, spin, perfect);
+  if (lines > 0 && betLeft > 0){        // 赌赢：这一手的注入翻倍
+    gain *= BET_MULT;
+    betLeft = 0; betHide();
+    showToast('梭哈成功　热度 ×' + BET_MULT);
+    sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
+  }
+  heat += gain;
+  syncHeat();
+  betMaybeOffer(lines, spin);     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
   if (lines <= 0) return;                 // 但不推 FEVER 保底
   if (feverLeft > 0) return;
   feverPity += lines;
@@ -2135,6 +2186,280 @@ function feverEnd(){
   staticDirty = true; previewDirty = true; needsDraw = true;
   document.body.classList.remove('fever');
   setTempo(baseBpm);
+}
+
+
+// ═══════════ 第二批：方块变异 ═══════════
+//
+// 概率是按实测的「一局约 770~1000 块」反推的，不是拍脑袋定的。
+// 第一版我提的 1/40、1/60、1/30 换算下来一局会出五十几个特殊块，
+// 那就不叫天降救兵了，叫常规配置。
+const MOD_RATES = [
+  ['laser',  1 / 350],   // 一局约 3 个
+  ['bomb',   1 / 250],   // 一局约 4 个
+  ['hammer', 1 / 120],   // 一局约 8 个
+  ['gold',   GOLD_RATE], // 一局约 90 个
+];
+const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
+
+function rollMod(){
+  let r = rndFx();
+  for (const [k, rate] of MOD_RATES){ if (r < rate) return k; r -= rate; }
+  return null;
+}
+
+// 三种效果刻意分成「减堆 / 挖井 / 修洞」，各解决一类困境，不互相重复
+function crazyApplyMod(p){
+  if (!CRAZY || !p.mod || p.mod === 'gold') return;
+  if (p.mod === 'bomb')   bombAt(p);
+  if (p.mod === 'laser')  laserAt(p);
+  if (p.mod === 'hammer') hammerAt(p);
+}
+
+// 让这几列里的格子落下去填掉下方的空洞。
+// 俄罗斯方块本身没有这种重力，所以它只能是特效，必须有明确的视觉来源。
+function collapseCols(cols){
+  for (const x of cols){
+    if (x < 0 || x >= COLS) continue;
+    let w = TOTAL_ROWS - 1;
+    for (let y = TOTAL_ROWS - 1; y >= 0; y--){
+      const v = game.board[y][x];
+      if (!v) continue;
+      game.board[w][x] = v;
+      if (w !== y) game.board[y][x] = null;
+      w--;
+    }
+  }
+  staticDirty = true; needsDraw = true;
+  clearFullNow();
+}
+
+// 压实和爆炸都可能直接把某几行凑满。这些行必须当场清掉：
+//   1) 留在盘面上「满了却不消」是明显的 bug 观感；
+//   2) 攒到下一次锁定会凑出 5、6 行的超额消除，而记分表只到 4 行 ——
+//      [0,100,300,500,800][5] 是 undefined，乘出来整个分数变 NaN。实测踩过。
+// 不走 scoreFor：它不是玩家摆出来的消行，不该吃 combo / B2B / 全消那套加成。
+// 给行数和热度，不直接给分 —— 热度会把回报体现在之后的每一次消行上。
+function clearFullNow(){
+  const full = [];
+  for (let y = 0; y < TOTAL_ROWS; y++) if (game.board[y].every(c => c)) full.push(y);
+  if (!full.length) return 0;
+  for (const y of full) burstRow(y);
+  sweepRows(full, '#9bffdc');
+  applyClear(full);
+  game.lines += full.length;
+  if (CRAZY) heat += heatGain(full.length, null, false);
+  const lv = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
+  if (lv > game.level){ game.level = lv; flashLevel(); syncEdge(); }
+  sfx('clear', 1.1);
+  return full.length;
+}
+
+// 炸弹：炸掉周围一圈，然后让受影响的列塌下来。
+// 只炸不塌等于在盘面中间留一个洞 —— 那是帮倒忙。塌陷才让它成为「减堆」的手段。
+function bombAt(p){
+  const cols = new Set(), kill = new Set();
+  for (const [cx, cy] of cellsOf(p.type, p.rot)){
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++){
+      const x = p.x + cx + dx, y = p.y + cy + dy;
+      if (x < 0 || x >= COLS || y < 0 || y >= TOTAL_ROWS) continue;
+      kill.add(y * COLS + x); cols.add(x);
+    }
+  }
+  for (const k of kill){
+    const y = (k / COLS) | 0, x = k % COLS;
+    if (y >= BUFFER && game.board[y][x]) boom(x, y, '#ff7a4d');
+    game.board[y][x] = null;
+  }
+  collapseCols(cols);
+  burstRing([p.y + 1], '#ff7a4d');
+  shake(true); sfx('tetris', .7); buzz([50, 30, 70]);
+}
+
+// 激光：从落点正下方打穿一整列。开出来的那口井正好是打 TETRIS 要的形状。
+function laserAt(p){
+  const cells = cellsOf(p.type, p.rot);
+  const xs = cells.map(c => c[0]);
+  const cx = p.x + Math.round((Math.min(...xs) + Math.max(...xs)) / 2);
+  if (cx < 0 || cx >= COLS) return;
+  // 整块连同下方那一列一起汽化。
+  // 只打一列的话，方块落在别的列上的那几格会悬在半空 —— 看着像 bug 不像特效。
+  for (const [dx, dy] of cells){
+    const x = p.x + dx, y = p.y + dy;
+    if (x < 0 || x >= COLS || y < 0 || y >= TOTAL_ROWS) continue;
+    if (y >= BUFFER && game.board[y][x]) boom(x, y, '#7cf4ff');
+    game.board[y][x] = null;
+  }
+  const top = p.y + Math.min(...cells.map(c => c[1]));
+  for (let y = Math.max(top, 0); y < TOTAL_ROWS; y++){
+    if (y >= BUFFER && game.board[y][cx]) boom(cx, y, '#7cf4ff');
+    game.board[y][cx] = null;
+  }
+  beams.push({ x: cx, t: 0 });
+  while (beams.length > 2) beams.shift();
+  staticDirty = true; needsDraw = true;
+  shake(true); sfx('tspin', 1.3); buzz([30, 20, 30, 20, 60]);
+}
+
+// 重锤：一个方块都不炸，只把落点这几列压实 —— 埋着的洞消失，堆高跟着降。
+// 它是三个里唯一「纯修复」的，不改变任何格子的存在，只改位置。
+function hammerAt(p){
+  const cols = new Set(cellsOf(p.type, p.rot).map(c => p.x + c[0]));
+  collapseCols(cols);
+  for (const x of cols) if (x >= 0 && x < COLS) boom(x, TOTAL_ROWS - 1, '#c9a6ff');
+  shake(false); sfx('drop', .72); buzz(40);
+}
+
+// 一颗格子被处理掉时的碎屑。粒子有 110 颗硬上限，这里只给两颗，
+// 免得一发激光把整条列的碎屑吃光了预算，把消行粒子挤掉。
+function boom(x, y, color){
+  for (let i = 0; i < 2; i++)
+    particles.push({
+      x: (x + .5) * CELL, y: (y - BUFFER + .5) * CELL,
+      vx: (rndFx() - .5) * 260, vy: (rndFx() - .5) * 220,
+      life: .9, color, size: CELL * .19,
+    });
+}
+
+let beams = [];                 // 激光柱 { x, t }
+const BEAM_MS = 260;
+
+// ═══════════ 第三批：盘面事件 ═══════════
+//
+// 硬规则：所有捣乱事件必须提前预告。没预告的随机惩罚不是疯狂，是耍赖 ——
+// 玩家只会觉得游戏在作弊。三坏一好，必须有天上掉馅饼的时刻。
+const EV_WARN   = 3000;         // 预告多久
+const EV_FIRST  = 45000;        // 开局多久来第一次
+const EV_MIN    = 20000;        // 最密
+const EV_TAU    = 240000;       // 加密的时间常数
+const EVENTS = [
+  { key:'blackout', name:'暗幕',   tip:'方块要隐形了', bad:true,  ms:5000, w:3 },
+  { key:'mirror',   name:'镜像',   tip:'左右要对调了', bad:true,  ms:8000, w:3 },
+  { key:'quake',    name:'地震',   tip:'整堆要平移了', bad:true,  ms:0,    w:2 },
+  { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:3 },
+];
+let evTimer = 0, evWarnLeft = 0, evPending = null, evActive = null, evLeft = 0, evBeep = 0;
+
+function evPeriod(){
+  return EV_MIN + (EV_FIRST - EV_MIN) * Math.exp(-game.elapsed / EV_TAU);
+}
+
+function pickEvent(){
+  // 濒死时只发好事。这时候再来一发地震就是耍赖，不是难度。
+  const safe = stackTopRow() > RAIN_TRIGGER + 3;
+  const pool = EVENTS.filter(e => safe || !e.bad);
+  let total = pool.reduce((a, e) => a + e.w, 0), r = rndFx() * total;
+  for (const e of pool){ if ((r -= e.w) < 0) return e; }
+  return pool[pool.length - 1];
+}
+
+function evStepSchedule(dt){
+  if (evPending){
+    evWarnLeft -= dt;
+    evBeep -= dt;
+    if (evBeep <= 0){ evBeep = 1000; sfx('rotate', 1.6); }
+    if (evWarnLeft <= 0) evFire();
+    return;
+  }
+  if (evActive){
+    if (evLeft > 0){ evLeft -= dt; if (evLeft <= 0) evEnd(); }
+    return;
+  }
+  evTimer += dt;
+  if (evTimer < evPeriod()) return;
+  evTimer = 0;
+  evPending = pickEvent();
+  evWarnLeft = EV_WARN; evBeep = 0;
+  showToast(`${evPending.name}　${evPending.tip}`);
+  const b = $('evwarn');
+  if (b){ b.textContent = evPending.name; b.dataset.bad = evPending.bad ? '1' : '0'; b.classList.add('on'); }
+}
+
+function evFire(){
+  const e = evPending; evPending = null;
+  const b = $('evwarn'); if (b) b.classList.remove('on');
+  if (!e) return;
+  if (e.key === 'quake')   doQuake();
+  if (e.key === 'compact') doCompact();
+  if (e.ms > 0){ evActive = e; evLeft = e.ms; document.body.dataset.ev = e.key; staticDirty = true; needsDraw = true; }
+  sfx(e.bad ? 'over' : 'level', 1);
+  buzz(e.bad ? [60, 40, 60] : 40);
+}
+
+function evEnd(){
+  evActive = null; evLeft = 0;
+  delete document.body.dataset.ev;
+  staticDirty = true; needsDraw = true;
+}
+
+// 地震：整堆左右平移一格。推出边界的那一列直接丢掉 ——
+// 换成「撞墙不动」的话它就不是灾难了，而灾难正是它存在的意义。
+function doQuake(){
+  const dir = rndFx() < .5 ? -1 : 1;
+  for (let y = 0; y < TOTAL_ROWS; y++){
+    const row = game.board[y], out = new Array(COLS).fill(null);
+    for (let x = 0; x < COLS; x++){
+      const nx = x + dir;
+      if (nx >= 0 && nx < COLS) out[nx] = row[x];
+    }
+    game.board[y] = out;
+  }
+  staticDirty = true; needsDraw = true; shake(true);
+}
+
+function doCompact(){
+  collapseCols(new Set(Array.from({ length: COLS }, (_, i) => i)));
+  shake(false);
+}
+
+const evBlackout = () => CRAZY && evActive && evActive.key === 'blackout';
+// 镜像：左右键对调。挂在 press 上，DAS 连发也跟着换向
+const evMirror   = () => CRAZY && evActive && evActive.key === 'mirror';
+
+// ═══════════ 梭哈 ALL-IN ═══════════
+//
+// 整套机制里唯一「主动选择承担风险」的地方。抽奖给不了这种心跳，
+// 因为抽奖不是你的决定。
+const BET_MS = 10000, BET_MULT = 2;
+let betOffer = 0, betLeft = 0;
+
+function betMaybeOffer(n, spin){
+  if (!CRAZY || betLeft > 0 || betOffer > 0) return;
+  if (!(n === 4 || spin) || heat < 24) return;   // 热度太低时赌没意思
+  betOffer = BET_MS;
+  const el = $('allin');
+  if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
+}
+
+function betAccept(){
+  if (!CRAZY || betOffer <= 0) return;
+  betOffer = 0; betLeft = BET_MS;
+  betHide();
+  showToast('梭哈！十秒内必须消行');
+  sfx('tetris', 1.15); buzz([40, 30, 40]);
+}
+
+function betHide(){
+  const el = $('allin');
+  if (el){ el.classList.remove('on'); el.setAttribute('aria-hidden', 'true'); }
+  document.body.classList.toggle('betting', betLeft > 0);
+}
+
+function betStep(dt){
+  if (betOffer > 0){
+    betOffer -= dt;
+    if (betOffer <= 0){ betOffer = 0; betHide(); }
+  }
+  if (betLeft > 0){
+    betLeft -= dt;
+    document.body.classList.add('betting');
+    if (betLeft <= 0){
+      betLeft = 0; heat = 0; heatQuant = -1;
+      betHide(); syncHeat(); syncEdge();
+      showToast('赌输了，热度清零');
+      sfx('over', .8); buzz([90, 60, 90]);
+    }
+  }
 }
 
 // 钩子⑤：行雨 = 濒死豁免，一局最多三次。
@@ -2178,6 +2503,7 @@ function stepOnce(dt){
   stepTrails(dt);
   stepFx(dt);
   crazyStep(dt);
+  crazyClocks(dt);
   handleAutoRepeat(dt);
 
   // 灰线倒计时（消行动画期间不推进，免得叠在一起）
@@ -2299,6 +2625,7 @@ function handleAutoRepeat(dt){
 
 function press(dir){
   if (game.over || game.paused) return;
+  if (evMirror()) dir = dir === 'left' ? 'right' : 'left';
   held[dir] = true;
   repeat[dir] = 0;
   repeat.started[dir] = false;
@@ -2747,6 +3074,13 @@ function init(){
   }
 
   // 点按走上面的映射表（touch 优先），这里只补键盘可达性
+  const ag = $('allinGo');
+  if (ag){
+    const take = (e) => { e.preventDefault(); betAccept(); };
+    ag.addEventListener('touchstart', take, { passive: false });
+    ag.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
+  }
+
   const hs = $('holdSlot');
   hs.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); holdPiece(); }
@@ -2792,7 +3126,12 @@ function init(){
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
-  get heat(){ return heat; }, heatMult, heatGain,
+  get heat(){ return heat; }, heatMult, heatGain, rollMod, collapseCols,
+  bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
+  get evActive(){ return evActive && evActive.key; },
+  get evPending(){ return evPending && evPending.key; },
+  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
+  evFire, pickEvent, MOD_RATES, EVENTS,
   get fever(){ return feverLeft; }, get rainLeft(){ return rainLeft; }, get feverPity(){ return feverPity; },
   feverStart, crazyRescue, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,

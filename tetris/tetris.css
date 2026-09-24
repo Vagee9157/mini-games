@@ -801,6 +801,73 @@ body[data-heat="3"] .board-aura{ animation: auraPulse 1.5s ease-in-out infinite;
 body[data-heat="4"] .board-aura{ animation: auraPulse .8s ease-in-out infinite, heatHue 3.2s linear infinite; }
 @keyframes heatHue{ from{ filter: hue-rotate(0deg) } to{ filter: hue-rotate(360deg) } }
 
+/* ── 事件预告 ── */
+.evwarn{
+  position: absolute;
+  left: 50%; top: 26%;
+  transform: translate(-50%, -50%) scale(.85);
+  font-family: var(--mono);
+  font-size: 22px; font-weight: 600; letter-spacing: .22em;
+  padding: 8px 18px; border-radius: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s, transform .2s;
+  will-change: opacity, transform;
+}
+.evwarn.on{ opacity: 1; transform: translate(-50%, -50%) scale(1); animation: evPulse .5s ease-in-out infinite alternate; }
+.evwarn[data-bad="1"]{ color: #ffd9d0; background: rgba(244,63,94,.24); border: 1px solid rgba(244,63,94,.7); }
+.evwarn[data-bad="0"]{ color: #d8ffd0; background: rgba(95,224,200,.22); border: 1px solid rgba(95,224,200,.7); }
+@keyframes evPulse{ from{ transform: translate(-50%,-50%) scale(1) } to{ transform: translate(-50%,-50%) scale(1.09) } }
+
+/* 暗幕：盘面压暗一点，配合 canvas 那边只画轮廓 */
+body[data-ev="blackout"] #board{ filter: brightness(.82); }
+/* 镜像：给个持续的提示，不然玩家只会以为是 bug */
+body[data-ev="mirror"] .shaker{ outline: 2px dashed rgba(232,121,249,.55); outline-offset: 3px; }
+
+/* ── 梭哈 ──
+   压成一条横幅摆在顶上。第一版做成居中的大卡片，实测会把下落区整个盖住，
+   而它偏偏只在打完大消除、正要接着打的时候出现 —— 最不该挡人的时机。 */
+.allin{
+  position: absolute;
+  left: 50%; top: 9%;
+  transform: translate(-50%, 0) scale(.94);
+  width: min(94%, 300px);
+  display: none;
+  align-items: center; gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border-radius: 13px;
+  background: linear-gradient(120deg, rgba(52,26,72,.95), rgba(24,13,34,.95));
+  border: 1px solid rgba(255,193,71,.62);
+  box-shadow: 0 0 24px rgba(255,160,50,.24), 0 8px 24px rgba(0,0,0,.5);
+}
+.allin.on{ display: flex; animation: allinIn .2s cubic-bezier(.2,.8,.3,1) forwards; }
+@keyframes allinIn{ from{ opacity:0; transform: translate(-50%,-8px) scale(.94) } to{ opacity:1; transform: translate(-50%,0) scale(1) } }
+.allin-txt{ flex: 1; font-size: 10px; line-height: 1.55; color: var(--ink-soft); text-align: left; }
+.allin-txt b{
+  font-family: var(--mono); font-size: 13px; letter-spacing: .16em;
+  color: #ffd166; margin-right: 6px;
+}
+.allin-go{
+  flex: none;
+  font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
+  color: #241503;
+  background: linear-gradient(180deg, #ffd980, #ffb020);
+  border: 0; border-radius: 999px;
+  /* 44px 是能稳稳点中的下限，这个键十秒就消失，点不中等于白给 */
+  min-height: 44px;
+  padding: 0 20px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.allin-go:active{ transform: translateY(1px); }
+/* 赌约进行中：边框常亮提醒「你还欠一次消行」 */
+body.betting .shaker{ outline: 2px solid rgba(255,193,71,.7); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce){
+  .evwarn.on{ animation: none; }
+  .allin.on{ animation: none; opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce){
   .shaker.shake, .shaker.shake-big{ animation: none; }
   .danger.on{ animation: none; opacity: .6; }

@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=46000649">
+<link rel="stylesheet" href="../tetris/tetris.css?v=76059aef">
 </head>
 <body>
 <div class="topline"></div>
@@ -90,6 +90,16 @@
         </div>
       </div>
 
+      <!-- 事件预告。捣乱事件必须提前三秒喊一声，没预告的惩罚是耍赖不是难度。 -->
+      <div class="evwarn" id="evwarn" aria-hidden="true"></div>
+
+      <!-- 梭哈。整套机制里唯一需要玩家主动做决定的地方，所以给了一个够大的点击区；
+           它只在打出 TETRIS / T-spin 且热度够高时出现，十秒不理会自动作废。 -->
+      <div class="allin" id="allin" aria-hidden="true">
+        <span class="allin-txt"><b>梭哈</b>十秒内消行 ×2<br>没消到则热度清零</span>
+        <button class="allin-go" id="allinGo" type="button">接受</button>
+      </div>
+
       <div class="toast" id="toast"></div>
      </div>
     </div>
@@ -153,7 +163,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=e4a59c97"></script>
+<script src="../tetris/tetris.js?v=69dc3a73"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
