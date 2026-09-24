@@ -2584,6 +2584,7 @@ function evFire(){
     document.body.dataset.ev = e.key; staticDirty = true; needsDraw = true;
     if (e.key === 'blackout') setMuffle(true);      // 看不见 + 听不清，压迫感翻倍
     if (e.key === 'wind') windTimer = 0;
+    if (e.key === 'mirror') clearHeld();
   }
   sfx(e.bad ? 'over' : 'level', 1);
   buzz(e.bad ? [60, 40, 60] : 40);
@@ -2594,6 +2595,7 @@ function evEnd(){
   evActive = null; evLeft = 0;
   if (was === 'blackout') setMuffle(false);
   if (was === 'wall') wallCol = -1;
+  if (was === 'mirror') clearHeld();
   delete document.body.dataset.ev;
   staticDirty = true; needsDraw = true;
 }
@@ -2829,18 +2831,37 @@ function handleAutoRepeat(dt){
   }
 }
 
+// 镜像把方向翻过来之后，press 置的是翻转后那一路的 held，
+// 而 release 拿到的还是原始按键 —— 直接按原样清就会漏掉真正被置上的那个，
+// 于是 DAS 连发一直跑，一点就滑到墙边（实测点一下走四格）。
+// 记下这一次按下究竟走的是哪一路，松手按记的那个清。
+// 单记一份还不够：按住期间事件可能正好结束，翻不翻转会对不上。
+const pressedAs = { left: 'left', right: 'right' };
+
 function press(dir){
   if (game.over || game.paused) return;
-  if (evMirror()) dir = dir === 'left' ? 'right' : 'left';
-  held[dir] = true;
-  repeat[dir] = 0;
-  repeat.started[dir] = false;
-  tryMove(dir === 'left' ? -1 : 1, 0);
+  const d = evMirror() ? (dir === 'left' ? 'right' : 'left') : dir;
+  pressedAs[dir] = d;
+  held[d] = true;
+  repeat[d] = 0;
+  repeat.started[d] = false;
+  tryMove(d === 'left' ? -1 : 1, 0);
 }
 function release(dir){
-  held[dir] = false;
-  repeat[dir] = 0;
-  repeat.started[dir] = false;
+  const d = pressedAs[dir] || dir;
+  pressedAs[dir] = dir;
+  held[d] = false;
+  repeat[d] = 0;
+  repeat.started[d] = false;
+}
+
+// 镜像开关的那一刻把两路都松掉。上面记的那份能兜住正常的按下-松手，
+// 但手指正按着的时候事件切换，按下和松手分处两种状态，只能在这里一并清干净。
+function clearHeld(){
+  held.left = held.right = false;
+  repeat.left = repeat.right = 0;
+  repeat.started.left = repeat.started.right = false;
+  pressedAs.left = 'left'; pressedAs.right = 'right';
 }
 
 const KEYMAP = {
