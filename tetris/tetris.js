@@ -1487,9 +1487,9 @@ function syncHud(){
   if (key === hudCache) return;         // 每帧写 DOM 很浪费
   hudCache = key;
   rollScore(false);
-  $('lines').textContent = game.lines;
-  $('level').textContent = game.level;
-  $('best').textContent  = fmtScore(game.best);
+  setStat($('lines'), String(game.lines));
+  setStat($('level'), String(game.level));
+  setStat($('best'), fmtScore(game.best));
 }
 
 // 消行时让棋盘边框闪一下，四行给更重的那一版
@@ -1601,27 +1601,47 @@ function topFilledRow(){
 
 // 分数滚动。自己跑一条 rAF，不依赖游戏循环 —— 结算那一刻循环已经停了。
 let shownScore = 0, rollId = 0;
-// 分数超过六位就换成「万」，不然 SCORE 框（56px 宽 / 14px 字号）装不下：
-// `1,036,800` 要 76px，会被 text-overflow 截成省略号。
-// 疯狂版解除等级封顶之后七位数是常态，这个必须一起改，
-// 否则「看着数字爆炸」这个核心爽点反而是看不见的。
+// 过万换「万」：1.23万 / 12.34万 / 123.5万 / 3041万，过亿换「亿」：1.23亿。
+//
+// 小数位不是按档写死的，而是按「总长不超过 6 个字符」倒推 —— SCORE 框只有
+// 56px，14px 字号下最多放得下 6 个字符，第 7 个就得把字号压到 11px 以下，
+// 压到 10px 就没法看了。与其缩字号，不如少给一位小数。
+// 边界也顺带兜住了：999,999 算出来是 99.9999，两位小数会进位成「100.00万」
+// 变成 7 个字符，这个 while 会把它退成「100.0万」。
 function fmtScore(v){
   v = Math.round(v);
-  if (v < 1000000) return v.toLocaleString();
-  if (v < 100000000) return (v / 10000).toFixed(v < 10000000 ? 1 : 0) + '万';
-  return (v / 100000000).toFixed(2) + '亿';
+  if (v < 10000) return v.toLocaleString();
+  if (v >= 100000000) return (v / 100000000).toFixed(2) + '亿';
+  const w = v / 10000;
+  let d = w < 100 ? 2 : w < 1000 ? 1 : 0;
+  let t = w.toFixed(d);
+  while (t.length > 5 && d > 0) t = w.toFixed(--d);
+  // 四舍五入进位到 10000 万就是 1 亿了，换个单位，顺带把「10000万」这个
+  // 六字符又全是数字的最宽情况（61px > 56px 的框）消掉
+  if (parseFloat(t) >= 10000) return (v / 100000000).toFixed(2) + '亿';
+  return t + '万';
+}
+
+// 按字数缩字号塞进框里。.stat b 没设 nowrap，放不下不是截省略号而是直接换行，
+// 那一格的高度会从 16px 撑到 36px，整个侧栏跟着跳。
+// 查表不量 DOM —— rollScore 是逐帧跑的，每帧读一次布局就是每帧一次强制重排。
+const STAT_FIT = { 6: .90, 7: .76, 8: .66, 9: .58 };
+function setStat(el, text){
+  if (!el) return;
+  el.textContent = text;
+  el.style.setProperty('--fit', STAT_FIT[Math.min(9, text.length)] || 1);
 }
 
 function rollScore(snap){
   const el = $('score');
   if (!el) return;
-  if (snap){ shownScore = game.score; el.textContent = fmtScore(shownScore); return; }
+  if (snap){ shownScore = game.score; setStat(el, fmtScore(shownScore)); return; }
   if (rollId) return;
   const tickRoll = () => {
     const d = game.score - shownScore;
-    if (Math.abs(d) < 1){ shownScore = game.score; el.textContent = fmtScore(shownScore); rollId = 0; return; }
+    if (Math.abs(d) < 1){ shownScore = game.score; setStat(el, fmtScore(shownScore)); rollId = 0; return; }
     shownScore += d * .22;
-    el.textContent = fmtScore(shownScore);
+    setStat(el, fmtScore(shownScore));
     rollId = requestAnimationFrame(tickRoll);
   };
   rollId = requestAnimationFrame(tickRoll);
@@ -3331,6 +3351,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; needsDraw = true; },
+  fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
   feverStart, switchTrack, setPack, setTempo,

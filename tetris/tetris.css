@@ -143,7 +143,14 @@ body{
 .stat b{
   display: block;
   font-family: var(--mono);
-  font-size: 15px;
+  /* --stat-fs 是这一档布局的基准字号，--fit 是 JS 按字数给的缩放。
+     两个分开，断点改基准、JS 只管缩放，互不覆盖。 */
+  --stat-fs: 15px;
+  font-size: calc(var(--stat-fs) * var(--fit, 1));
+  /* 行高钉死在基准字号上，不跟 --fit 走：「万」「亿」是中日韩字形，行框比
+     纯数字高 4px，分数跨过 1 万那一刻整个侧栏会跳一下；字号一缩又会再跳一次。 */
+  line-height: calc(var(--stat-fs) * 1.2);
+  white-space: nowrap;
   font-weight: 500;
   color: var(--ink);
   margin-top: 2px;
@@ -520,7 +527,7 @@ body{
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 5px 4px; text-align: left; }
   .stat span{ font-size: 7.5px; }
-  .stat b{ font-size: 13px; }
+  .stat b{ --stat-fs: 13px; }
 
   .slot{ padding: 5px 6px 6px; }
   .slot.hold canvas{ width: 100%; height: 40px; }
@@ -547,7 +554,7 @@ body{
 
     .stat{ padding: 3px 3px 4px; }
     .stat span{ font-size: 7.5px; letter-spacing: .06em; }
-    .stat b{ font-size: 14px; letter-spacing: -.02em; }
+    .stat b{ --stat-fs: 14px; letter-spacing: -.02em; }
 
     .slot{ padding: 4px 4px 5px; }
     .slot-label{ font-size: 8px; letter-spacing: .1em; }
@@ -561,7 +568,7 @@ body{
   .pad{ gap: 5px; }
   .k{ min-height: 50px; }
   .slot.next canvas{ width: 98px; }
-  .stat b{ font-size: 12.5px; }
+  .stat b{ --stat-fs: 12.5px; }
   .tbtn{ font-size: 10px; padding: 5px 7px; }
 }
 
@@ -589,7 +596,7 @@ body{
   .stats{ grid-template-columns: 1fr; gap: 8px; align-content: start; }
   .stat{ padding: 8px 10px 9px; text-align: left; }
   .stat span{ font-size: 9.5px; }
-  .stat b{ font-size: 20px; }
+  .stat b{ --stat-fs: 20px; }
   /* 桌面用键盘，按键区收起来（空格 = 落底） */
   .pads{ display: none; }
   .overlay h2{ font-size: 26px; }
