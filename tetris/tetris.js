@@ -322,6 +322,10 @@ const RANKS = [
   [1200000,  '紫微'],
   [2000000,  '曜极'],
   [3000000,  '太一'],
+  // 太一在道家里已经是本源，再往上只能往「天地未开」那头走：
+  // 无极生太极 —— 鸿蒙是未分之气，无极是没有边界，都排在太一之前/之上。
+  [4000000,  '鸿蒙'],
+  [5000000,  '无极'],
 ];
 // 段位 · 看累计总分。按「一局 10 万、一天 30 局 ≈ 300 万」铺，15 天到顶。
 const CAREER = [
@@ -990,6 +994,7 @@ function fillRunLog(){
   const mods = [['金', r.gold], ['锤', r.hammer], ['弹', r.bomb], ['激', r.laser]]
     .filter(v => v[1] > 0).map(v => v[0] + v[1]).join(' ');
   if (mods) add('变异块', mods, true);
+  if (r.chests) add('宝箱', r.chests + ' 个');
   if (r.tetris) add('四行', r.tetris + ' 次');
   if (r.tspin) add('T-SPIN', r.tspin + ' 次');
   if (r.perfect) add('全消', r.perfect + ' 次');
@@ -2688,7 +2693,11 @@ function heatGain(n, spin, perfect){
 }
 
 const DANGER_HEAT = 2;           // 危险区里消行的热度倍数
-const CHEST_RATE = 1 / 4;        // 每条灰线带宝箱的概率，一局约 4~5 个
+// 每条灰线带宝箱的概率。注意这是「生成」的概率，不是「开出来」的 ——
+// 宝箱只有在你把那一行消掉时才算开，大量灰线是被顶出去的。
+// 实测开出来的数（机器人，一局六七分钟）：普通局中位 3 个，
+// 狂欢局灰线快 82%、所以中位 8 个。
+const CHEST_RATE = 1 / 4;
 let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压哨」用
 
 // 消掉带宝箱的行就开箱。三选一，都是当场能感觉到的东西。

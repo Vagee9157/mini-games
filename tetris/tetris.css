@@ -260,7 +260,9 @@ body{
   line-height: 1.6;
 }
 .overlay.show{ display: grid; }
-.overlay .card{ max-width: 290px; }
+/* 卡片高过视口就自己滚。横屏 844×390 下，统计最满的那张结算卡有 411px 高，
+   而窗口只有 390px —— 原来卡片不可滚，「再来一局」就永远够不到了。 */
+.overlay .card{ max-width: 290px; max-height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .overlay h2{ font-size: 21px; margin: 0 0 6px; letter-spacing: .04em; }
 .overlay h2 .neon{ color: var(--n-cyan); text-shadow: 0 0 18px rgba(34,211,238,.6); }
 .overlay p{ font-size: 12.5px; line-height: 1.75; color: var(--ink-soft); margin: 0 0 14px; }
