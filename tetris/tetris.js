@@ -214,10 +214,15 @@ const G_HARD_MIN = 1000;     // 再快也不低于 1 秒：到这份上谁都必
 function garbageClock(){
   return game.elapsed + game.lines * G_LINE_BONUS;
 }
+// 狂欢局灰线涨得快四分之一 —— 它有 ×1.2 的分数，就得有对应的代价，
+// 否则刷到一局就是白赚。挑灰线钟而不是 level：level 快了 levelMult 跟着涨，
+// 分数反而更高，越平衡越失衡。灰线是纯加压，不直接给分。
+const RUSH_GARBAGE = .55;      // 灰线周期，越小涨得越快
 function garbagePeriod(){
   let p = G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
   const over = game.level - G_OVER_FROM;
   if (over > 0) p *= Math.pow(G_OVER_RATE, over);
+  if (game.rush) p *= RUSH_GARBAGE;
   return Math.max(G_HARD_MIN, p);
 }
 
@@ -334,25 +339,92 @@ function tierOf(table, v){
   return hit;
 }
 const rankOf   = (v) => tierOf(RANKS, v);
-// ── 限时挑战 ──
-// 开局随机给的一次机会：整局分数 ×1.2，而且有利的机制密集得多。
+// ── 狂欢局 ──
+// 开局给的一次机会：整局分数 ×1.2，而且有利的机制密集得多。
+// 是整局有效，不计时 —— 所以不叫「限时挑战」，那个名字名实不符。
 //
 // 走保底不走纯随机：纯随机的话你可以一直重开刷到它。保底计数每开一局走一格，
-// 所以无论怎么刷，拿到的频率都超不过十分之一。计数存本地，刷新页面也带着。
-const RUSH_EVERY = 10;
-const RUSH_MULT  = 1.2;        // 系数压在 1.2 —— 真正的好处是机制密集，不是数字
-const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它已经够多了）
-const RUSH_PITY  = 38;         // FEVER 保底斜率，平时 55
+// 所以无论怎么刷，频率都压得住。计数存本地，刷新页面也带着。
+// 也刻意不在开始界面预告「还差几局」—— 预告等于教人刷局。
+const RUSH_NAME = '狂欢局';
+const RUSH_EVERY = 10;         // 基础门槛，今天打得多会往下降，见 rushEvery()
+// 狂欢局 = 难度高 + 奖励厚，是给熟练玩家的局，不是白送的糖。
+// 第一版把「有利机制」全翻倍（压实、宝箱、FEVER 保底），结果实测中位 2.67 倍
+// 而且活得更久 —— 那些是拐杖，让局变简单，方向反了。现在只留两样：
+//   难 = 灰线快得多 + 坏事件更密
+//   厚 = 分数倍率给足 + 道具方块翻倍（道具是工具也是分数，给熟练玩家转化率）
+// 拐杖（压实权重、宝箱率、FEVER 保底）一律回到平时水平。
+// ×3 是按机器人 36 局 × 两组 × 三种子的 A/B 反推的：灰线快 82% 把一局砍掉一半，
+// ×2 的时候各分位是 中位 0.65 / p75 0.75 / p90 0.87，净亏；×3 之后
+// 中位 0.98（中等发挥白打一场，所以没有刷它的动机）、p90 1.30（打得好才赚）。
+// 倍率是纯乘在分数上的，不反馈进玩法，所以可以这么直接按比例推。
+const RUSH_MULT  = 3;          // 分数倍率
+const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它只是纯加分）
+const RUSH_BAD   = 1.5;        // 坏事件权重
 const RUSH_KEY   = nsKey('rush.v1');
+const RUSH_INTRO = 3000;       // 狂欢局开局先停这么久报幕
 
-function bumpRush(){
-  let n = 0;
-  try { n = parseInt(localStorage.getItem(RUSH_KEY) || '0', 10) || 0; } catch { /* 忽略 */ }
-  n++;
-  const hit = n >= RUSH_EVERY;
-  try { localStorage.setItem(RUSH_KEY, String(hit ? 0 : n)); } catch { /* 忽略 */ }
-  return hit;
+// 今天打得越多，门槛越低：每多打 10 局降一格，50 局起封在 5。
+// 今日局数走北京时间日切，零点自己归零。
+//   0–9 局 每 10 局   10–19 每 9   20–29 每 8
+//   30–39 每 7        40–49 每 6   50 局起 每 5
+// 坡度压得很缓：前 30 局和固定每 10 局完全一样，打满 100 局才多出六成。
+const RUSH_FLOOR = 5;
+function rushEvery(){
+  const p = readDaily().plays;
+  return Math.max(RUSH_FLOOR, RUSH_EVERY - Math.floor(p / 10));
 }
+
+// 报幕期间不落方块也不走表。用「还没生成方块」当闸：hardDrop / holdPiece /
+// tryMove 本来就判 !game.piece，所以按键自然全部失效，不用到处补守卫。
+let introLeft = 0;
+function showRushIntro(){
+  introLeft = RUSH_INTRO;
+  const el = $('rushIntro');
+  if (el){
+    $('rushIntroName').textContent = RUSH_NAME;
+    const sub = $('rushIntroSub');
+    if (sub) sub.textContent = '更难 · 但分数 ×' + RUSH_MULT;
+    el.classList.add('on');
+    el.setAttribute('aria-hidden', 'false');
+  }
+  sfx('tetris', 1.3);
+  buzz([40, 40, 40, 40, 90]);
+}
+function endRushIntro(){
+  introLeft = 0;
+  const el = $('rushIntro');
+  if (el){ el.classList.remove('on'); el.setAttribute('aria-hidden', 'true'); }
+  if (game.started && !game.over && !game.piece) spawnNext();
+}
+
+// 计数推进放在局末、而且只认「有效局」。
+// 原来是开局就走一格 —— 开局秒死再重开，一轮三五秒，九轮不到一分钟就能把
+// 狂欢局刷出来，秒死还顺带把今日局数堆上去、把门槛压低。
+// 现在落够 RUSH_MIN_PIECES 块或打满 RUSH_MIN_MS 才算一局，垃圾局白刷。
+const RUSH_MIN_PIECES = 30;
+const RUSH_MIN_MS = 60000;
+function isRealRun(){
+  return game.pieces >= RUSH_MIN_PIECES || game.elapsed >= RUSH_MIN_MS;
+}
+
+function readRushCount(){
+  try { return parseInt(localStorage.getItem(RUSH_KEY) || '0', 10) || 0; }
+  catch { return 0; }
+}
+// 局末调：有效局才推进一格
+function countRush(){
+  try { localStorage.setItem(RUSH_KEY, String(readRushCount() + 1)); } catch { /* 忽略 */ }
+}
+// 开局调：够了就消耗掉并返回 true。
+// 阈值用 rushEvery() 本身而不是减一 —— 计数是在局末推进的，减一会让实际间隔
+// 比标称少一格（「每 10 局」跑出来是 8~9 局一次）。
+function takeRush(){
+  if (readRushCount() < rushEvery()) return false;
+  try { localStorage.setItem(RUSH_KEY, '0'); } catch { /* 忽略 */ }
+  return true;
+}
+
 
 // ── 今日最佳 ──
 // 按北京时间归日，而且按「这一局结束的时刻」算 —— 跨零点打完的那局算新的一天，
@@ -493,6 +565,7 @@ const game = {
   // 但之前没有任何一个地方把它们汇总给玩家看。
   run: null,
   rush: false,
+  pieces: 0,           // 这一局落了几块，给「有效局」判据用
   queue: [],          // 预览队列，保持 5 个
   mods: [],           // 和 queue 一一对应的变异，入队时摇好
   holdMod: null,
@@ -728,6 +801,7 @@ function detectTSpin(){
 function lockPiece(){
   const p = game.piece;
   if (!p) return;
+  game.pieces++;
   crazyOnLock(p);
   const spin = detectTSpin();
 
@@ -919,6 +993,7 @@ function fillRunLog(){
   if (r.tetris) add('四行', r.tetris + ' 次');
   if (r.tspin) add('T-SPIN', r.tspin + ' 次');
   if (r.perfect) add('全消', r.perfect + ' 次');
+  if (game.rush) add(RUSH_NAME, '分数 ×' + RUSH_MULT, true);
   if (r.bets) add('梭哈', `${r.betWins}/${r.bets}`);
   if (r.rerolls) add('换牌', r.rerolls + ' 次');
   // 写成 4:47 而不是「4 分 47 秒」—— 后者在 320px 宽的屏上会被截掉尾巴
@@ -1109,7 +1184,7 @@ function riseGarbage(){
   row[gap] = null;                                      // 留个缺口，不然没法消
   // 宝箱：灰线现在只有坏处，这给了它第二个身份 —— 一个看得见、够得到的目标。
   // 状态存在盘面格子里（和冰冻行同一套），塌陷、上顶、地震都会跟着走。
-  if (CRAZY && rndFx() < CHEST_RATE * (game.rush ? 2 : 1)){
+  if (CRAZY && rndFx() < CHEST_RATE){
     let x = (rndFx() * COLS) | 0;
     if (x === gap) x = (x + 1) % COLS;
     row[x] = CHEST;
@@ -1161,8 +1236,12 @@ function endGame(why){
   // 记账放在这里：累计分只增，今日最佳按「这一局结束的时刻」归日
   if (CRAZY) addTotal(game.score);
   if (CRAZY){
+    // 有效局才推进狂欢局的计数、才算今日一局 —— 秒死重开刷不出狂欢局，
+    // 也压不低门槛。最佳分不设门槛：打出来了就是打出来了。
+    const real = isRealRun();
+    if (real) countRush();
     const d = readDaily();          // readDaily 自己会判断是不是还是同一天
-    d.plays++;
+    if (real) d.plays++;
     if (game.score > d.best) d.best = game.score;
     writeDaily(d);
   }
@@ -2723,7 +2802,7 @@ function crazyOnClear(lines, spin, perfect){
   if (lines <= 0) return;                 // 但不推 FEVER 保底
   if (feverLeft > 0) return;
   feverPity += lines;
-  if (rndFx() < feverPity / (game.rush ? RUSH_PITY : PITY_DIV)){ feverPity = 0; feverStart(); }
+  if (rndFx() < feverPity / PITY_DIV){ feverPity = 0; feverStart(); }
 }
 
 function feverStart(){
@@ -3096,8 +3175,9 @@ function pickEvent(){
   // 濒死时只发好事。这时候再来一发地震就是耍赖，不是难度。
   const safe = stackTopRow() > DANGER_ROW + 3;
   const pool = EVENTS.filter(e => safe || !e.bad);
-  // 限时挑战里唯一的好事件（压实）权重翻倍
-  const wt = (e) => e.w * (game.rush && !e.bad ? 2 : 1);
+  // 狂欢局里坏事件更密。注意这里不能反过来给好事件加权 ——
+  // 压实是填洞的，加权等于送，那是把难度往下调
+  const wt = (e) => e.w * (game.rush && e.bad ? RUSH_BAD : 1);
   let total = pool.reduce((a, e) => a + wt(e), 0), r = rndFx() * total;
   for (const e of pool){ if ((r -= wt(e)) < 0) return e; }
   return pool[pool.length - 1];
@@ -3292,6 +3372,13 @@ function betStep(dt){
 // 返回 'stop' / 'clearing' / 'normal'，由调用方决定怎么画。
 function stepOnce(dt){
   if (game.paused || game.over || game.frozen) return 'stop';
+  // 报幕这三秒：不累加 elapsed（否则灰线钟和热度衰减白跑三秒），也不生成方块。
+  // 这里绝不能 return 'stop' —— tick 见到 stop 会把 rAF 停掉，三秒后没人拉得起来。
+  if (introLeft > 0){
+    introLeft -= dt;
+    if (introLeft <= 0) endRushIntro();
+    return 'normal';
+  }
 
   stepParticles(dt);
   stepTrails(dt);
@@ -3729,9 +3816,10 @@ function resumeLoop(){
 
 function restart(keepRush){
   clearSave();
+  endRushIntro();                    // 上一局的报幕没放完就重开，先收干净
   // 限时挑战由保底计数决定，不是玩家选的。keepRush 只给「重开当前这局」用，
   // 免得手滑按重开把已经拿到的机会冲掉。
-  game.rush = CRAZY && (keepRush ? game.rush : bumpRush());
+  game.rush = CRAZY && (keepRush ? game.rush : takeRush());
   document.body.classList.toggle('rushrun', !!game.rush);
   game.board = newBoard();
   game.bag = [];
@@ -3758,6 +3846,7 @@ function restart(keepRush){
   game.frozen = false;
   game.started = true;
   game.garbage = 0;
+  game.pieces = 0;
   game.elapsed = 0;
   game.why = '';
   bestBeaten = false;
@@ -3780,7 +3869,8 @@ function restart(keepRush){
   $('overlay').classList.remove('show');
   $('pauseTx').textContent = '暂停';
   fillQueue();
-  spawnNext();
+  if (game.rush) showRushIntro();     // 报幕结束时才 spawnNext
+  else spawnNext();
   syncHud();
   lastFrame = performance.now();
   cancelAnimationFrame(rafId);
@@ -3791,7 +3881,9 @@ function restart(keepRush){
 
 function togglePause(){
   if (!game.started || game.over) return;
-  if (feverLeft > 0){ showToast('FEVER 期间不能暂停'); return; }
+  // 任何时候都能暂停。原来 FEVER 期间禁暂停，但暂停会把所有计时一起冻住
+  // （FEVER 剩余、灰线钟、热度衰减都走 game.elapsed，而 elapsed 在暂停时不涨），
+  // 所以拦不住任何便宜，只是在最需要放下手机的时候把人按在座位上。
   game.paused = !game.paused;
   $('pauseTx').textContent = game.paused ? '继续' : '暂停';
   // 暂停时图标换成播放三角，一眼知道再点一下是继续
@@ -4008,8 +4100,10 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   rerollPiece, canReroll, REROLL_COST,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
-  rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, bumpRush, crazyScoreMult,
-  syncRank, openRankSheet, RUSH_EVERY, RUSH_MULT, endGame, readBest, STORE_KEY, TOTAL_KEY,
+  rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
+  syncRank, openRankSheet, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
+  RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
