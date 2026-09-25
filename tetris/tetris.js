@@ -2844,7 +2844,7 @@ const MOD_RATES = [
 const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
 
 function rollMod(){
-  // 限时挑战里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
+  // 狂欢局里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
   const k2 = game.rush ? RUSH_MOD : 1;
   let r = rndFx();
   for (const [k, rate] of MOD_RATES){
@@ -3817,10 +3817,13 @@ function resumeLoop(){
 function restart(keepRush){
   clearSave();
   endRushIntro();                    // 上一局的报幕没放完就重开，先收干净
-  // 限时挑战由保底计数决定，不是玩家选的。keepRush 只给「重开当前这局」用，
+  // 狂欢局由保底计数决定，不是玩家选的。keepRush 只给「重开当前这局」用，
   // 免得手滑按重开把已经拿到的机会冲掉。
   game.rush = CRAZY && (keepRush ? game.rush : takeRush());
   document.body.classList.toggle('rushrun', !!game.rush);
+  // 分数格的标签直接写出倍率，跟着 RUSH_MULT 走 —— 写死数字改一次倍率就会过期
+  const sl = $('scoreLabel');
+  if (sl) sl.textContent = game.rush ? 'SCORE ×' + RUSH_MULT : 'SCORE';
   game.board = newBoard();
   game.bag = [];
   clearTimeout(dieTimer);
