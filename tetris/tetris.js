@@ -1154,7 +1154,9 @@ function endGame(why){
   needsDraw = true;
   clearSave();
   cancelAnimationFrame(rafId);
-  const prevRank = rankOf(readBest());     // 先记下进这一局之前的「最强」
+  // 两条梯子都要在记账之前取一次旧值，才判得出这一局升没升
+  const prevRank = rankOf(readBest());        // 「最强」看单局最高分
+  const prevCareer = careerOf(readTotal());   // 「段位」看累计总分
   if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
   // 记账放在这里：累计分只增，今日最佳按「这一局结束的时刻」归日
   if (CRAZY) addTotal(game.score);
@@ -1180,13 +1182,20 @@ function endGame(why){
   // 升段要在 writeBest 之后判，拿旧的最高分和这一局比。
   const rk = $('overRank');
   if (rk){
+    // 「最强」用这一局的分（够不着第一档就不显示，说什么都是扫兴），
+    // 「段位」用记完账之后的累计分，所以它一旦入段就一直在。
     const now = CRAZY ? rankOf(game.score) : null;
-    rk.hidden = !now;
-    if (now){
-      const up = !prevRank || prevRank[0] < now[0];
-      rk.className = 'overrank' + (up ? ' up' : '');
-      rk.innerHTML = `<b>${now[1]}</b><span>${up ? '新纪录' : '最强'}</span>`;
-      if (up){ sfx('level', 1.2); buzz([40, 30, 60]); }
+    const car = CRAZY ? careerOf(readTotal()) : null;
+    rk.hidden = !now && !car;
+    if (!rk.hidden){
+      const upR = now && (!prevRank || prevRank[0] < now[0]);
+      const upC = car && (!prevCareer || prevCareer[0] < car[0]);
+      const cell = (cls, name, lb, up) =>
+        `<i class="${cls}${up ? ' up' : ''}"><b>${name}</b><span>${up ? '新' + lb : lb}</span></i>`;
+      rk.className = 'overrank' + (upR || upC ? ' up' : '');
+      rk.innerHTML = (now ? cell('best', now[1], '最强', upR) : '')
+                   + (car ? cell('career', car[1], '段位', upC) : '');
+      if (upR || upC){ sfx('level', 1.2); buzz([40, 30, 60]); }
     }
   }
   $('overlay').dataset.mode = 'over';
@@ -3973,7 +3982,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, bumpRush, crazyScoreMult,
-  syncRank, openRankSheet, RUSH_EVERY, RUSH_MULT,
+  syncRank, openRankSheet, RUSH_EVERY, RUSH_MULT, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },

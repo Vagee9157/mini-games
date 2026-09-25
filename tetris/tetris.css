@@ -360,15 +360,25 @@ body.crazy .danger{ background: linear-gradient(180deg, rgba(255,160,50,.36), rg
 .stat.rankbox:hover, .stat.rankbox:focus-visible{ border-color: rgba(255,193,71,.5); outline: none; }
 .stat.rankbox:active{ background: rgba(255,193,71,.13); }
 
-/* 结算页的段位 */
-.overrank{ display: flex; align-items: baseline; justify-content: center; gap: 8px; margin: 0 0 12px; }
+/* 结算页的两条梯子：最强（金）+ 段位（蓝），各自独立判升 */
+.overrank{ display: flex; align-items: baseline; justify-content: center; gap: 18px; margin: 0 0 12px; }
+.overrank i{ display: flex; align-items: baseline; gap: 7px; font-style: normal; }
 .overrank b{
   font-family: var(--mono); font-size: 22px; letter-spacing: .16em; color: #ffd166;
   text-shadow: 0 0 20px rgba(255,193,71,.5);
 }
+.overrank .career b{ color: #8fd4ff; text-shadow: 0 0 20px rgba(143,212,255,.5); }
 .overrank span{ font-size: 10.5px; color: var(--ink-dim); letter-spacing: .1em; }
-.overrank.up span{ color: #ffd166; }
-.overrank.up b{ animation: rankPop .7s cubic-bezier(.2,.8,.3,1); }
+/* 只有真升了的那一条亮起来并弹一下，另一条保持安静 */
+.overrank i.up span{ color: #ffd166; }
+.overrank i.career.up span{ color: #8fd4ff; }
+.overrank i.up b{ animation: rankPop .7s cubic-bezier(.2,.8,.3,1); }
+/* 320 宽下「新最强 + 新段位」两条一起亮会折行，收一收字距和间隙 */
+@media (max-width: 340px){
+  .overrank{ gap: 10px; }
+  .overrank i{ gap: 5px; }
+  .overrank b{ font-size: 19px; letter-spacing: .08em; }
+}
 @keyframes rankPop{
   0%{ transform: scale(.6); opacity: 0 }
   45%{ transform: scale(1.18); opacity: 1 }
