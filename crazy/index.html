@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=b8e11081">
+<link rel="stylesheet" href="../tetris/tetris.css?v=7bfd1b01">
 </head>
 <body>
 <div class="topline"></div>
@@ -137,9 +137,14 @@
         <div class="stat"><span>LINES</span><b id="lines">0</b></div>
         <div class="stat" id="levelBox"><span>LEVEL</span><b id="level">1</b></div>
         <div class="stat"><span>BEST</span><b id="best">0</b></div>
-        <!-- 段位常驻一格，点它开称号面板。标准版 syncRank 早退，这格一直藏着。 -->
-        <div class="stat rankbox" id="rankBox" role="button" tabindex="0" aria-label="查看称号" hidden>
-          <span>段位</span><b id="rankName">—</b>
+        <!-- 两条梯子各占一格，点哪个都开称号面板。
+             「最强」= 单局最高分那条，「段位」= 累计总分那条。
+             标准版 syncRank 早退，两格一直藏着。 -->
+        <div class="stat rankbox" id="rankBox" role="button" tabindex="0" aria-label="查看最强称号" hidden>
+          <span>最强</span><b id="rankName">—</b>
+        </div>
+        <div class="stat rankbox career" id="careerBox" role="button" tabindex="0" aria-label="查看段位" hidden>
+          <span>段位</span><b id="careerName">—</b>
         </div>
       </div>
 
@@ -164,9 +169,9 @@
   <div class="sheet" id="rankSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>称号</h3></div>
-      <span class="sheet-lb">段位 · 看单局最高分</span>
+      <span class="sheet-lb">最强 · 看单局最高分</span>
       <div class="ranks" id="rankList"></div>
-      <span class="sheet-lb">生涯 · 看累计总分</span>
+      <span class="sheet-lb">段位 · 看累计总分</span>
       <div class="ranks" id="careerList"></div>
       <p class="rank-foot" id="rankFoot"></p>
       <button class="pbtn sheet-done" id="rankDone">好了</button>
@@ -196,7 +201,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=ec30a4b9"></script>
+<script src="../tetris/tetris.js?v=b31ebcc6"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

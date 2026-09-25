@@ -353,6 +353,10 @@ body.crazy .danger{ background: linear-gradient(180deg, rgba(255,160,50,.36), rg
 /* 右侧栏常驻那一格 */
 .stat.rankbox{ cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color .16s, background .16s; }
 .stat.rankbox b{ color: #ffd166; }
+/* 生涯那格换个色，扫一眼就知道是另一条梯子 */
+.stat.rankbox.career b{ color: #8fd4ff; }
+.stat.rankbox.career:hover, .stat.rankbox.career:focus-visible{ border-color: rgba(143,212,255,.5); }
+.stat.rankbox.career:active{ background: rgba(143,212,255,.13); }
 .stat.rankbox:hover, .stat.rankbox:focus-visible{ border-color: rgba(255,193,71,.5); outline: none; }
 .stat.rankbox:active{ background: rgba(255,193,71,.13); }
 

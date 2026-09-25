@@ -299,10 +299,10 @@ function addTotal(v){
 
 // ── 称号 ──
 // 两条独立的梯子，量的是两件不同的事：
-//   段位   = 你单局最高打到过多少 —— 「你有多强」
-//   生涯   = 你一共打出过多少分   —— 「你玩了多久」
+//   最强   = 你单局最高打到过多少 —— 「你有多强」
+//   段位   = 你一共打出过多少分   —— 「你玩了多久」
 // 都从存档里现算，不另存状态：最高分和累计分只增不减，算出来的结果天然单调。
-// 段位 · 看单局最高分。门槛按真实分数定：普通局 10 万、最好 100 万，
+// 最强 · 看单局最高分。门槛按真实分数定：普通局 10 万、最好 100 万，
 // 所以 10 万摆在第三档（常驻位），100 万落在第七档，上面还留三格看得见。
 // 火焰这条隐喻和游戏的核心机制是同一件事 —— 一局就是一次燃烧：
 // 热度起来、烧到顶、然后熄灭。
@@ -318,7 +318,7 @@ const RANKS = [
   [2000000,  '曜极'],
   [3000000,  '太一'],
 ];
-// 生涯 · 看累计总分。按「一局 10 万、一天 30 局 ≈ 300 万」铺，15 天到顶。
+// 段位 · 看累计总分。按「一局 10 万、一天 30 局 ≈ 300 万」铺，15 天到顶。
 const CAREER = [
   [1000000,  '青铜'],
   [4000000,  '白银'],
@@ -842,7 +842,7 @@ function clearStyle(n, spin, perfect){
 }
 
 // 把这一局讲出来。只挑「真的发生过」的条目 —— 一堆 0 比什么都不写更难看。
-// 段位牌：右侧栏常驻一格 + 开始页一块 + 称号面板。都从存档现算，不存状态。
+// 称号牌：右侧栏两格（最强 / 段位）+ 开始页一块 + 称号面板。都从存档现算，不存状态。
 function syncRank(){
   if (!CRAZY) return;
   const best = Math.max(game.best, readBest());
@@ -851,6 +851,11 @@ function syncRank(){
   if (box){
     box.hidden = false;
     $('rankName').textContent = r ? r[1] : '—';
+  }
+  const cbox = $('careerBox');
+  if (cbox){
+    cbox.hidden = false;
+    $('careerName').textContent = c ? c[1] : '—';
   }
   const chip = $('rankChip');
   if (chip){
@@ -887,7 +892,7 @@ function openRankSheet(){
   const best = Math.max(game.best, readBest()), total = readTotal();
   fillLadder($('rankList'), RANKS, best);
   fillLadder($('careerList'), CAREER, total);
-  $('rankFoot').textContent = `单局最高 ${fmtScore(best)}　生涯累计 ${fmtScore(total)}`;
+  $('rankFoot').textContent = `最强 ${fmtScore(best)}　累计 ${fmtScore(total)}`;
   $('rankSheet').hidden = false;
 }
 
@@ -1149,7 +1154,7 @@ function endGame(why){
   needsDraw = true;
   clearSave();
   cancelAnimationFrame(rafId);
-  const prevRank = rankOf(readBest());     // 先记下进这一局之前的段位
+  const prevRank = rankOf(readBest());     // 先记下进这一局之前的「最强」
   if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
   // 记账放在这里：累计分只增，今日最佳按「这一局结束的时刻」归日
   if (CRAZY) addTotal(game.score);
@@ -1171,7 +1176,7 @@ function endGame(why){
   fillRunLog();
   syncRank();
   $('overDied').textContent = DEATH_TEXT[game.why] || '';
-  // 段位只在够得着的时候才提（低于第一档说什么都是扫兴）。
+  // 「最强」只在够得着的时候才提（低于第一档说什么都是扫兴）。
   // 升段要在 writeBest 之后判，拿旧的最高分和这一局比。
   const rk = $('overRank');
   if (rk){
@@ -1180,7 +1185,7 @@ function endGame(why){
     if (now){
       const up = !prevRank || prevRank[0] < now[0];
       rk.className = 'overrank' + (up ? ' up' : '');
-      rk.innerHTML = `<b>${now[1]}</b><span>${up ? '新段位' : '段位'}</span>`;
+      rk.innerHTML = `<b>${now[1]}</b><span>${up ? '新纪录' : '最强'}</span>`;
       if (up){ sfx('level', 1.2); buzz([40, 30, 60]); }
     }
   }
@@ -3868,10 +3873,12 @@ function init(){
   $('againBtn').addEventListener('click', () => restart(false));
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
-  $('rankBox').addEventListener('click', openRank);
-  $('rankBox').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openRank(); }
-  });
+  for (const id of ['rankBox', 'careerBox']){
+    $(id).addEventListener('click', openRank);
+    $(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openRank(); }
+    });
+  }
   const closeRank = () => { $('rankSheet').hidden = true; };
   $('rankDone').addEventListener('click', closeRank);
   // 点抽屉外面也关掉，免得非得够到底部那个按钮
