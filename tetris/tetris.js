@@ -1973,18 +1973,23 @@ let shownScore = 0, rollId = 0;
 // 压到 10px 就没法看了。与其缩字号，不如少给一位小数。
 // 边界也顺带兜住了：999,999 算出来是 99.9999，两位小数会进位成「100.00万」
 // 变成 7 个字符，这个 while 会把它退成「100.0万」。
+// 「80.00万」这种尾零白占两格，抹掉；但只抹小数尾巴，整数位的 0 不动
+function trimZeros(t){
+  if (t.indexOf('.') < 0) return t;
+  return t.replace(/0+$/, '').replace(/\.$/, '');
+}
 function fmtScore(v){
   v = Math.round(v);
   if (v < 10000) return v.toLocaleString();
-  if (v >= 100000000) return (v / 100000000).toFixed(2) + '亿';
+  if (v >= 100000000) return trimZeros((v / 100000000).toFixed(2)) + '亿';
   const w = v / 10000;
   let d = w < 100 ? 2 : w < 1000 ? 1 : 0;
   let t = w.toFixed(d);
   while (t.length > 5 && d > 0) t = w.toFixed(--d);
   // 四舍五入进位到 10000 万就是 1 亿了，换个单位，顺带把「10000万」这个
   // 六字符又全是数字的最宽情况（61px > 56px 的框）消掉
-  if (parseFloat(t) >= 10000) return (v / 100000000).toFixed(2) + '亿';
-  return t + '万';
+  if (parseFloat(t) >= 10000) return trimZeros((v / 100000000).toFixed(2)) + '亿';
+  return trimZeros(t) + '万';
 }
 
 // 按字数缩字号塞进框里。.stat b 没设 nowrap，放不下不是截省略号而是直接换行，
