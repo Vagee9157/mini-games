@@ -327,15 +327,19 @@ const RANKS = [
   [4000000,  '鸿蒙'],
   [5000000,  '无极'],
 ];
-// 段位 · 看累计总分。按「一局 10 万、一天 30 局 ≈ 300 万」铺，15 天到顶。
+// 段位 · 看累计总分。前七档是按「一局 10 万」铺的，实测一局能打三百万，
+// 所以王者二十局就到顶了。已有的阈值不动 —— 往上调等于把已经爬到的人降级，
+// 比早期爬得快更难受。坡度加在顶上：王者之上还有荣耀王者、传奇王者。
 const CAREER = [
-  [1000000,  '青铜'],
-  [4000000,  '白银'],
-  [9000000,  '黄金'],
-  [18000000, '铂金'],
-  [30000000, '钻石'],
-  [43000000, '星耀'],
-  [60000000, '王者'],
+  [1000000,   '青铜'],
+  [4000000,   '白银'],
+  [9000000,   '黄金'],
+  [18000000,  '铂金'],
+  [30000000,  '钻石'],
+  [43000000,  '星耀'],
+  [60000000,  '王者'],
+  [100000000, '荣耀王者'],
+  [250000000, '传奇王者'],
 ];
 function tierOf(table, v){
   let hit = null;
@@ -921,6 +925,15 @@ function clearStyle(n, spin, perfect){
 
 // 把这一局讲出来。只挑「真的发生过」的条目 —— 一堆 0 比什么都不写更难看。
 // 称号牌：右侧栏两格（最强 / 段位）+ 开始页一块 + 称号面板。都从存档现算，不存状态。
+// 称号名往格子里填。不走 setStat —— 那套 --fit 是按数字串的字符数标定的，
+// 汉字宽得多，「传奇王者」四个字在 402 宽下正好顶到 64px 格子的两条边，
+// 不裁但也没留白。四字给一档轻缩收出呼吸感，两三字维持原大小。
+function setRank(el, name){
+  if (!el) return;
+  el.textContent = name;
+  el.style.setProperty('--fit', name.length >= 4 ? .86 : name.length === 3 ? .94 : 1);
+}
+
 function syncRank(){
   if (!CRAZY) return;
   const best = Math.max(game.best, readBest());
@@ -928,12 +941,12 @@ function syncRank(){
   const box = $('rankBox');
   if (box){
     box.hidden = false;
-    $('rankName').textContent = r ? r[1] : '—';
+    setRank($('rankName'), r ? r[1] : '—');
   }
   const cbox = $('careerBox');
   if (cbox){
     cbox.hidden = false;
-    $('careerName').textContent = c ? c[1] : '—';
+    setRank($('careerName'), c ? c[1] : '—');
   }
   const chip = $('rankChip');
   if (chip){

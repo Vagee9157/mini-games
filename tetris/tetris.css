@@ -375,11 +375,15 @@ body.crazy .danger{ background: linear-gradient(180deg, rgba(255,160,50,.36), rg
 .overrank i.up span{ color: #ffd166; }
 .overrank i.career.up span{ color: #8fd4ff; }
 .overrank i.up b{ animation: rankPop .7s cubic-bezier(.2,.8,.3,1); }
-/* 320 宽下「新最强 + 新段位」两条一起亮会折行，收一收字距和间隙 */
-@media (max-width: 340px){
-  .overrank{ gap: 10px; }
-  .overrank i{ gap: 5px; }
-  .overrank b{ font-size: 19px; letter-spacing: .08em; }
+/* 320 宽下两条一起亮会折行 —— 段位那条可能是「荣耀王者」四个字，
+   比原来的两字宽一倍。收字距、收间隙、收字号。 */
+/* 断点取 380 不是 340：结算卡在 360 宽下比 390 宽下更窄，
+   340 的断点盖不住它，实测 360 会折行而 340 反而不折。 */
+@media (max-width: 380px){
+  .overrank{ gap: 7px; }
+  .overrank i{ gap: 4px; }
+  .overrank b{ font-size: 16px; letter-spacing: .02em; }
+  .overrank span{ font-size: 9.5px; letter-spacing: .04em; }
 }
 @keyframes rankPop{
   0%{ transform: scale(.6); opacity: 0 }
