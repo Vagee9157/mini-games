@@ -2550,7 +2550,9 @@ function toggleMusic(){
 // 这几个数是按「疯狂版中位 = 标准版的 2~3 倍」反推出来的。
 // 第一版（1/16、10 秒、×3）实测只有 1.24 倍 —— FEVER 十秒只盖得住三次消行，
 // 一局三百行里被加成的占比太小。
-const GOLD_RATE = 1 / 10;        // 黄金方块出现概率
+// 后来热度那条直线和变异块浓度一起跑飞，倍率冲到 3.78；压完拐点和浓度
+// 回到 2.52，又落回当初这个区间里了。
+const GOLD_RATE = 1 / 38;        // 黄金方块出现概率（见 MOD_RATES 的浓度说明）
 const GOLD_MULT = 3;
 const FEVER_MS = 20000;          // 一次 FEVER 多长（走 game.elapsed，不是墙钟）
 const FEVER_MULT = 4;
@@ -2570,10 +2572,30 @@ const DANGER_ROW = 4;            // 堆顶到了这一行（含）算进危险�
 // 不设上限是故意的：打得够猛它就该失控。实际会被衰减自然拉住，
 // 平衡点约等于「注入速率 × 45 秒」，所以上限由手速决定，不由代码决定。
 const HEAT_TAU = 45000;   // 衰减时间常数：停手 45 秒掉到三分之一
-const HEAT_DIV = 12;      // 倍率 = 1 + heat / HEAT_DIV
+const HEAT_DIV = 12;      // 拐点之前：倍率 = 1 + heat / HEAT_DIV
+// 拐点之后改走平方根。原来是一条直线，一局打长了热度能压到 160 上下，
+// 倍率直接 ×14.5 —— 分数不是被关卡撑起来的，是被这条直线撑起来的，
+// 顺带把单局和累计两条称号梯子一起打穿。
+// 前半段一格不动（照旧一路冲到 ×5），只把尾巴压下来：
+//   heat  48 → ×5.0（不变）   100 → ×7.1（原 ×9.3）
+//        162 → ×8.5（原 ×14.5）  300 → ×10.6（原 ×26）
+// 还是不封顶，打得猛照样涨，只是涨得动涨不飞。
+//
+// 平方根那支要在拐点把「值」和「斜率」都接上，不能直接写 sqrt(heat-KNEE)：
+// 平方根在 0 处斜率是无穷大，那样刚过拐点会比原来的直线涨得还快
+// （heat 48~64 区间新值反而更高），软上限软出个鼓包来。
+// 所以整体右移 HEAT_SOFT，再反解 A、B 让 f(KNEE) 和 f'(KNEE) 各自对上。
+const HEAT_KNEE = 48;     // 拐点
+const HEAT_SOFT = 6;      // 软化半径：越大尾巴抬得越高
+const HEAT_B = 2 * Math.sqrt(HEAT_SOFT) / HEAT_DIV;
+const HEAT_A = 1 + HEAT_KNEE / HEAT_DIV - 2 * HEAT_SOFT / HEAT_DIV;
 let heat = 0;
 
-function heatMult(){ return CRAZY ? 1 + heat / HEAT_DIV : 1; }
+function heatMult(){
+  if (!CRAZY) return 1;
+  if (heat <= HEAT_KNEE) return 1 + heat / HEAT_DIV;
+  return HEAT_A + HEAT_B * Math.sqrt(heat - HEAT_KNEE + HEAT_SOFT);
+}
 
 // 注入量按含金量给，不按行数摊：一次 TETRIS 给 16，拆成四次单行只给 8。
 // 想把倍率烧上去就得打大的。
@@ -2729,16 +2751,21 @@ function feverEnd(){
 // 概率跟着「一局多少块」走，不是拍脑袋定的。
 // 难度提上去之后一局只剩 97~160 块（原来 770），旧概率下休闲档六局才见一次
 // 炸弹 —— 最带感的两个东西等于白做。按新的块数重新反推。
+// 这几个概率原先是照着机器人「一局一百多块就死」调的，人类一局能落六百块，
+// 于是实测变成每 6.7 块就有一个变异块 —— 15%，变异成了常态。而且比例是反的：
+// 最没戏的金块 60 个，最有戏的激光 3 个。
+// 重调到总量 5.4%（一局六百块 ≈ 33 个），顺带把四种拉平：
+//   一局六百块下 ≈ 金 16 / 锤 6.7 / 弹 5.5 / 激 4.6
 const MOD_RATES = [
-  ['laser',  1 / 90],    // 一局约 1~2 个
-  ['bomb',   1 / 70],    // 一局约 1.5~2 个
-  ['hammer', 1 / 45],    // 一局约 2~3 个
-  ['gold',   GOLD_RATE], // 一局约 10~16 个
+  ['laser',  1 / 130],
+  ['bomb',   1 / 110],
+  ['hammer', 1 / 90],
+  ['gold',   GOLD_RATE],   // 1/38
 ];
 const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
 
 function rollMod(){
-  // 限时挑战里三种「干活的」变异翻倍，金块不翻 —— 它本来就多，再翻只是加分不加戏
+  // 限时挑战里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
   const k2 = game.rush ? RUSH_MOD : 1;
   let r = rndFx();
   for (const [k, rate] of MOD_RATES){
