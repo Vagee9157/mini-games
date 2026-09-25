@@ -245,6 +245,8 @@ const EDGE_STOPS = [
 ];
 
 const STORE_KEY = nsKey('best.v1');       // 隔离：两个模式各有各的最高分
+const TOTAL_KEY = nsKey('total.v1');      // 生涯累计分
+const DAILY_KEY = nsKey('daily.v1');      // 今日最佳（按北京时间归日）
 const SAVE_KEY  = nsKey('save.v1');       // 隔离：疯狂版的存档不能被标准版 restore
 const LEGACY_KEY = nsKey('best.legacy');  // 清档时把旧纪录留一份
 function readLegacy(){
@@ -287,6 +289,90 @@ function readBest(){
 function writeBest(v){
   try { localStorage.setItem(STORE_KEY, String(v)); } catch { /* 存不了就算了 */ }
 }
+function readTotal(){
+  try { return parseInt(localStorage.getItem(TOTAL_KEY) || '0', 10) || 0; }
+  catch { return 0; }
+}
+function addTotal(v){
+  try { localStorage.setItem(TOTAL_KEY, String(readTotal() + v)); } catch { /* 忽略 */ }
+}
+
+// ── 称号 ──
+// 两条独立的梯子，量的是两件不同的事：
+//   段位   = 你单局最高打到过多少 —— 「你有多强」
+//   生涯   = 你一共打出过多少分   —— 「你玩了多久」
+// 都从存档里现算，不另存状态：最高分和累计分只增不减，算出来的结果天然单调。
+// 段位 · 看单局最高分。门槛按真实分数定：普通局 10 万、最好 100 万，
+// 所以 10 万摆在第三档（常驻位），100 万落在第七档，上面还留三格看得见。
+// 火焰这条隐喻和游戏的核心机制是同一件事 —— 一局就是一次燃烧：
+// 热度起来、烧到顶、然后熄灭。
+const RANKS = [
+  [30000,    '微光'],
+  [60000,    '星火'],
+  [100000,   '流焰'],
+  [180000,   '赤霄'],
+  [300000,   '烈阳'],
+  [500000,   '熔金'],
+  [800000,   '炽天'],
+  [1200000,  '紫微'],
+  [2000000,  '曜极'],
+  [3000000,  '太一'],
+];
+// 生涯 · 看累计总分。按「一局 10 万、一天 30 局 ≈ 300 万」铺，15 天到顶。
+const CAREER = [
+  [1000000,  '青铜'],
+  [4000000,  '白银'],
+  [9000000,  '黄金'],
+  [18000000, '铂金'],
+  [30000000, '钻石'],
+  [43000000, '星耀'],
+  [60000000, '王者'],
+];
+function tierOf(table, v){
+  let hit = null;
+  for (const t of table){ if (v >= t[0]) hit = t; else break; }
+  return hit;
+}
+const rankOf   = (v) => tierOf(RANKS, v);
+// ── 限时挑战 ──
+// 开局随机给的一次机会：整局分数 ×1.2，而且有利的机制密集得多。
+//
+// 走保底不走纯随机：纯随机的话你可以一直重开刷到它。保底计数每开一局走一格，
+// 所以无论怎么刷，拿到的频率都超不过十分之一。计数存本地，刷新页面也带着。
+const RUSH_EVERY = 10;
+const RUSH_MULT  = 1.2;        // 系数压在 1.2 —— 真正的好处是机制密集，不是数字
+const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它已经够多了）
+const RUSH_PITY  = 38;         // FEVER 保底斜率，平时 55
+const RUSH_KEY   = nsKey('rush.v1');
+
+function bumpRush(){
+  let n = 0;
+  try { n = parseInt(localStorage.getItem(RUSH_KEY) || '0', 10) || 0; } catch { /* 忽略 */ }
+  n++;
+  const hit = n >= RUSH_EVERY;
+  try { localStorage.setItem(RUSH_KEY, String(hit ? 0 : n)); } catch { /* 忽略 */ }
+  return hit;
+}
+
+// ── 今日最佳 ──
+// 按北京时间归日，而且按「这一局结束的时刻」算 —— 跨零点打完的那局算新的一天，
+// 否则昨天的成绩会挤掉今天的第一局。
+// 时区不读设备设置：时间戳先推到 UTC+8，再取 UTC 的年月日。
+function bjDay(){
+  // 先把时间戳推到 UTC+8，再读 UTC 的年月日 —— 这样不依赖运行设备的时区设置
+  return new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+}
+function readDaily(){
+  try {
+    const d = JSON.parse(localStorage.getItem(DAILY_KEY) || 'null');
+    if (d && d.day === bjDay()) return d;
+  } catch { /* 坏数据当没有 */ }
+  return { day: bjDay(), best: 0, plays: 0 };
+}
+function writeDaily(d){
+  try { localStorage.setItem(DAILY_KEY, JSON.stringify(d)); } catch { /* 忽略 */ }
+}
+const careerOf = (v) => tierOf(CAREER, v);
 
 // 正在玩的这一局也存下来：手机上切个 App、锁个屏回来还能接着打
 let lastSaveAt = 0;
@@ -406,6 +492,7 @@ const game = {
   // 这一局都发生了什么。结算页要把它讲出来 —— 所有机制都在跑，
   // 但之前没有任何一个地方把它们汇总给玩家看。
   run: null,
+  rush: false,
   queue: [],          // 预览队列，保持 5 个
   mods: [],           // 和 queue 一一对应的变异，入队时摇好
   holdMod: null,
@@ -755,6 +842,55 @@ function clearStyle(n, spin, perfect){
 }
 
 // 把这一局讲出来。只挑「真的发生过」的条目 —— 一堆 0 比什么都不写更难看。
+// 段位牌：右侧栏常驻一格 + 开始页一块 + 称号面板。都从存档现算，不存状态。
+function syncRank(){
+  if (!CRAZY) return;
+  const best = Math.max(game.best, readBest());
+  const r = rankOf(best), c = careerOf(readTotal());
+  const box = $('rankBox');
+  if (box){
+    box.hidden = false;
+    $('rankName').textContent = r ? r[1] : '—';
+  }
+  const chip = $('rankChip');
+  if (chip){
+    chip.hidden = false;
+    $('rankNow').textContent = r ? r[1] : '未入段';
+    $('careerNow').textContent = c ? c[1] : '';
+  }
+  const d = readDaily(), tl = $('todayLine');
+  if (tl){
+    tl.hidden = false;
+    $('dailyBest').textContent = d.best > 0 ? fmtScore(d.best) : '—';
+  }
+}
+
+// 面板里的一条梯子。从高往低排，拿到的亮着，没拿到的灰着并写出门槛 ——
+// 要让人看见下一格还差多少。
+// 门槛都是整数，用 fmtScore 会显示成「80.00万」，小数位全是零。单写一个。
+function fmtNeed(v){
+  if (v >= 100000000) return (v / 100000000) + '亿';
+  if (v >= 10000) return (v / 10000) + '万';
+  return v.toLocaleString();
+}
+
+function fillLadder(el, table, val){
+  if (!el) return;
+  el.innerHTML = table.slice().reverse().map(([need, name]) => {
+    const got = val >= need;
+    return `<span class="rk${got ? ' got' : ''}"><i>${name}</i><b>${fmtNeed(need)}</b></span>`;
+  }).join('');
+}
+
+function openRankSheet(){
+  if (!CRAZY) return;
+  const best = Math.max(game.best, readBest()), total = readTotal();
+  fillLadder($('rankList'), RANKS, best);
+  fillLadder($('careerList'), CAREER, total);
+  $('rankFoot').textContent = `单局最高 ${fmtScore(best)}　生涯累计 ${fmtScore(total)}`;
+  $('rankSheet').hidden = false;
+}
+
 function fillRunLog(){
   const box = $('runlog');
   if (!box) return;
@@ -789,14 +925,19 @@ function fillRunLog(){
 
 // 分数关口播报。一局能撞三四个，是频率最高的一条，顺带给「一局之内没有
 // 阶段感」补一个节点 —— 分数原来只是个一直涨的数字。
-const MILESTONES = [
-  [10000,   '一万'],
-  [50000,   '五万，还行'],
-  [100000,  '十万，有点东西'],
-  [500000,  '五十万，你认真的?'],
-  [1000000, '一百万'],
-  [5000000, '五百万，服了'],
-];
+// 关口密一点，一局能多撞几次。大部分只报个数，整数关口才给一句话 ——
+// 每个都配文案的话，说得太满反而不值钱了。
+const MILE_W = [1, 3, 5, 10, 15, 20, 25, 30, 50, 80, 100, 150, 200, 300];
+const MILE_SAY = {
+  1: '一万',
+  10: '十万，有点东西',
+  30: '三十万',
+  50: '五十万，你认真的?',
+  100: '一百万',
+  200: '两百万，离谱',
+  300: '三百万。没话说了',
+};
+const MILESTONES = MILE_W.map(w => [w * 10000, MILE_SAY[w] || (w + ' 万')]);
 function checkMilestone(){
   const r = game.run;
   if (!CRAZY || !r) return;
@@ -963,7 +1104,7 @@ function riseGarbage(){
   row[gap] = null;                                      // 留个缺口，不然没法消
   // 宝箱：灰线现在只有坏处，这给了它第二个身份 —— 一个看得见、够得到的目标。
   // 状态存在盘面格子里（和冰冻行同一套），塌陷、上顶、地震都会跟着走。
-  if (CRAZY && rndFx() < CHEST_RATE){
+  if (CRAZY && rndFx() < CHEST_RATE * (game.rush ? 2 : 1)){
     let x = (rndFx() * COLS) | 0;
     if (x === gap) x = (x + 1) % COLS;
     row[x] = CHEST;
@@ -1008,7 +1149,16 @@ function endGame(why){
   needsDraw = true;
   clearSave();
   cancelAnimationFrame(rafId);
+  const prevRank = rankOf(readBest());     // 先记下进这一局之前的段位
   if (game.score > game.best){ game.best = game.score; writeBest(game.best); }
+  // 记账放在这里：累计分只增，今日最佳按「这一局结束的时刻」归日
+  if (CRAZY) addTotal(game.score);
+  if (CRAZY){
+    const d = readDaily();          // readDaily 自己会判断是不是还是同一天
+    d.plays++;
+    if (game.score > d.best) d.best = game.score;
+    writeDaily(d);
+  }
   $('overScore').textContent = game.score.toLocaleString();
   $('overLines').textContent = game.lines;
   $('overLevel').textContent = game.level;
@@ -1019,7 +1169,21 @@ function endGame(why){
   $('legacyCell').hidden = !lg;
   if (lg) $('overLegacy').textContent = lg.toLocaleString();
   fillRunLog();
+  syncRank();
   $('overDied').textContent = DEATH_TEXT[game.why] || '';
+  // 段位只在够得着的时候才提（低于第一档说什么都是扫兴）。
+  // 升段要在 writeBest 之后判，拿旧的最高分和这一局比。
+  const rk = $('overRank');
+  if (rk){
+    const now = CRAZY ? rankOf(game.score) : null;
+    rk.hidden = !now;
+    if (now){
+      const up = !prevRank || prevRank[0] < now[0];
+      rk.className = 'overrank' + (up ? ' up' : '');
+      rk.innerHTML = `<b>${now[1]}</b><span>${up ? '新段位' : '段位'}</span>`;
+      if (up){ sfx('level', 1.2); buzz([40, 30, 60]); }
+    }
+  }
   $('overlay').dataset.mode = 'over';
 
   // 死亡慢镜：结算页晚 700ms 再弹，中间让盘面褪色定住。
@@ -2480,6 +2644,7 @@ function crazyOnLock(p){
 function crazyScoreMult(){
   if (!CRAZY) return 1;
   let m = heatMult();
+  if (game.rush) m *= RUSH_MULT;
   if (goldPending) m *= GOLD_MULT;
   if (feverLeft > 0) m *= FEVER_MULT;
   return m;
@@ -2517,7 +2682,7 @@ function crazyOnClear(lines, spin, perfect){
   if (lines <= 0) return;                 // 但不推 FEVER 保底
   if (feverLeft > 0) return;
   feverPity += lines;
-  if (rndFx() < feverPity / PITY_DIV){ feverPity = 0; feverStart(); }
+  if (rndFx() < feverPity / (game.rush ? RUSH_PITY : PITY_DIV)){ feverPity = 0; feverStart(); }
 }
 
 function feverStart(){
@@ -2554,8 +2719,14 @@ const MOD_RATES = [
 const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
 
 function rollMod(){
+  // 限时挑战里三种「干活的」变异翻倍，金块不翻 —— 它本来就多，再翻只是加分不加戏
+  const k2 = game.rush ? RUSH_MOD : 1;
   let r = rndFx();
-  for (const [k, rate] of MOD_RATES){ if (r < rate) return k; r -= rate; }
+  for (const [k, rate] of MOD_RATES){
+    const p = k === 'gold' ? rate : rate * k2;
+    if (r < p) return k;
+    r -= p;
+  }
   return null;
 }
 
@@ -2879,8 +3050,10 @@ function pickEvent(){
   // 濒死时只发好事。这时候再来一发地震就是耍赖，不是难度。
   const safe = stackTopRow() > DANGER_ROW + 3;
   const pool = EVENTS.filter(e => safe || !e.bad);
-  let total = pool.reduce((a, e) => a + e.w, 0), r = rndFx() * total;
-  for (const e of pool){ if ((r -= e.w) < 0) return e; }
+  // 限时挑战里唯一的好事件（压实）权重翻倍
+  const wt = (e) => e.w * (game.rush && !e.bad ? 2 : 1);
+  let total = pool.reduce((a, e) => a + wt(e), 0), r = rndFx() * total;
+  for (const e of pool){ if ((r -= wt(e)) < 0) return e; }
   return pool[pool.length - 1];
 }
 
@@ -3270,7 +3443,7 @@ window.addEventListener('keydown', (e) => {
   const act = KEYMAP[e.code];
   if (!act) return;
   e.preventDefault();
-  if (act === 'restart'){ restart(); return; }
+  if (act === 'restart'){ restart(true); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
   if (act === 'fullscreen'){ toggleGameMode(); return; }
@@ -3508,8 +3681,12 @@ function resumeLoop(){
   if (!rafId) rafId = requestAnimationFrame(tick);
 }
 
-function restart(){
+function restart(keepRush){
   clearSave();
+  // 限时挑战由保底计数决定，不是玩家选的。keepRush 只给「重开当前这局」用，
+  // 免得手滑按重开把已经拿到的机会冲掉。
+  game.rush = CRAZY && (keepRush ? game.rush : bumpRush());
+  document.body.classList.toggle('rushrun', !!game.rush);
   game.board = newBoard();
   game.bag = [];
   clearTimeout(dieTimer);
@@ -3680,11 +3857,23 @@ function init(){
   if (mb) mb.addEventListener('click', toggleMusic);
   syncMusic();
 
-  $('startBtn').addEventListener('click', restart);
-  $('againBtn').addEventListener('click', restart);
+  // 必须包一层：addEventListener 会把 Event 当第一个参数传进去，
+  // restart(event) 的 !!event 是 true，每次普通重开都会变成每日挑战
+  $('startBtn').addEventListener('click', () => restart(false));
+  $('againBtn').addEventListener('click', () => restart(false));
+  const openRank = () => openRankSheet();
+  $('rankChip').addEventListener('click', openRank);
+  $('rankBox').addEventListener('click', openRank);
+  $('rankBox').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openRank(); }
+  });
+  const closeRank = () => { $('rankSheet').hidden = true; };
+  $('rankDone').addEventListener('click', closeRank);
+  // 点抽屉外面也关掉，免得非得够到底部那个按钮
+  $('rankSheet').addEventListener('click', (e) => { if (e.target === $('rankSheet')) closeRank(); });
   $('resumeBtn').addEventListener('click', togglePause);
   $('pauseBtn').addEventListener('click', togglePause);
-  $('restartBtn').addEventListener('click', restart);
+  $('restartBtn').addEventListener('click', () => restart(true));
   $('muteBtn').addEventListener('click', toggleMute);
   $('skinBtn').addEventListener('click', () => toggleStylePanel());
   $('skinDone').addEventListener('click', () => toggleStylePanel(false));
@@ -3743,6 +3932,7 @@ function init(){
   });
 
   document.body.classList.toggle('crazy', CRAZY);
+  syncRank();
   if (launchedAsApp()) { document.body.classList.add('immersive'); keepAwake(true); }
   syncFsBtn();
   syncMuteBtn();
@@ -3770,6 +3960,8 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   rerollPiece, canReroll, REROLL_COST,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
+  rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, bumpRush, crazyScoreMult,
+  syncRank, openRankSheet, RUSH_EVERY, RUSH_MULT,
   fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
