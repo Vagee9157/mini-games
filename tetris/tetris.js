@@ -1028,9 +1028,11 @@ function helpSections(){
       { dot: '◈', name: '倍率', meta: '不封顶', text: '热度 24 → ×3　48 → ×5　100 → ×7　160 → ×8.5' },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
       { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
-      { dot: '◈', name: '深局加成', meta: '每 100 行 +' + Math.round(DEEP_STEP * 100) + '%',
-        text: '消行数过 ' + DEEP_FROM + ' 之后，活得越久每一行越值 —— 200 行 ×'
-              + (1 + DEEP_STEP).toFixed(1) + '，400 行 ×' + (1 + DEEP_STEP * 3).toFixed(1) },
+      { dot: '◈', name: '深局加成', meta: DEEP_FROM + ' 行起 ×' + DEEP_BASE,
+        text: '只在普通局生效（狂欢局已经有 ×' + RUSH_MULT + '）。过 ' + DEEP_FROM
+              + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +' + DEEP_STEP
+              + ' —— 200 行 ×' + (DEEP_BASE + 1.2 * DEEP_STEP).toFixed(1)
+              + '，400 行 ×' + (DEEP_BASE + 3.2 * DEEP_STEP).toFixed(1) },
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
@@ -2986,20 +2988,25 @@ function crazyOnLock(p){
 // 再乘就过头了。
 const CRAZY_TUNE = 1;
 
-// ── 深局加成 ──
-// 活得越久每一行越值。为什么要有它：狂欢局灰线快 82%，结构上活不长
-// （同样打法 265 行封顶），而普通局能打到 380+ 行。把奖励挂在「已消行数」上，
-// 普通局吃得到而狂欢局吃不满 —— 这是唯一能偏向普通局的杠杆。
-// 拉 levelMult 的曲线没用：狂欢局吃同一条，两边一起涨，比值几乎不动
-// （指数 0.75→1.10 只把比值从 0.61 抬到 0.69，还会误伤低段手感）。
+// ── 深局加成（只给普通局）──
+// 狂欢局比普通局值多少，是三个常数乘出来的：热度 1.97 倍（梭哈连赢 + 道具
+// 翻倍带来的额外注入）× 分数 2.4 倍 × 行数 0.69 倍（灰线快 82%，活不长）。
+// 乘起来约 2.1，而且跟行数无关 —— 所以补偿也得是个接近常数的量，
+// 拿「行数越多越值」那种缓坡补不动：实测 100 行就差 2.16 倍、550 行还差 2.08 倍。
 //
-// 从 DEEP_FROM 行起，每多 100 行每行 +DEEP_STEP：
-//   100行 ×1.0   200行 ×1.2   300行 ×1.4   400行 ×1.6
-const DEEP_FROM = 100;
-const DEEP_STEP = .20;
+// 第一版让两边共吃这个加成，等于白给狂欢局也加，方向错了。现在只给普通局：
+// 狂欢局已经有 ×2.4 和道具翻倍。
+//
+// 用两局真实对局校准（普通 137 行 82.5 万 / 狂欢 265 行 1331 万），
+// 普通/狂欢 在各水平上的比值：
+//   150行 0.76   200行 0.86   250行 0.95   300行 1.02   383行 1.13
+const DEEP_FROM = 80;
+const DEEP_BASE = 1.8;
+const DEEP_STEP = .4;
+let deepSaid = false;
 function deepMult(){
-  if (!CRAZY) return 1;
-  return 1 + Math.max(0, (game.lines - DEEP_FROM) / 100) * DEEP_STEP;
+  if (!CRAZY || game.rush || game.lines < DEEP_FROM) return 1;
+  return DEEP_BASE + (game.lines - DEEP_FROM) / 100 * DEEP_STEP;
 }
 
 function crazyScoreMult(){
@@ -3029,6 +3036,11 @@ function crazyOnClear(lines, spin, perfect){
   if (lines > 0 && game.elapsed - lastRiseAt < 1000){
     gain += 8;
     tip('压哨', 3000);
+  }
+  // 越过深局门槛报一次。1.0 → 1.8 是个台阶，不说一声会像数值跳变
+  if (!game.rush && !deepSaid && game.lines >= DEEP_FROM){
+    deepSaid = true;
+    tip('深局　每行 ×' + DEEP_BASE, 0);
   }
   heat += gain;
   betResolve(lines);
@@ -4214,6 +4226,7 @@ function restart(keepRush){
   // 上一局留下的时刻会变成一个「很久以前」，新一局第一次消行就被判成压哨。
   lastRiseAt = -1e9;
   lastTip = -1e9;
+  deepSaid = false;
   gwarnStep = -1;
   game.run = newRun();
   game.queue = [];
