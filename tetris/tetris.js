@@ -3063,7 +3063,7 @@ const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a
 // 一整块只画一个（画在外接框正中），每格一个太吵。
 function drawModIcon(c, cx, cy, r, mod){
   c.save();
-  c.lineWidth = Math.max(1.5, r * .34);
+  c.lineWidth = Math.max(1.3, r * .32);
   c.strokeStyle = 'rgba(6,10,18,.85)';
   c.fillStyle = '#f2f7ff';
   c.lineJoin = 'round';
@@ -3104,7 +3104,7 @@ function modIconOn(c, cells, ox, oy, cell, minX, minY, mod){
   }
   const cx = ox + (best[0] - minX + .5) * cell;
   const cy = oy + (best[1] - minY + .5) * cell;
-  drawModIcon(c, cx, cy, Math.max(6, cell * .32), mod);
+  drawModIcon(c, cx, cy, Math.max(5, cell * .26), mod);
 }
 
 function rollMod(){

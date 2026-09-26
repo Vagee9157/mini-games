@@ -1091,6 +1091,43 @@ body[data-heat="4"] .board-aura{ animation: auraPulse .8s ease-in-out infinite, 
 .evwarn[data-bad="0"]{ color: #d8ffd0; background: rgba(95,224,200,.22); border: 1px solid rgba(95,224,200,.7); }
 @keyframes evPulse{ from{ transform: translate(-50%,-50%) scale(1) } to{ transform: translate(-50%,-50%) scale(1.09) } }
 
+/* ── 事件覆盖层 ──
+   只有一个元素、只动 transform，走合成器，不吃 paint。
+   条纹本体做得比容器大一圈再平移，避免动 background-position（那会重绘）。 */
+.evfx{
+  position: absolute; inset: 0;
+  overflow: hidden; border-radius: 12px;
+  pointer-events: none;
+  opacity: 0; transition: opacity .25s;
+}
+.evfx i{ position: absolute; display: block; will-change: transform; }
+body[data-ev="wind"] .evfx, body[data-ev="slam"] .evfx{ opacity: 1; }
+
+/* 狂风：横向流线，跟方块被吹偏的方向一致 */
+body[data-ev="wind"] .evfx i{
+  inset: -12% -110%;
+  background: repeating-linear-gradient(90deg,
+    rgba(150,215,255,.20) 0 2px, rgba(150,215,255,.07) 2px 5px, transparent 5px 48px);
+  animation: windFlow 1.05s linear infinite;
+}
+@keyframes windFlow{ from{ transform: translateX(0) } to{ transform: translateX(48px) } }
+
+/* 瞬落：竖向下坠流线 + 底部一道受力光 */
+body[data-ev="slam"] .evfx i{
+  inset: -110% -12%;
+  background: repeating-linear-gradient(180deg,
+    rgba(255,170,120,.13) 0 2px, rgba(255,170,120,.045) 2px 5px, transparent 5px 54px);
+  animation: slamFall .5s linear infinite;
+}
+@keyframes slamFall{ from{ transform: translateY(0) } to{ transform: translateY(54px) } }
+body[data-ev="slam"] .evfx{
+  box-shadow: inset 0 -22px 24px -18px rgba(255,140,60,.38);
+}
+
+@media (prefers-reduced-motion: reduce){
+  .evfx i{ animation: none !important; }
+}
+
 /* 暗幕：盘面压暗一点，配合 canvas 那边只画轮廓 */
 body[data-ev="blackout"] #board{ filter: brightness(.82); }
 /* 镜像：给个持续的提示，不然玩家只会以为是 bug */

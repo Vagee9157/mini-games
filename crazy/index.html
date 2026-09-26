@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=f8f216a5">
+<link rel="stylesheet" href="../tetris/tetris.css?v=7c3b1dbb">
 </head>
 <body>
 <div class="topline"></div>
@@ -105,6 +105,11 @@
       </div>
 
       <!-- 事件预告。捣乱事件必须提前三秒喊一声，没预告的惩罚是耍赖不是难度。 -->
+      <!-- 事件的盘面覆盖层。狂风和瞬落原来盘面上零视觉，只能靠状态格的名字
+           知道 —— 而这两个恰恰是最影响手感的。::before 被 FEVER 占着、
+           ::after 被狂欢局金边占着，所以单开一层。 -->
+      <div class="evfx" id="evfx" aria-hidden="true"><i></i></div>
+
       <div class="evwarn" id="evwarn" aria-hidden="true"></div>
 
       <!-- 梭哈。整套机制里唯一需要玩家主动做决定的地方，所以给了一个够大的点击区；
@@ -228,7 +233,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=46b24dd1"></script>
+<script src="../tetris/tetris.js?v=19b311f8"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
