@@ -2142,8 +2142,11 @@ function flashEvent(e){
 function fxRows(){
   const out = [];
   // 梭哈排第一：它是唯一有硬时限、且要你当场做事的东西
-  if (betLeft > 0) out.push({ n: '梭哈', v: (betLeft / 1000).toFixed(1) + 's ' + betLines + '/' + BET_NEED,
-                              k: 'betrow', p: betLeft / BET_MS });
+  if (betLeft > 0){
+    const m = betMult(betLines);
+    out.push({ n: '梭哈 ' + betLines + '行', v: (betLeft / 1000).toFixed(1) + 's ' + (m ? '×' + m : '—'),
+               k: 'betrow', p: betLeft / BET_MS });
+  }
   if (evActive) out.push({ n: evActive.name, v: (evLeft / 1000).toFixed(1) + 's',
                            k: evActive.bad ? 'bad' : 'good', p: evLeft / evActive.ms });
   else if (flashLeft > 0 && flashFx) out.push({ n: flashFx.name, v: '已发生',
@@ -3616,7 +3619,18 @@ function syncReroll(){
 const BET_MS = 10000;
 const BET_WIN  = 2;      // 赢：热度 ×2
 const BET_LOSE = .5;     // 输：热度减半
-const BET_NEED = 2;        // 接了之后要消几行才算赢
+// 分档给奖励。为什么高档系数要拉得这么开：奖励挂在热度上，而热度倍率过了
+// 拐点是开方压的，系数的差会被压扁 —— 照「2行×1.8 / 5行×3.0」那组算，
+// 热度 80 时屏幕上只差 20%，拼死多消三行不值。现在 5 行的净收益是 2 行的
+// 3.4 倍，档位才读得出来。
+const BET_TIERS = [[2, 1.6], [3, 2.0], [4, 2.8], [5, 4.0]];
+const BET_NEED = BET_TIERS[0][0];   // 够不到这个就是输
+const BET_CAP  = BET_TIERS[BET_TIERS.length - 1][0];
+function betMult(lines){
+  let m = 0;
+  for (const [n, k] of BET_TIERS) if (lines >= n) m = k;
+  return m;                          // 0 = 没达标
+}
 // 弹出的门槛比完成的门槛高：三行或 T-spin 才弹，接了之后两行就算过。
 // 放宽到「两行就弹」实测太吵 —— 两行消除本来就常见，加上赢完那一刻
 // betMaybeOffer 会在同一次消行里再跑一遍，能连着弹。
@@ -3631,27 +3645,42 @@ function betMaybeOffer(n, spin){
   if (!CRAZY || betLeft > 0 || betOffer > 0 || betCool > 0) return;
   if (!(n >= BET_OFFER_NEED || spin) || heat < BET_MIN_HEAT) return;
   betOffer = BET_MS;
+  // 文案从档位表现算，改数值不用回来改字
+  const tx = $('allinTxt');
+  if (tx) tx.innerHTML = '<b>梭哈</b>十秒内消 ' + BET_NEED + '~' + BET_CAP + ' 行<br>'
+    + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join('　') + '　不足 ' + BET_NEED + ' 行减半';
   const el = $('allin');
   if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
 }
 
 // 梭哈结算。两条消行路径都要走这里 —— 原来只有正常锁定那条调，
 // 道具和压实清出来的行（clearFullNow）根本不算数，实测一局接了 34 次只赢 2 次。
+// 消行时只累加，不当场结算 —— 结算放到窗口结束，这样十秒里你会一直想
+// 再多挤一行。唯一的例外是消满上限，那就没必要干等了，直接封顶收。
 function betResolve(lines){
   if (!CRAZY || betLeft <= 0 || lines <= 0) return;
-  // 按累计算，不是「一次消够」。横幅写的就是「十秒内消两行」，
-  // 而且状态格要显示进度，累计才对得上。
   betLines += lines;
-  if (betLines < BET_NEED) return;
-  heat *= BET_WIN;
+  if (betLines >= BET_CAP) betSettle();
+}
+
+function betSettle(){
+  const m = betMult(betLines);
   betLeft = 0; betCool = BET_COOL; betHide();
-  if (game.run) game.run.betWins++;
+  if (m > 0){
+    heat *= m;
+    if (game.run) game.run.betWins++;
+    // 不能只靠 toast —— 它是共享通道，赢完紧接着可能触发 FEVER，
+    // 后来的 toast 会把「梭哈成功」顶掉，看起来就像没结算。
+    betPop(betLines + ' 行　热度 ×' + m, '梭哈成功', 'win');
+    showToast(`梭哈成功　${betLines} 行　热度 ×${m}`);
+    sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
+  } else {
+    heat *= BET_LOSE;
+    betPop('热度 ÷2', `梭哈失败　只有 ${betLines} 行`, 'lose');
+    showToast('赌输了　热度减半');
+    sfx('over', .8); buzz([90, 60, 90]);
+  }
   heatQuant = -1; syncHeat(); syncEdge();
-  // 不能只靠 toast —— 它是一条共享通道，赢了之后紧接着就可能触发 FEVER，
-  // 后来的 toast 直接把「梭哈成功」顶掉，看起来就像没结算。
-  betPop('梭哈成功', '热度 ×' + BET_WIN, 'win');
-  showToast('梭哈成功　热度 ×' + BET_WIN);
-  sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
 }
 
 // 梭哈的结算走飘字，摆在盘面中间偏上，跟消行飘字错开
@@ -3684,13 +3713,7 @@ function betStep(dt){
   if (betLeft > 0){
     betLeft -= dt;
     document.body.classList.add('betting');
-    if (betLeft <= 0){
-      betLeft = 0; betCool = BET_COOL; heat *= BET_LOSE; heatQuant = -1;
-      betHide(); syncHeat(); syncEdge();
-      betPop('梭哈失败', '热度 ÷2', 'lose');
-      showToast('赌输了　热度减半');
-      sfx('over', .8); buzz([90, 60, 90]);
-    }
+    if (betLeft <= 0) betSettle();
   }
 }
 
@@ -4436,7 +4459,7 @@ function init(){
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
   heatMult, heatGain, rollMod, collapseCols,
-  BET_WIN, BET_LOSE, BET_NEED, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
+  BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
   get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
   bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
