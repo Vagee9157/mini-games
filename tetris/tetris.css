@@ -130,6 +130,28 @@ body{
 .slot.next.active{ background: rgba(255,193,71,.16); border-color: rgba(255,193,71,.8); }
 
 /* 统计 */
+/* ── 状态格 ── */
+.fxbox{ padding: 5px 6px 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.fxbox:hover, .fxbox:focus-visible{ border-color: rgba(255,255,255,.28); outline: none; }
+.fxbox .fxs{ height: 22px; margin-top: 3px; }
+.fxbox .fxs:first-of-type{ margin-top: 2px; }
+.fxbox .fxl{ display: flex; align-items: baseline; justify-content: space-between; gap: 3px; }
+.fxbox b{ font-family: var(--mono); white-space: nowrap; }
+.fxbox .fxn{ font-size: 9.5px; }
+.fxbox .fxv{ font-size: 10px; }
+.fxbox .fxbar{ display: block; height: 3px; border-radius: 2px;
+               background: rgba(255,255,255,.10); overflow: hidden; margin-top: 2px; }
+/* 条只动 transform，走合成器，不吃 paint */
+.fxbox .fxbar i{ display: block; height: 100%; transform-origin: left; border-radius: 2px;
+                 will-change: transform; }
+.fxbox .bad  b{ color: #ffb4a6 } .fxbox .bad  .fxbar i{ background: #f43f5e }
+.fxbox .good b{ color: #b8f5e4 } .fxbox .good .fxbar i{ background: #5fe0c8 }
+.fxbox .fev  b{ color: #7fe3ff } .fxbox .fev  .fxbar i{ background: #7fe3ff }
+.fxbox .heat .fxn{ color: var(--ink-soft) } .fxbox .heat .fxv{ color: #ff8a5c }
+.fxbox .rush .fxn{ color: var(--ink-soft) } .fxbox .rush .fxv{ color: #ffd166 }
+/* 320 宽放不下：右栏内容 520px 而盘面只有 420px */
+@media (max-width: 340px){ .fxbox{ display: none; } }
+
 .stats{
   display: grid;
   grid-template-columns: 1fr;
@@ -410,7 +432,29 @@ body.crazy .danger{ background: linear-gradient(180deg, rgba(255,160,50,.36), rg
 }
 .rank-foot{ font-size: 10.5px; color: var(--ink-dim); text-align: center; margin: 6px 0 2px; }
 /* 抽屉本身是滚动的，按钮吸在底部 —— 不然 17 行要滚到头才点得到「好了」 */
-#rankSheet .sheet-done{
+.helplink{
+  display: block; margin: 0 auto 12px; padding: 4px 12px;
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--ink-dim); font-size: 11.5px; letter-spacing: .06em; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.helplink:hover, .helplink:focus-visible{ color: var(--ink-soft); border-color: rgba(255,255,255,.3); outline: none; }
+
+/* ── 玩法说明 ── */
+.helpbody{ text-align: left; }
+.helpbody h4{
+  margin: 14px 0 6px; font-size: 11px; letter-spacing: .16em;
+  color: var(--ink-dim); font-weight: 600; font-family: var(--mono);
+}
+.helpbody h4:first-child{ margin-top: 2px; }
+.helprow{ display: flex; align-items: flex-start; gap: 8px; margin: 0 0 7px; }
+.helprow canvas{ flex: 0 0 auto; width: 26px; height: 26px; margin-top: 1px; }
+.helprow .dot{ flex: 0 0 auto; width: 26px; text-align: center; font-size: 13px; line-height: 26px; }
+.helprow .tx{ flex: 1 1 auto; min-width: 0; }
+.helprow b{ display: block; font-size: 12px; color: var(--ink); }
+.helprow b em{ font-style: normal; color: var(--ink-dim); font-family: var(--mono); font-size: 10.5px; margin-left: 5px; }
+.helprow span{ display: block; font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
+#helpSheet .sheet-done, #rankSheet .sheet-done{
   position: sticky; bottom: 0; z-index: 1;
   display: block; width: 100%;
   box-shadow: 0 -12px 18px rgba(11,16,28,.96), 0 0 26px rgba(34,211,238,.42);
@@ -897,6 +941,9 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
   will-change: transform, opacity;
 }
 .pop b{ display: block; font-weight: 600; }
+/* 道具/压实清出来的行。刻意做得比亲手打出来的素 —— 它不该抢 TETRIS 的风头 */
+.pop.tool b{ color: #9fb4d0; text-shadow: 0 0 10px rgba(159,180,208,.35); }
+.pop.tool i{ color: #6f88a8; }
 /* 类型名固定小号：它是说明，不该跟着分数一起长大抢戏 */
 .pop i{
   display: block;

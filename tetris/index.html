@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=32ac3742">
+<link rel="stylesheet" href="tetris.css?v=5560afc8">
 </head>
 <body>
 <div class="topline"></div>
@@ -70,6 +70,7 @@
               <span id="rankNow">未入段</span><em id="careerNow"></em>
             </button>
             <p class="todayline" id="todayLine" hidden>今日最佳 <b id="dailyBest">—</b></p>
+            <button class="helplink" id="helpLink" type="button" hidden>玩法说明</button>
             <button class="pbtn" id="resumeSaveBtn" data-save>接着上次玩 · <b id="resumeScore">0</b></button>
             <button class="pbtn" id="startBtn">开始</button>
           </div>
@@ -108,7 +109,7 @@
       <!-- 梭哈。整套机制里唯一需要玩家主动做决定的地方，所以给了一个够大的点击区；
            它只在打出 TETRIS / T-spin 且热度够高时出现，十秒不理会自动作废。 -->
       <div class="allin" id="allin" aria-hidden="true">
-        <span class="allin-txt"><b>梭哈</b>十秒内消行 ×2<br>没消到则热度清零</span>
+        <span class="allin-txt"><b>梭哈</b>十秒内消两行<br>成功热度翻倍 · 失败减半</span>
         <button class="allin-go" id="allinGo" type="button">接受</button>
       </div>
 
@@ -126,6 +127,16 @@
 
     <!-- 右侧：下一个 / 暂存 / 计分 -->
     <aside class="side">
+      <!-- 状态格：当前挂在身上的机制。固定三槽常驻 —— 空了就收起来的话，
+           每次事件开始/结束整列都会上下跳，而 NEXT 就在它正下方。
+           点它开玩法说明。标准版 syncFx 早退，这格一直藏着。 -->
+      <div class="stat fxbox" id="fxBox" role="button" tabindex="0" aria-label="查看玩法说明" hidden>
+        <span>状态</span>
+        <div class="fxs" id="fxs0"></div>
+        <div class="fxs" id="fxs1"></div>
+        <div class="fxs" id="fxs2"></div>
+      </div>
+
       <!-- 疯狂版里点它换牌（花热度）。标准版 rerollPiece 早退，点了没反应。 -->
       <div class="slot next" id="nextSlot" role="button" tabindex="0" aria-label="花热度换牌">
         <span class="slot-label">NEXT</span>
@@ -183,6 +194,16 @@
     </div>
   </div>
 
+  <!-- 玩法说明。内容全部由 JS 从常量现算，不写死 ——
+         这次会话里光注释就过期两次，写死的说明书一定会变成谎话。 -->
+  <div class="sheet" id="helpSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>玩法</h3></div>
+      <div class="helpbody" id="helpBody"></div>
+      <button class="pbtn sheet-done" id="helpDone">好了</button>
+    </div>
+  </div>
+
   <div class="sheet" id="styleSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top">
@@ -205,7 +226,7 @@
 
 </div>
 
-<script src="tetris.js?v=d0e2ece3"></script>
+<script src="tetris.js?v=3da79d71"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

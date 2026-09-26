@@ -954,6 +954,8 @@ function syncRank(){
     $('rankNow').textContent = r ? r[1] : '未入段';
     $('careerNow').textContent = c ? c[1] : '';
   }
+  const hl = $('helpLink');
+  if (hl) hl.hidden = false;
   const d = readDaily(), tl = $('todayLine');
   if (tl){
     tl.hidden = false;
@@ -976,6 +978,97 @@ function fillLadder(el, table, val){
     const got = val >= need;
     return `<span class="rk${got ? ' got' : ''}"><i>${name}</i><b>${fmtNeed(need)}</b></span>`;
   }).join('');
+}
+
+// ── 玩法说明 ──
+// 每个数字都从常量现算。写死的话迟早对不上 —— 这次改动里光注释就过期过两次
+// （宝箱「一局 4~5 个」、金块「它本来就多」）。
+function fmtRate(r){ return '1/' + Math.round(1 / r); }
+
+function helpSections(){
+  const evOn = EVENTS.filter(e => e.ms > 0), evNow = EVENTS.filter(e => !e.ms);
+  const wTot = EVENTS.reduce((a, e) => a + e.w, 0);
+  const rate = Object.fromEntries(MOD_RATES);
+  const evLine = (e) => ({
+    dot: e.bad ? '▲' : '●',
+    name: e.name,
+    meta: (e.ms ? (e.ms / 1000) + ' 秒' : '瞬发') + '　' + Math.round(e.w / wTot * 100) + '%',
+    text: MOD_HELP.ev[e.key],
+  });
+  return [
+    ['变异块　约 ' + (Object.values(rate).reduce((a, b) => a + b, 0) * 100).toFixed(1) + '% 的方块',
+      ['gold', 'hammer', 'bomb', 'laser'].map(k => ({
+        mod: k, name: MOD_HELP.name[k], meta: fmtRate(rate[k]), text: MOD_HELP.mod[k] }))],
+    ['事件　开局 ' + (EV_FIRST / 1000) + ' 秒第一次，最密 ' + (EV_MIN / 1000) + ' 秒一次，提前 ' + (EV_WARN / 1000) + ' 秒预告',
+      evOn.concat(evNow).map(evLine)],
+    ['热度　消行注入，停手 ' + (HEAT_TAU / 1000) + ' 秒掉到三分之一', [
+      { dot: '◈', name: '注入', meta: '', text: '一行 2 · 两行 5 · 三行 9 · 四行 16 · T-spin 6~26 · 全消 40' },
+      { dot: '◈', name: '倍率', meta: '不封顶', text: '热度 24 → ×3　48 → ×5　100 → ×7　160 → ×8.5' },
+      { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
+      { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
+    ]],
+    ['宝箱与梭哈', [
+      { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
+        text: '每条灰线有这么大概率带宝箱，消掉那一行才算开。34% FEVER / 36% 热度 +30 / 30% 下一块是炸弹' },
+      { dot: '✦', name: 'FEVER', meta: (FEVER_MS / 1000) + ' 秒 ×' + FEVER_MULT,
+        text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减' },
+      { dot: '⚄', name: '梭哈', meta: BET_MS / 1000 + ' 秒',
+        text: '消 ' + BET_NEED + ' 行以上且热度 ≥' + BET_MIN_HEAT + ' 时弹出。接了就要在十秒内再消 '
+              + BET_NEED + ' 行 —— 成功热度 ×' + BET_WIN + '，失败减半' },
+      { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
+    ]],
+    ['狂欢局　' + RUSH_EVERY + ' 局攒一次，今天打得多门槛会降', [
+      { dot: '★', name: '分数', meta: '×' + RUSH_MULT, text: '整局有效，不计时' },
+      { dot: '★', name: '道具', meta: '×' + RUSH_MOD, text: '重锤 / 炸弹 / 激光概率翻倍，金块不翻' },
+      { dot: '▲', name: '灰线', meta: '快 ' + Math.round((1 / RUSH_GARBAGE - 1) * 100) + '%', text: '这是它的代价' },
+      { dot: '▲', name: '坏事件', meta: '×' + RUSH_BAD, text: '权重提高，好事件相对更少' },
+      { dot: '◈', name: '有效局', meta: RUSH_MIN_PIECES + ' 块 / ' + (RUSH_MIN_MS / 1000) + ' 秒',
+        text: '一局要落够方块或打够时间才算一格，秒死重开刷不出来' },
+    ]],
+  ];
+}
+
+const MOD_HELP = {
+  name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光' },
+  mod: {
+    gold:   '用它消行时，那一次得分 ×' + 3,
+    hammer: '锁定后，它占到的每一列整列向下塌实，洞被挤掉',
+    bomb:   '炸掉自身周围一圈，然后受影响的列塌实',
+    laser:  '整块汽化，再从落点往下打穿中心那一列 —— 开出来的井正好是打四行的形状',
+  },
+  ev: {
+    blackout: '方块只画轮廓，看不见填充，音效也变闷',
+    mirror:   '左右键对调，连发也跟着换向',
+    wind:     '每隔不到一秒，把下落中的方块随机吹偏一格',
+    wall:     '随机封死一列当墙，不封出生区',
+    slam:     '方块一出生就贴到底。落地后还能左右滑和转，失去的是边落边调整',
+    quake:    '整个盘面左右平移一格，推出边界的格子直接消失',
+    compact:  '挑洞最多的三列塌实 —— 八个事件里唯一对你有利的',
+    freeze:   '冻住上方某一行。冻住的行凑满时不消，只解冻，要消两次才掉',
+  },
+};
+
+function fillHelp(){
+  const box = $('helpBody');
+  if (!box) return;
+  box.innerHTML = helpSections().map(([title, rows]) => '<h4>' + title + '</h4>' + rows.map(r =>
+    '<div class="helprow">'
+    + (r.mod ? '<canvas data-mod="' + r.mod + '" width="52" height="52"></canvas>'
+             : '<i class="dot">' + r.dot + '</i>')
+    + '<div class="tx"><b>' + r.name + (r.meta ? '<em>' + r.meta + '</em>' : '') + '</b>'
+    + '<span>' + (r.text || '') + '</span></div></div>').join('')).join('');
+  // 图标用游戏自己的画法渲染，不另画一套 —— 这样它永远跟盘面上看到的一致
+  for (const cv of box.querySelectorAll('canvas[data-mod]')){
+    const c = cv.getContext('2d'), m = cv.dataset.mod, S = 52;
+    c.clearRect(0, 0, S, S);
+    drawCell(c, 3, 3, S - 6, mix(colorOf('T'), MOD_TINT[m], .72), {});
+    drawModIcon(c, S / 2, S / 2, S * .22, m);
+  }
+}
+
+function openHelp(){
+  fillHelp();
+  $('helpSheet').hidden = false;
 }
 
 function openRankSheet(){
@@ -1623,12 +1716,16 @@ function draw(){
     const tint = CRAZY && p.mod ? MOD_TINT[p.mod] : null;
     const gold = !!tint;
     const pc = tint ? mix(color, tint, .72) : color;
-    for (const [cx, cy] of cellsOf(p.type, p.rot)){
+    const cells = cellsOf(p.type, p.rot);
+    for (const [cx, cy] of cells){
       const by = p.y + cy;
       if (by < BUFFER) continue;
       drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, pc,
                { glow: Math.max(lockPulse, gold ? .55 : 0) });
     }
+    // 图标画在格子之后，且只在整块都露出隐藏区时画 —— 半截在上面时画出来是悬空的
+    if (p.mod && cells.every(([, cy]) => p.y + cy >= BUFFER))
+      modIconOn(ctx, cells, p.x * CELL, (p.y - BUFFER) * CELL, CELL, 0, 0, p.mod);
   }
 
   // 硬降拖尾：落点那端最浓，往起点方向渐隐到透明。
@@ -1762,6 +1859,7 @@ function drawMini(c, type, ox, oy, w, h, alpha, mod){
   for (const [cx, cy] of cells){
     drawCell(c, px + (cx - minX) * cell, py + (cy - minY) * cell, cell, mcolor, { alpha });
   }
+  if (CRAZY && mod && alpha > .5) modIconOn(c, cells, px, py, cell, minX, minY, mod);
   // 变异角标。光靠染色不够：七种方块本色里，O 是黄、Z 是红、I 是青、T 是紫，
   // 正好把金/炸弹/激光/重锤四种染色各撞掉一个 —— 撞上就跟普通块长得一样。
   // 落下的那块有辉光圈能区分，预览里没有，所以这里补一个点。
@@ -2004,6 +2102,61 @@ function shake(big){
 // 热度可视化：一个常驻徽章报当前倍率，外加整体视觉跟着热度分档变。
 // 玩家全程盯着一个数字，那个数字能飙到自己都害怕 —— 这是疯狂版的主轴。
 let heatTier = -1, heatQuant = -1;
+// ── 状态格 ──
+// 三槽固定。优先级：事件 > FEVER > 狂欢 > 热度 —— 满了就砍最后一条。
+// 瞬发事件（地震/压实/冰冻）没有时长，给它闪 FX_FLASH 毫秒表示「刚发生过」。
+//
+// 每帧都重排 DOM 会毁掉帧时间，所以这里只在「内容真的变了」时才写：
+// 把要显示的东西压成一个字符串指纹，跟上次比，一样就直接 return。
+// 进度条的宽度不进指纹 —— 它走 transform，单独更新，代价可以忽略。
+const FX_FLASH = 1500;
+let flashFx = null, flashLeft = 0, fxSig = '';
+
+function flashEvent(e){
+  if (!CRAZY || !e) return;
+  flashFx = e; flashLeft = FX_FLASH;
+}
+
+function fxRows(){
+  const out = [];
+  if (evActive) out.push({ n: evActive.name, v: (evLeft / 1000).toFixed(1) + 's',
+                           k: evActive.bad ? 'bad' : 'good', p: evLeft / evActive.ms });
+  else if (flashLeft > 0 && flashFx) out.push({ n: flashFx.name, v: '已发生',
+                           k: flashFx.bad ? 'bad' : 'good', p: flashLeft / FX_FLASH });
+  if (feverLeft > 0) out.push({ n: 'FEVER', v: '×' + FEVER_MULT, k: 'fev', p: feverLeft / FEVER_MS });
+  if (game.rush) out.push({ n: '狂欢', v: '×' + RUSH_MULT, k: 'rush' });
+  out.push({ n: '热度', v: '×' + heatMult().toFixed(1), k: 'heat' });
+  return out.slice(0, 3);
+}
+
+function syncFx(){
+  if (!CRAZY) return;
+  const box = $('fxBox');
+  if (!box) return;
+  box.hidden = false;
+  const rows = fxRows();
+  const sig = rows.map(r => r.n + r.v + r.k).join('|');
+  if (sig !== fxSig){
+    fxSig = sig;
+    for (let i = 0; i < 3; i++){
+      const el = $('fxs' + i), r = rows[i];
+      if (!el) continue;
+      el.className = 'fxs' + (r ? ' ' + r.k : '');
+      el.innerHTML = r
+        ? `<div class="fxl"><b class="fxn">${r.n}</b><b class="fxv">${r.v}</b></div>`
+          + (r.p == null ? '' : '<span class="fxbar"><i></i></span>')
+        : '';
+    }
+  }
+  // 条每帧更新，但只写 transform
+  for (let i = 0; i < 3; i++){
+    const r = rows[i];
+    if (r == null || r.p == null) continue;
+    const bar = $('fxs' + i).querySelector('.fxbar i');
+    if (bar) bar.style.transform = 'scaleX(' + Math.max(0, Math.min(1, r.p)).toFixed(3) + ')';
+  }
+}
+
 function syncHeat(){
   if (!CRAZY) return;
   const el = $('badgeHeat');
@@ -2747,8 +2900,12 @@ function crazyClocks(dt){
     windTimer += dt;
     if (windTimer >= 850){ windTimer = 0; tryMove(rndFx() < .5 ? -1 : 1, 0); }
   }
+  if (flashLeft > 0) flashLeft -= dt;
   evStepSchedule(dt);
   betStep(dt);
+  // 必须排在 evStepSchedule / betStep 之后 —— 排前面的话，事件点燃的那一帧
+  // 状态格还读不到它，要等下一帧才显示
+  syncFx();
   for (let i = beams.length - 1; i >= 0; i--)
     if ((beams[i].t += dt) > BEAM_MS) beams.splice(i, 1);
   for (let i = embers.length - 1; i >= 0; i--)
@@ -2764,6 +2921,7 @@ function crazyReset(){
   feverLeft = 0; feverPity = 0; goldPending = false;
   heat = 0; heatTier = -1; heatQuant = -1;
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
+  flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; beams.length = 0;
   delete document.body.dataset.ev;
@@ -2783,9 +2941,16 @@ function crazyOnLock(p){
 }
 
 // 钩子③：算分时的倍数。金块 ×2、FEVER ×3，两者相乘。
+// 整体手感微调。想让全局分数涨/跌就只动这一个数 —— 其余旋钮（HEAT_DIV、
+// GOLD_MULT、FEVER_MULT、levelMult）都不均匀：有的只在热度高时生效，有的只
+// 覆盖一小撮消行，调它们等于顺手改了平衡。
+// 现在是 1：道具/压实消行给分那条已经把整体抬了约 18%（狂欢局 33%），
+// 再乘就过头了。
+const CRAZY_TUNE = 1;
+
 function crazyScoreMult(){
   if (!CRAZY) return 1;
-  let m = heatMult();
+  let m = heatMult() * CRAZY_TUNE;
   if (game.rush) m *= RUSH_MULT;
   if (goldPending) m *= GOLD_MULT;
   if (feverLeft > 0) m *= FEVER_MULT;
@@ -2811,14 +2976,15 @@ function crazyOnClear(lines, spin, perfect){
     gain += 8;
     tip('压哨', 3000);
   }
-  if (lines > 0 && betLeft > 0){        // 赌赢：这一手的注入翻倍
-    gain *= BET_MULT;
+  heat += gain;
+  // 赌赢：整条热度翻倍（注入之后再翻，所以这一手也算在里面）
+  if (lines >= BET_NEED && betLeft > 0){
+    heat *= BET_WIN;
     betLeft = 0; betHide();
     if (game.run) game.run.betWins++;
-    showToast('梭哈成功　热度 ×' + BET_MULT);
+    showToast('梭哈成功　热度 ×' + BET_WIN);
     sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
   }
-  heat += gain;
   syncHeat();
   betMaybeOffer(lines, spin);     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
   if (lines <= 0) return;                 // 但不推 FEVER 保底
@@ -2864,6 +3030,60 @@ const MOD_RATES = [
   ['gold',   GOLD_RATE],   // 1/38
 ];
 const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
+
+// ── 变异块图标 ──
+// 原来只靠混色区分，但方块本身有七种颜色，混出来必然撞车 ——
+// 实测 I 块+激光 和 I 块原色 都是青的、O 块+金块 和 O 块原色 都是黄的，
+// 最该被看见的两个恰好隐形。所以改成画一个图标，颜色只当辅助。
+//
+// 形状手画不用 emoji：最窄屏格子只有 21px，图标约 12px，emoji 在这个尺寸糊成一团，
+// 而且各平台渲染不一致。近白填充 + 深描边，任何底色上都读得出来。
+// 一整块只画一个（画在外接框正中），每格一个太吵。
+function drawModIcon(c, cx, cy, r, mod){
+  c.save();
+  c.lineWidth = Math.max(1.5, r * .34);
+  c.strokeStyle = 'rgba(6,10,18,.85)';
+  c.fillStyle = '#f2f7ff';
+  c.lineJoin = 'round';
+  c.beginPath();
+  if (mod === 'gold'){                       // ◆ 菱形
+    c.moveTo(cx, cy - r); c.lineTo(cx + r * .78, cy);
+    c.lineTo(cx, cy + r); c.lineTo(cx - r * .78, cy); c.closePath();
+  } else if (mod === 'hammer'){              // ▼ 下三角
+    c.moveTo(cx - r * .88, cy - r * .62); c.lineTo(cx + r * .88, cy - r * .62);
+    c.lineTo(cx, cy + r * .82); c.closePath();
+  } else if (mod === 'bomb'){                // ● 圆 + 短引线
+    c.arc(cx, cy + r * .14, r * .74, 0, Math.PI * 2);
+    c.closePath();
+    c.moveTo(cx + r * .3, cy - r * .5); c.lineTo(cx + r * .72, cy - r * .95);
+  } else {                                   // ⚡ 竖向折线（激光）
+    c.moveTo(cx + r * .42, cy - r);  c.lineTo(cx - r * .48, cy + r * .12);
+    c.lineTo(cx + r * .08, cy + r * .12); c.lineTo(cx - r * .38, cy + r);
+    c.lineTo(cx + r * .52, cy - r * .16); c.lineTo(cx - r * .04, cy - r * .16);
+    c.closePath();
+  }
+  c.stroke();
+  c.fill();
+  c.restore();
+}
+
+// 图标落在「离质心最近的那个格子」正中，而不是质心本身 ——
+// T / L / J / S / Z 这些不对称块的质心在格子交界处，直接画会骑在两行之间。
+function modIconOn(c, cells, ox, oy, cell, minX, minY, mod){
+  if (!mod) return;
+  let sx = 0, sy = 0;
+  for (const [dx, dy] of cells){ sx += dx - minX; sy += dy - minY; }
+  const n = cells.length, gx = sx / n, gy = sy / n;
+  let best = cells[0], bd = Infinity;
+  for (const cc of cells){
+    const dx = (cc[0] - minX) - gx, dy = (cc[1] - minY) - gy;
+    const d = dx * dx + dy * dy;
+    if (d < bd){ bd = d; best = cc; }
+  }
+  const cx = ox + (best[0] - minX + .5) * cell;
+  const cy = oy + (best[1] - minY + .5) * cell;
+  drawModIcon(c, cx, cy, Math.max(6, cell * .32), mod);
+}
 
 function rollMod(){
   // 狂欢局里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
@@ -2915,8 +3135,20 @@ function clearFullNow(){
   if (!full.length) return 0;
   for (const y of full) burstRow(y);
   sweepRows(full, '#9bffdc');
+  // 分要在 applyClear 之前算好行号（塌陷之后 full 里的 y 就没意义了），
+  // 也要在 game.lines 推进之前算 —— levelMult 用的是这一消之前的等级，
+  // 跟 scoreFor 那条路保持一致。
+  const n = full.length;
+  const base = n <= 4 ? [0, 100, 300, 500, 800][n] : 800 + (n - 4) * 300;
+  const gain = Math.round(base * levelMult(game.level) * crazyScoreMult());
+  const py = (full.reduce((a, b) => a + b, 0) / n - BUFFER + .5) * CELL;
   applyClear(full);
-  game.lines += full.length;
+  game.score += gain;
+  // 刻意不推 combo / b2b / run.tetris：那三个是奖励「连续的、亲手打出来的消除」，
+  // 让道具清出来的行去推它们，等于白送下一次真消除的加成。
+  if (game.run && gain > game.run.bestHit) game.run.bestHit = gain;
+  popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), n >= 2 ? n + ' 行' : '', 'tool');
+  game.lines += n;
   if (CRAZY) heat += heatGain(full.length, null, false);
   const lv = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
   if (lv > game.level){ game.level = lv; flashLevel(); syncEdge(); }
@@ -3231,6 +3463,7 @@ function evFire(){
   const e = evPending; evPending = null;
   const b = $('evwarn'); if (b) b.classList.remove('on');
   if (!e) return;
+  if (e.ms <= 0) flashEvent(e);          // 瞬发的没时长，闪一下表示刚发生过
   if (e.key === 'quake')   doQuake();
   if (e.key === 'compact') doCompact();
   if (e.key === 'freeze' && !doFreeze()) return;    // 空盘冻不了，当没发生
@@ -3345,12 +3578,22 @@ function syncReroll(){
 //
 // 整套机制里唯一「主动选择承担风险」的地方。抽奖给不了这种心跳，
 // 因为抽奖不是你的决定。
-const BET_MS = 10000, BET_MULT = 2;
+// 旧版是「赢 = 那一手热度注入 ×2（TETRIS 只多拿 16 点），输 = 热度清零」。
+// 这是个陷阱：收益固定而代价随热度暴涨，热度 162 时要赢到 96% 才不亏，
+// 正确玩法永远是「不接」—— 整套机制里唯一的主动决策等于是废的。
+// 现在两边都跟着热度走，不亏线稳定在 45~53%，是个接近公平的赌。
+// 任务也从「消任意一行」提到「消两行以上」—— 前者对会打的人几乎白送，
+// 配上公平赔率就变成「永远接」，跟以前一样不是决策，只是反过来。
+const BET_MS = 10000;
+const BET_WIN  = 2;      // 赢：热度 ×2
+const BET_LOSE = .5;     // 输：热度减半
+const BET_NEED = 2;      // 要消几行才算赢
+const BET_MIN_HEAT = 24; // 热度太低时赌没意思
 let betOffer = 0, betLeft = 0;
 
 function betMaybeOffer(n, spin){
   if (!CRAZY || betLeft > 0 || betOffer > 0) return;
-  if (!(n === 4 || spin) || heat < 24) return;   // 热度太低时赌没意思
+  if (n < BET_NEED || heat < BET_MIN_HEAT) return;
   betOffer = BET_MS;
   const el = $('allin');
   if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
@@ -3380,9 +3623,9 @@ function betStep(dt){
     betLeft -= dt;
     document.body.classList.add('betting');
     if (betLeft <= 0){
-      betLeft = 0; heat = 0; heatQuant = -1;
+      betLeft = 0; heat *= BET_LOSE; heatQuant = -1;
       betHide(); syncHeat(); syncEdge();
-      showToast('赌输了，热度清零');
+      showToast('赌输了　热度减半');
       sfx('over', .8); buzz([90, 60, 90]);
     }
   }
@@ -3894,6 +4137,7 @@ function restart(keepRush){
   $('overlay').classList.remove('show');
   $('pauseTx').textContent = '暂停';
   fillQueue();
+  syncFx();
   if (game.rush) showRushIntro();     // 报幕结束时才 spawnNext
   else spawnNext();
   syncHud();
@@ -4026,6 +4270,15 @@ function init(){
   $('againBtn').addEventListener('click', () => restart(false));
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
+  const openHelpSheet = () => openHelp();
+  $('helpLink').addEventListener('click', openHelpSheet);
+  $('fxBox').addEventListener('click', openHelpSheet);
+  $('fxBox').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openHelpSheet(); }
+  });
+  const closeHelp = () => { $('helpSheet').hidden = true; };
+  $('helpDone').addEventListener('click', closeHelp);
+  $('helpSheet').addEventListener('click', (e) => { if (e.target === $('helpSheet')) closeHelp(); });
   for (const id of ['rankBox', 'careerBox']){
     $(id).addEventListener('click', openRank);
     $(id).addEventListener('keydown', (e) => {
@@ -4117,7 +4370,9 @@ function init(){
 
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
-  get heat(){ return heat; }, heatMult, heatGain, rollMod, collapseCols,
+  get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
+  heatMult, heatGain, rollMod, collapseCols,
+  BET_WIN, BET_LOSE, BET_NEED, BET_MIN_HEAT, BET_MS, betMaybeOffer, betStep,
   bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
@@ -4126,7 +4381,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
-  syncRank, openRankSheet, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,
