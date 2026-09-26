@@ -1028,6 +1028,10 @@ function helpSections(){
       { dot: '◈', name: '倍率', meta: '不封顶', text: '热度 24 → ×3　48 → ×5　100 → ×7　160 → ×8.5' },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
       { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
+      { dot: '✦', name: '热流', meta: '×' + FLOW_MULT,
+        text: '每次消行有概率把该次注入翻 ' + FLOW_MULT + ' 倍，行数越少概率越高 —— 单行 '
+              + Math.round(FLOW_P[1] * 100) + '%、两行 ' + Math.round(FLOW_P[2] * 100)
+              + '%、三行 ' + Math.round(FLOW_P[3] * 100) + '%、四行 ' + Math.round(FLOW_P[4] * 100) + '%' },
       { dot: '◈', name: '深局加成', meta: DEEP_FROM + ' 行起 ×' + DEEP_BASE,
         text: '只在普通局生效（狂欢局已经有 ×' + RUSH_MULT + '）。过 ' + DEEP_FROM
               + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +' + DEEP_STEP
@@ -2898,6 +2902,18 @@ function heatGain(n, spin, perfect){
   return [0, 2, 5, 9, 16][n] || 0;
 }
 
+// ── 热流 ──
+// 每次消行有概率把该次热度注入翻倍，行数越少概率越高。
+// 为什么要偏向小消除：热度是「每秒注入 × 45 秒衰减」的平衡点，单行注入只有 2，
+// 平衡在 ×3.1 —— 只会打单行的人永远养不起热度，而热度是乘在每一次得分上的。
+// 偏向之后单行平衡抬到 ×4.75（+51%），四行只抬到 ×9.78（+6%），梯度保住了。
+//
+// 用概率不用直接调高单行注入，是因为后者会让单行逼近双行（×5.25 对 ×5.93），
+// 而且没有「中了」的瞬间 —— 整套机制里对玩家有利的东西太少，八个事件只有压实一个。
+// 只给玩家亲手打出来的消行，道具和压实清出来的不算。
+const FLOW_MULT = 4;
+let flowHit = false;
+const FLOW_P = [.25, .25, .18, .12, .06];   // 索引 = 消了几行，0 行（空转 T-spin）按单行算
 const DANGER_HEAT = 2;           // 危险区里消行的热度倍数
 // 每条灰线带宝箱的概率。注意这是「生成」的概率，不是「开出来」的 ——
 // 宝箱只有在你把那一行消掉时才算开，大量灰线是被顶出去的。
@@ -2963,7 +2979,7 @@ function crazyReset(){
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
-  betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; beams.length = 0;
+  betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; flowHit = false; beams.length = 0;
   delete document.body.dataset.ev;
   document.body.classList.remove('betting');
   const ew = $('evwarn'); if (ew) ew.classList.remove('on');
@@ -3026,6 +3042,11 @@ function crazyOnClear(lines, spin, perfect){
   goldPending = false;
   // 空转的 T-spin 也给热度：它是实打实的技术动作，只是没消到行
   let gain = heatGain(lines, spin, perfect);
+  // 热流：先掷，再叠险区/压哨那些加成
+  if (rndFx() < (FLOW_P[Math.min(lines, 4)] ?? FLOW_P[4])){
+    gain *= FLOW_MULT;
+    flowHit = true;
+  }
   // 险区加成：危险区原来只有坏处，所以最优解永远是「尽快清下去」，没有选择。
   // 在里面消行热度翻倍之后，才谈得上「敢不敢赖在高处多赚一点」。
   if (lines > 0 && dangerOn){
@@ -3043,6 +3064,13 @@ function crazyOnClear(lines, spin, perfect){
     tip('深局　每行 ×' + DEEP_BASE, 0);
   }
   heat += gain;
+  // 热流的反馈放在注入之后：它是「这一手更值」，不是独立事件，
+  // 所以走飘字而不是 toast —— toast 会被 FEVER / 里程碑顶掉。
+  if (flowHit){
+    flowHit = false;
+    if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .26, '热度 ×' + FLOW_MULT, '热流', 'flow', .95);
+    sfx('rotate', 1.5); buzz(22);
+  }
   betResolve(lines);
   syncHeat();
   betMaybeOffer(lines, spin);     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
@@ -4502,7 +4530,7 @@ function init(){
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
-  heatMult, heatGain, rollMod, collapseCols,
+  heatMult, heatGain, rollMod, collapseCols, FLOW_MULT, FLOW_P,
   BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
   get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
   bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
