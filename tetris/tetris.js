@@ -9,13 +9,15 @@
 // 疯狂版跟标准版同一份代码，靠这个开关分流。页面在加载 tetris.js 之前设它。
 const CRAZY = !!window.TETRIS_CRAZY;
 
-// ── 测试开关：每一局都是狂欢局 ──
-// 打开方式：网址后面加 ?rush=1（关掉就是去掉这个参数）。
-// 也可以把下面这行直接改成 true 写死。
+// ── 【临时测试态】每一局都是狂欢局 ──
+// 现在默认开着，方便实测：重开、再来一局、新开一局都会走报幕和边框特效。
+// 测完改回正常触发（每 N 局攒一次）时，把这行换成：
+//     const FORCE_RUSH = CRAZY && /[?&]rush=1\b/.test(location.search);
+// 临时想关掉一局的话，网址后面加 ?rush=0。
 //
-// 打开时刻意不碰保底计数 —— 既不消耗、也不累加，免得测试局把真实进度搅了。
-// 分数、最高分、累计、今日最佳照常记：它就是一局真的狂欢局，只是不用等。
-const FORCE_RUSH = CRAZY && /[?&]rush=1\b/.test(location.search);
+// 强制态刻意不碰保底计数 —— 既不消耗也不累加，免得测试局把真实进度搅了。
+// 分数、最高分、累计、今日最佳照常记：它就是真的狂欢局，只是不用等。
+const FORCE_RUSH = CRAZY && !/[?&]rush=0\b/.test(location.search);
 const NS = CRAZY ? 'crazy' : 'tetris';
 // 所有 localStorage 访问统一走这里，禁止写裸字符串 —— 之前就漏过
 // 内联的 'tetris.muted.v1'（不在常量块里，按常量块改会漏掉）
@@ -473,6 +475,8 @@ function saveGame(force){
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       board: game.board,
+      rush: game.rush,          // 不存的话，续玩会把狂欢局静默变成普通局
+      pieces: game.pieces,      // 有效局判据要用
       queue: game.queue,
       mods: game.mods,
       holdMod: game.holdMod,
@@ -525,8 +529,16 @@ function restoreGame(d){
   game.combo = typeof d.combo === 'number' ? d.combo : -1;
   game.b2b = !!d.b2b;
   game.garbage = d.garbage || 0;
+  game.pieces = d.pieces || 0;
   game.elapsed = d.elapsed || 0;
+  // 续玩要把狂欢状态一起接回来。原来这里不碰 game.rush，所以存档一续
+  // 狂欢局就静默降成普通局 —— 分数倍率、灰线速度、道具概率全跟着没了。
+  game.rush = FORCE_RUSH || (CRAZY && !!d.rush);
+  document.body.classList.toggle('rushrun', !!game.rush);
+  const sl = $('scoreLabel');
+  if (sl) sl.textContent = game.rush ? 'SCORE ×' + RUSH_MULT : 'SCORE';
   heat = CRAZY ? (+d.heat || 0) : 0;
+  syncFx();
   syncEdge();
   garbageTimer = 0;
   game.over = false;
@@ -964,6 +976,8 @@ function syncRank(){
   }
   const hl = $('helpLink');
   if (hl) hl.hidden = false;
+  const hb = $('helpBtn');
+  if (hb) hb.hidden = false;
   const d = readDaily(), tl = $('todayLine');
   if (tl){
     tl.hidden = false;
@@ -2127,6 +2141,9 @@ function flashEvent(e){
 
 function fxRows(){
   const out = [];
+  // 梭哈排第一：它是唯一有硬时限、且要你当场做事的东西
+  if (betLeft > 0) out.push({ n: '梭哈', v: (betLeft / 1000).toFixed(1) + 's ' + betLines + '/' + BET_NEED,
+                              k: 'betrow', p: betLeft / BET_MS });
   if (evActive) out.push({ n: evActive.name, v: (evLeft / 1000).toFixed(1) + 's',
                            k: evActive.bad ? 'bad' : 'good', p: evLeft / evActive.ms });
   else if (flashLeft > 0 && flashFx) out.push({ n: flashFx.name, v: '已发生',
@@ -2851,8 +2868,12 @@ let heat = 0;
 
 function heatMult(){
   if (!CRAZY) return 1;
-  if (heat <= HEAT_KNEE) return 1 + heat / HEAT_DIV;
-  return HEAT_A + HEAT_B * Math.sqrt(heat - HEAT_KNEE + HEAT_SOFT);
+  // 夹一下负数。现在没有能让 heat 变负的路径（衰减是乘 exp 且低于 .05 归零、
+  // 换牌有余额判、赌输是减半），但公式本身没护栏 —— 真漏进来会算出负倍率，
+  // 分数直接变负，排查起来毫无线索。
+  const h = heat > 0 ? heat : 0;
+  if (h <= HEAT_KNEE) return 1 + h / HEAT_DIV;
+  return HEAT_A + HEAT_B * Math.sqrt(h - HEAT_KNEE + HEAT_SOFT);
 }
 
 // 注入量按含金量给，不按行数摊：一次 TETRIS 给 16，拆成四次单行只给 8。
@@ -2931,7 +2952,7 @@ function crazyReset(){
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
-  betOffer = 0; betLeft = 0; beams.length = 0;
+  betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; beams.length = 0;
   delete document.body.dataset.ev;
   document.body.classList.remove('betting');
   const ew = $('evwarn'); if (ew) ew.classList.remove('on');
@@ -2985,14 +3006,7 @@ function crazyOnClear(lines, spin, perfect){
     tip('压哨', 3000);
   }
   heat += gain;
-  // 赌赢：整条热度翻倍（注入之后再翻，所以这一手也算在里面）
-  if (lines >= BET_NEED && betLeft > 0){
-    heat *= BET_WIN;
-    betLeft = 0; betHide();
-    if (game.run) game.run.betWins++;
-    showToast('梭哈成功　热度 ×' + BET_WIN);
-    sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
-  }
+  betResolve(lines);
   syncHeat();
   betMaybeOffer(lines, spin);     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
   if (lines <= 0) return;                 // 但不推 FEVER 保底
@@ -3138,8 +3152,15 @@ function collapseCols(cols){
 // 不走 scoreFor：它不是玩家摆出来的消行，不该吃 combo / B2B / 全消那套加成。
 // 给行数和热度，不直接给分 —— 热度会把回报体现在之后的每一次消行上。
 function clearFullNow(){
-  const full = [];
-  for (let y = 0; y < TOTAL_ROWS; y++) if (game.board[y].every(c => c)) full.push(y);
+  // 跟正常锁定那条路一样分两路：带冰的只解冻不消。
+  // 不分的话，炸弹/重锤/压实能一次打掉冰冻行，绕过「要消两次才掉」的规则 ——
+  // 同一个盘面状态，换个来源就换套规矩，说明书也对不上。
+  const full = [], thaw = [];
+  for (let y = 0; y < TOTAL_ROWS; y++){
+    if (!game.board[y].every(c => c)) continue;
+    if (CRAZY && game.board[y].some(c => c === FROZEN)) thaw.push(y); else full.push(y);
+  }
+  if (thaw.length) crazyThaw(thaw);
   if (!full.length) return 0;
   for (const y of full) burstRow(y);
   sweepRows(full, '#9bffdc');
@@ -3157,7 +3178,7 @@ function clearFullNow(){
   if (game.run && gain > game.run.bestHit) game.run.bestHit = gain;
   popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), n >= 2 ? n + ' 行' : '', 'tool');
   game.lines += n;
-  if (CRAZY) heat += heatGain(full.length, null, false);
+  if (CRAZY){ heat += heatGain(n, null, false); betResolve(n); }
   const lv = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
   if (lv > game.level){ game.level = lv; flashLevel(); syncEdge(); }
   sfx('clear', 1.1);
@@ -3595,21 +3616,53 @@ function syncReroll(){
 const BET_MS = 10000;
 const BET_WIN  = 2;      // 赢：热度 ×2
 const BET_LOSE = .5;     // 输：热度减半
-const BET_NEED = 2;      // 要消几行才算赢
-const BET_MIN_HEAT = 24; // 热度太低时赌没意思
+const BET_NEED = 2;        // 接了之后要消几行才算赢
+// 弹出的门槛比完成的门槛高：三行或 T-spin 才弹，接了之后两行就算过。
+// 放宽到「两行就弹」实测太吵 —— 两行消除本来就常见，加上赢完那一刻
+// betMaybeOffer 会在同一次消行里再跑一遍，能连着弹。
+const BET_OFFER_NEED = 3;
+const BET_COOL = 25000;   // 结算之后冷静这么久，别贴脸连弹
+let betLines = 0;         // 接了之后累计消了几行
+const BET_MIN_HEAT = 24;  // 热度太低时赌没意思
+let betCool = 0;
 let betOffer = 0, betLeft = 0;
 
 function betMaybeOffer(n, spin){
-  if (!CRAZY || betLeft > 0 || betOffer > 0) return;
-  if (n < BET_NEED || heat < BET_MIN_HEAT) return;
+  if (!CRAZY || betLeft > 0 || betOffer > 0 || betCool > 0) return;
+  if (!(n >= BET_OFFER_NEED || spin) || heat < BET_MIN_HEAT) return;
   betOffer = BET_MS;
   const el = $('allin');
   if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
 }
 
+// 梭哈结算。两条消行路径都要走这里 —— 原来只有正常锁定那条调，
+// 道具和压实清出来的行（clearFullNow）根本不算数，实测一局接了 34 次只赢 2 次。
+function betResolve(lines){
+  if (!CRAZY || betLeft <= 0 || lines <= 0) return;
+  // 按累计算，不是「一次消够」。横幅写的就是「十秒内消两行」，
+  // 而且状态格要显示进度，累计才对得上。
+  betLines += lines;
+  if (betLines < BET_NEED) return;
+  heat *= BET_WIN;
+  betLeft = 0; betCool = BET_COOL; betHide();
+  if (game.run) game.run.betWins++;
+  heatQuant = -1; syncHeat(); syncEdge();
+  // 不能只靠 toast —— 它是一条共享通道，赢了之后紧接着就可能触发 FEVER，
+  // 后来的 toast 直接把「梭哈成功」顶掉，看起来就像没结算。
+  betPop('梭哈成功', '热度 ×' + BET_WIN, 'win');
+  showToast('梭哈成功　热度 ×' + BET_WIN);
+  sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
+}
+
+// 梭哈的结算走飘字，摆在盘面中间偏上，跟消行飘字错开
+function betPop(label, text, kind){
+  if (!CELL) return;
+  popScore(CELL * COLS / 2, CELL * ROWS * .34, text, label, 'bet ' + kind, 1.05);
+}
+
 function betAccept(){
   if (!CRAZY || betOffer <= 0) return;
-  betOffer = 0; betLeft = BET_MS;
+  betOffer = 0; betLeft = BET_MS; betLines = 0;
   if (game.run) game.run.bets++;
   betHide();
   showToast('梭哈！十秒内必须消行');
@@ -3623,16 +3676,18 @@ function betHide(){
 }
 
 function betStep(dt){
+  if (betCool > 0) betCool -= dt;
   if (betOffer > 0){
     betOffer -= dt;
-    if (betOffer <= 0){ betOffer = 0; betHide(); }
+    if (betOffer <= 0){ betOffer = 0; betCool = BET_COOL; betHide(); }   // 没理会也冷却
   }
   if (betLeft > 0){
     betLeft -= dt;
     document.body.classList.add('betting');
     if (betLeft <= 0){
-      betLeft = 0; heat *= BET_LOSE; heatQuant = -1;
+      betLeft = 0; betCool = BET_COOL; heat *= BET_LOSE; heatQuant = -1;
       betHide(); syncHeat(); syncEdge();
+      betPop('梭哈失败', '热度 ÷2', 'lose');
       showToast('赌输了　热度减半');
       sfx('over', .8); buzz([90, 60, 90]);
     }
@@ -4280,6 +4335,7 @@ function init(){
   $('rankChip').addEventListener('click', openRank);
   const openHelpSheet = () => openHelp();
   $('helpLink').addEventListener('click', openHelpSheet);
+  $('helpBtn').addEventListener('click', openHelpSheet);
   $('fxBox').addEventListener('click', openHelpSheet);
   $('fxBox').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openHelpSheet(); }
@@ -4380,16 +4436,22 @@ function init(){
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
   heatMult, heatGain, rollMod, collapseCols,
-  BET_WIN, BET_LOSE, BET_NEED, BET_MIN_HEAT, BET_MS, betMaybeOffer, betStep,
+  BET_WIN, BET_LOSE, BET_NEED, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
+  get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
   bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
   rerollPiece, canReroll, REROLL_COST,
-  evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
+  evFire, pickEvent, MOD_RATES, EVENTS,
+  // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
+  // 只能靠真实调度随机等 —— 排查和截图时不可用。
+  evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
+                      evPending = e; evFire(); return true; }, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
-  syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
+  saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,

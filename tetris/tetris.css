@@ -147,6 +147,7 @@ body{
 .fxbox .bad  b{ color: #ffb4a6 } .fxbox .bad  .fxbar i{ background: #f43f5e }
 .fxbox .good b{ color: #b8f5e4 } .fxbox .good .fxbar i{ background: #5fe0c8 }
 .fxbox .fev  b{ color: #7fe3ff } .fxbox .fev  .fxbar i{ background: #7fe3ff }
+.fxbox .betrow b{ color: #ffd166 } .fxbox .betrow .fxbar i{ background: #ffb703 }
 .fxbox .heat .fxn{ color: var(--ink-soft) } .fxbox .heat .fxv{ color: #ff8a5c }
 .fxbox .rush .fxn{ color: var(--ink-soft) } .fxbox .rush .fxv{ color: #ffd166 }
 /* 320 宽放不下：右栏内容 520px 而盘面只有 420px */
@@ -466,13 +467,20 @@ body.crazy .danger{ background: linear-gradient(180deg, rgba(255,160,50,.36), rg
    （::before 被 FEVER 占着），呼吸只动 opacity，不动 box-shadow，不吃 paint。 */
 body.rushrun .shaker::after{
   content: '';
-  position: absolute; inset: -5px;
-  border: 2px solid rgba(255,193,71,.62);
-  border-radius: 14px;
+  position: absolute; inset: -6px;
+  border: 2.5px solid rgba(255,190,70,.8);
+  border-radius: 15px;
+  /* 外扩暖光 + 往盘面里渗一层。box-shadow 只在这里画一次，
+     动画只动 opacity / transform，都是合成器的活，不会每帧重绘。 */
+  box-shadow: 0 0 24px rgba(255,140,40,.45), inset 0 0 30px rgba(255,120,30,.16);
   pointer-events: none;
-  animation: rushBreath 3.6s ease-in-out infinite alternate;
+  will-change: opacity, transform;
+  animation: rushBreath 1.4s ease-in-out infinite alternate;
 }
-@keyframes rushBreath{ from{ opacity: .45 } to{ opacity: 1 } }
+@keyframes rushBreath{
+  from{ opacity: .58; transform: scale(.996) }
+  to  { opacity: 1;   transform: scale(1.007) }
+}
 /* 狂欢局里分数格的标签改成金色的 SCORE ×1.2 —— 低头看分就确认了，不占新格子 */
 body.rushrun .stat.hi span{ color: #ffd166; }
 
@@ -510,7 +518,7 @@ body.rushrun .stat.hi span{ color: #ffd166; }
   .rushintro span{ font-size: 10.5px; letter-spacing: .06em; }
 }
 @media (prefers-reduced-motion: reduce){
-  body.rushrun .shaker::after{ animation: none; opacity: .8; }
+  body.rushrun .shaker::after{ animation: none; opacity: .85; transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce){ .overrank.up b{ animation: none; } }
@@ -825,6 +833,10 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
   .slot.next canvas{ width: 98px; }
   .stat b{ --stat-fs: 12.5px; }
   .tbtn{ font-size: 10px; padding: 5px 7px; }
+  /* 多了玩法按钮之后，375 及以下顶栏排不下（实测内容 369px、条只有 365px）。
+     收掉图标按钮的文字只留图标，一个省 30 多像素，够了。 */
+  .tbtn-ic span{ display: none; }
+  .tbtn-ic{ padding: 6px 8px; gap: 0; }
 }
 
 /* ════════ 桌面：侧栏竖排，按键收起 ════════ */
@@ -942,6 +954,12 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 }
 .pop b{ display: block; font-weight: 600; }
 /* 道具/压实清出来的行。刻意做得比亲手打出来的素 —— 它不该抢 TETRIS 的风头 */
+/* 梭哈结算。赢的金、输的红，都比普通飘字重一点 */
+.pop.bet b{ font-size: 1.05em; }
+.pop.bet.win b{ color: #ffd166; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 22px rgba(255,193,71,.65); }
+.pop.bet.win i{ color: #ffd166; }
+.pop.bet.lose b{ color: #ff8f7a; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 20px rgba(244,63,94,.6); }
+.pop.bet.lose i{ color: #ff8f7a; }
 .pop.tool b{ color: #9fb4d0; text-shadow: 0 0 10px rgba(159,180,208,.35); }
 .pop.tool i{ color: #6f88a8; }
 /* 类型名固定小号：它是说明，不该跟着分数一起长大抢戏 */
