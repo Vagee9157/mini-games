@@ -8,6 +8,14 @@
 
 // 疯狂版跟标准版同一份代码，靠这个开关分流。页面在加载 tetris.js 之前设它。
 const CRAZY = !!window.TETRIS_CRAZY;
+
+// ── 测试开关：每一局都是狂欢局 ──
+// 打开方式：网址后面加 ?rush=1（关掉就是去掉这个参数）。
+// 也可以把下面这行直接改成 true 写死。
+//
+// 打开时刻意不碰保底计数 —— 既不消耗、也不累加，免得测试局把真实进度搅了。
+// 分数、最高分、累计、今日最佳照常记：它就是一局真的狂欢局，只是不用等。
+const FORCE_RUSH = CRAZY && /[?&]rush=1\b/.test(location.search);
 const NS = CRAZY ? 'crazy' : 'tetris';
 // 所有 localStorage 访问统一走这里，禁止写裸字符串 —— 之前就漏过
 // 内联的 'tetris.muted.v1'（不在常量块里，按常量块改会漏掉）
@@ -1350,7 +1358,7 @@ function endGame(why){
     // 有效局才推进狂欢局的计数、才算今日一局 —— 秒死重开刷不出狂欢局，
     // 也压不低门槛。最佳分不设门槛：打出来了就是打出来了。
     const real = isRealRun();
-    if (real) countRush();
+    if (real && !FORCE_RUSH) countRush();   // 测试模式不推进保底计数
     const d = readDaily();          // readDaily 自己会判断是不是还是同一天
     if (real) d.plays++;
     if (game.score > d.best) d.best = game.score;
@@ -4084,7 +4092,7 @@ function restart(keepRush){
   endRushIntro();                    // 上一局的报幕没放完就重开，先收干净
   // 狂欢局由保底计数决定，不是玩家选的。keepRush 只给「重开当前这局」用，
   // 免得手滑按重开把已经拿到的机会冲掉。
-  game.rush = CRAZY && (keepRush ? game.rush : takeRush());
+  game.rush = FORCE_RUSH || (CRAZY && (keepRush ? game.rush : takeRush()));
   document.body.classList.toggle('rushrun', !!game.rush);
   // 分数格的标签直接写出倍率，跟着 RUSH_MULT 走 —— 写死数字改一次倍率就会过期
   const sl = $('scoreLabel');
@@ -4381,7 +4389,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   evFire, pickEvent, MOD_RATES, EVENTS, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
-  syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,
