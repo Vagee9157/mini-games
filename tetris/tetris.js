@@ -1035,8 +1035,11 @@ function helpSections(){
       { dot: '✦', name: 'FEVER', meta: (FEVER_MS / 1000) + ' 秒 ×' + FEVER_MULT,
         text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减' },
       { dot: '⚄', name: '梭哈', meta: BET_MS / 1000 + ' 秒',
-        text: '消 ' + BET_NEED + ' 行以上且热度 ≥' + BET_MIN_HEAT + ' 时弹出。接了就要在十秒内再消 '
-              + BET_NEED + ' 行 —— 成功热度 ×' + BET_WIN + '，失败减半' },
+        text: '消 ' + BET_OFFER_NEED + ' 行以上或打出 T-spin，且热度 ≥' + BET_MIN_HEAT + ' 时弹出。'
+              + '接了之后这十秒里累计消行，窗口结束按档结算：'
+              + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join(' · ')
+              + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
+              + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
     ]],
     ['狂欢局　' + RUSH_EVERY + ' 局攒一次，今天打得多门槛会降', [
@@ -3617,7 +3620,6 @@ function syncReroll(){
 // 任务也从「消任意一行」提到「消两行以上」—— 前者对会打的人几乎白送，
 // 配上公平赔率就变成「永远接」，跟以前一样不是决策，只是反过来。
 const BET_MS = 10000;
-const BET_WIN  = 2;      // 赢：热度 ×2
 const BET_LOSE = .5;     // 输：热度减半
 // 分档给奖励。为什么高档系数要拉得这么开：奖励挂在热度上，而热度倍率过了
 // 拐点是开方压的，系数的差会被压扁 —— 照「2行×1.8 / 5行×3.0」那组算，
@@ -3694,7 +3696,7 @@ function betAccept(){
   betOffer = 0; betLeft = BET_MS; betLines = 0;
   if (game.run) game.run.bets++;
   betHide();
-  showToast('梭哈！十秒内必须消行');
+  showToast(`梭哈！十秒内消 ${BET_NEED}~${BET_CAP} 行`);
   sfx('tetris', 1.15); buzz([40, 30, 40]);
 }
 
