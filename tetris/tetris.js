@@ -370,11 +370,11 @@ const RUSH_EVERY = 10;         // 基础门槛，今天打得多会往下降，�
 //   难 = 灰线快得多 + 坏事件更密
 //   厚 = 分数倍率给足 + 道具方块翻倍（道具是工具也是分数，给熟练玩家转化率）
 // 拐杖（压实权重、宝箱率、FEVER 保底）一律回到平时水平。
-// ×3 是按机器人 36 局 × 两组 × 三种子的 A/B 反推的：灰线快 82% 把一局砍掉一半，
-// ×2 的时候各分位是 中位 0.65 / p75 0.75 / p90 0.87，净亏；×3 之后
-// 中位 0.98（中等发挥白打一场，所以没有刷它的动机）、p90 1.30（打得好才赚）。
-// 倍率是纯乘在分数上的，不反馈进玩法，所以可以这么直接按比例推。
-const RUSH_MULT  = 3;          // 分数倍率
+// ×3 是「道具消行还不给分」那个年代标的。后来道具消行开始给分，而狂欢局道具
+// 翻倍，它吃到的加成远多于普通局 —— 实测变成普通局的 2.1 倍中位 / 2.8 倍 p75，
+// 普通局没人想打了。配合深局加成一起收到 2.4，模型算下来普通/狂欢 ≈ 0.86：
+// 狂欢局十局才摊上一次，它就该更值，只是不该值到把普通局挤没。
+const RUSH_MULT  = 2.4;        // 分数倍率
 const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它只是纯加分）
 const RUSH_BAD   = 1.5;        // 坏事件权重
 const RUSH_KEY   = nsKey('rush.v1');
@@ -1020,12 +1020,17 @@ function helpSections(){
       ['gold', 'hammer', 'bomb', 'laser'].map(k => ({
         mod: k, name: MOD_HELP.name[k], meta: fmtRate(rate[k]), text: MOD_HELP.mod[k] }))],
     ['事件　开局 ' + (EV_FIRST / 1000) + ' 秒第一次，最密 ' + (EV_MIN / 1000) + ' 秒一次，提前 ' + (EV_WARN / 1000) + ' 秒预告',
-      evOn.concat(evNow).map(evLine)],
+      evOn.concat(evNow).map(evLine).concat([{ dot: '◈', name: '堆到高处时', meta: '',
+        text: EVENTS.filter(e => EV_DEADLY.has(e.key)).map(e => e.name).join(' / ')
+              + ' 不再出现，压实概率翻倍 —— 但暗幕 / 镜像 / 狂风 照旧' }])],
     ['热度　消行注入，停手 ' + (HEAT_TAU / 1000) + ' 秒掉到三分之一', [
       { dot: '◈', name: '注入', meta: '', text: '一行 2 · 两行 5 · 三行 9 · 四行 16 · T-spin 6~26 · 全消 40' },
       { dot: '◈', name: '倍率', meta: '不封顶', text: '热度 24 → ×3　48 → ×5　100 → ×7　160 → ×8.5' },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
       { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
+      { dot: '◈', name: '深局加成', meta: '每 100 行 +' + Math.round(DEEP_STEP * 100) + '%',
+        text: '消行数过 ' + DEEP_FROM + ' 之后，活得越久每一行越值 —— 200 行 ×'
+              + (1 + DEEP_STEP).toFixed(1) + '，400 行 ×' + (1 + DEEP_STEP * 3).toFixed(1) },
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
@@ -2981,9 +2986,25 @@ function crazyOnLock(p){
 // 再乘就过头了。
 const CRAZY_TUNE = 1;
 
+// ── 深局加成 ──
+// 活得越久每一行越值。为什么要有它：狂欢局灰线快 82%，结构上活不长
+// （同样打法 265 行封顶），而普通局能打到 380+ 行。把奖励挂在「已消行数」上，
+// 普通局吃得到而狂欢局吃不满 —— 这是唯一能偏向普通局的杠杆。
+// 拉 levelMult 的曲线没用：狂欢局吃同一条，两边一起涨，比值几乎不动
+// （指数 0.75→1.10 只把比值从 0.61 抬到 0.69，还会误伤低段手感）。
+//
+// 从 DEEP_FROM 行起，每多 100 行每行 +DEEP_STEP：
+//   100行 ×1.0   200行 ×1.2   300行 ×1.4   400行 ×1.6
+const DEEP_FROM = 100;
+const DEEP_STEP = .20;
+function deepMult(){
+  if (!CRAZY) return 1;
+  return 1 + Math.max(0, (game.lines - DEEP_FROM) / 100) * DEEP_STEP;
+}
+
 function crazyScoreMult(){
   if (!CRAZY) return 1;
-  let m = heatMult() * CRAZY_TUNE;
+  let m = heatMult() * CRAZY_TUNE * deepMult();
   if (game.rush) m *= RUSH_MULT;
   if (goldPending) m *= GOLD_MULT;
   if (feverLeft > 0) m *= FEVER_MULT;
@@ -3458,13 +3479,23 @@ function evPeriod(){
   return EV_MIN + (EV_FIRST - EV_MIN) * Math.exp(-game.elapsed / EV_TAU);
 }
 
+// 濒死时排掉的事件。按「会不会直接判死」分，不是按好坏分 ——
+// 原来是「濒死只发好事」，但八个事件里只有压实一个是好的，于是濒死 =
+// 每次事件必定压实，每二十秒白送一次清洞，保命绳成了免死金牌。
+//
+// 这四个在濒死时是真的没得救：冰冻要你多消一次、封锁堵掉一列、
+// 地震平移整堆、瞬落夺走边落边调整。发它们就是耍赖。
+// 暗幕 / 镜像 / 狂风 只是让操作变难，濒死时正该紧张，放回来。
+const EV_DEADLY = new Set(['freeze', 'wall', 'quake', 'slam']);
+
 function pickEvent(){
-  // 濒死时只发好事。这时候再来一发地震就是耍赖，不是难度。
   const safe = stackTopRow() > DANGER_ROW + 3;
-  const pool = EVENTS.filter(e => safe || !e.bad);
-  // 狂欢局里坏事件更密。注意这里不能反过来给好事件加权 ——
-  // 压实是填洞的，加权等于送，那是把难度往下调
-  const wt = (e) => e.w * (game.rush && e.bad ? RUSH_BAD : 1);
+  const pool = EVENTS.filter(e => safe || !EV_DEADLY.has(e.key));
+  // 狂欢局里坏事件更密。安全时不给好事件加权 —— 压实是填洞的，
+  // 加权等于送，那是把难度往下调；只有濒死时才翻倍，当保命绳。
+  const wt = (e) => e.w
+    * (game.rush && e.bad ? RUSH_BAD : 1)
+    * (!safe && !e.bad ? 2 : 1);
   let total = pool.reduce((a, e) => a + wt(e), 0), r = rndFx() * total;
   for (const e of pool){ if ((r -= wt(e)) < 0) return e; }
   return pool[pool.length - 1];
@@ -4466,7 +4497,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
   rerollPiece, canReroll, REROLL_COST,
-  evFire, pickEvent, MOD_RATES, EVENTS,
+  evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
   evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
@@ -4474,6 +4505,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
+  deepMult, DEEP_FROM, DEEP_STEP,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
