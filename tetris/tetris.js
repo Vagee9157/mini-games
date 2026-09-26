@@ -9,15 +9,13 @@
 // 疯狂版跟标准版同一份代码，靠这个开关分流。页面在加载 tetris.js 之前设它。
 const CRAZY = !!window.TETRIS_CRAZY;
 
-// ── 【临时测试态】每一局都是狂欢局 ──
-// 现在默认开着，方便实测：重开、再来一局、新开一局都会走报幕和边框特效。
-// 测完改回正常触发（每 N 局攒一次）时，把这行换成：
-//     const FORCE_RUSH = CRAZY && /[?&]rush=1\b/.test(location.search);
-// 临时想关掉一局的话，网址后面加 ?rush=0。
+// ── 测试开关：每一局都是狂欢局 ──
+// 正常态是关的，狂欢局按保底计数攒（见 takeRush / rushEvery）。
+// 要连着测狂欢局就在网址后面加 ?rush=1。
 //
-// 强制态刻意不碰保底计数 —— 既不消耗也不累加，免得测试局把真实进度搅了。
+// 打开时刻意不碰保底计数 —— 既不消耗也不累加，免得测试局把真实进度搅了。
 // 分数、最高分、累计、今日最佳照常记：它就是真的狂欢局，只是不用等。
-const FORCE_RUSH = CRAZY && !/[?&]rush=0\b/.test(location.search);
+const FORCE_RUSH = CRAZY && /[?&]rush=1\b/.test(location.search);
 const NS = CRAZY ? 'crazy' : 'tetris';
 // 所有 localStorage 访问统一走这里，禁止写裸字符串 —— 之前就漏过
 // 内联的 'tetris.muted.v1'（不在常量块里，按常量块改会漏掉）
