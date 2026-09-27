@@ -4067,10 +4067,31 @@ const KEYMAP = {
   KeyP: 'pause', Escape: 'pause', KeyR: 'restart', KeyM: 'mute', KeyF: 'fullscreen',
 };
 
+// 面板开着的时候键盘不能穿透到棋盘。原来是穿透的 ——
+// 读说明书时按空格会把当前块硬降，按 R 直接重开整局，Esc 更离谱：
+// 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
+// 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
+function topSheet(){
+  for (const id of ['helpSheet', 'rankSheet', 'styleSheet']){
+    const el = $(id);
+    if (el && !el.hidden) return el;
+  }
+  return null;
+}
+
 window.addEventListener('keydown', (e) => {
   const act = KEYMAP[e.code];
   if (!act) return;
   e.preventDefault();
+  const sheet = topSheet();
+  if (sheet){
+    // Esc 关掉它，其它键一律吞掉
+    if (act === 'pause'){
+      if (sheet.id === 'styleSheet') toggleStylePanel(false);
+      else sheet.hidden = true;
+    }
+    return;
+  }
   if (act === 'restart'){ restart(true); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
@@ -4089,6 +4110,7 @@ window.addEventListener('keydown', (e) => {
 }, { passive: false });
 
 window.addEventListener('keyup', (e) => {
+  if (topSheet()) return;
   const act = KEYMAP[e.code];
   if (!act) return;
   if (act === 'left')  release('left');
@@ -4610,7 +4632,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
-  rerollPiece, canReroll, REROLL_COST,
+  rerollPiece, canReroll, REROLL_COST, topSheet,
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
