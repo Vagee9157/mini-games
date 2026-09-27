@@ -179,7 +179,7 @@ const CRAZY_FALL_FLOOR = 200;
 // 快 1.5 倍 —— 局被压到只剩三五分钟。等级要留给分数（levelMult 不封顶），
 // 但难度不该跟着翻倍，所以把重力曲线按同样的比例拉平，让「多少行时多快」
 // 回到原来的手感。
-const CRAZY_FALL_K = 26;
+const CRAZY_FALL_K = 32;
 function gravityFor(lvl){
   if (CRAZY){
     const L = Math.max(1, lvl);
@@ -208,8 +208,8 @@ const CHEST   = 'C';   // 灰线里的宝箱：消掉那一行就开
 // 取消灰线这两个机制就空转了
 // 疯狂版比标准版凶得多。灰线钟走的是绝对时间、跟手速无关，所以它是唯一
 // 真正决定一局多长的旋钮 —— 摊平那一版各档手速全被钉在 9~19 分钟，太久。
-const G_MAX = CRAZY ? 28000 : 45000;     // 开局周期（放慢，把局拉长）
-const G_MIN = CRAZY ?  9000 : 15000;     // 压到这里就不再往下
+const G_MAX = CRAZY ? 36000 : 45000;     // 开局周期（再放慢，少出 <5 分钟的局）
+const G_MIN = CRAZY ?  7000 : 15000;     // 后期压紧一点，别超 20 分钟
 const G_TAU = CRAZY ? 260000 : 300000;   // 衰减时间常数，越大掉得越慢
 const G_LINE_BONUS = 0;      // 消行不再推快难度钟
 
@@ -231,7 +231,9 @@ function garbageClock(){
 // 狂欢局灰线涨得快四分之一 —— 它有 ×1.2 的分数，就得有对应的代价，
 // 否则刷到一局就是白赚。挑灰线钟而不是 level：level 快了 levelMult 跟着涨，
 // 分数反而更高，越平衡越失衡。灰线是纯加压，不直接给分。
-const RUSH_GARBAGE = .55;      // 灰线周期，越小涨得越快
+// .55 → .70：狂欢局中位只有 4.8 分钟、51/90 局不到 5 分钟，够不到 5~20 分的
+// 目标区间。放慢灰线让它活得久一点，顺带能打到更多行。
+const RUSH_GARBAGE = .70;      // 灰线周期，越小涨得越快
 function garbagePeriod(){
   let p = G_MIN + (G_MAX - G_MIN) * Math.exp(-garbageClock() / G_TAU);
   const over = game.level - G_OVER_FROM;
@@ -329,20 +331,20 @@ function addTotal(v){
 // 对照新实测（普通局整局中位 335 万 / 10~15 分 556~1348 万 / 400 行 3861 万）：
 // 一局普通水平落在 烈阳~熔金，打满 10~15 分钟在 炽天~紫微，打到 400 行是 鸿蒙。
 const RANKS = [
-  [300000,    '微光'],
-  [600000,    '星火'],
-  [1000000,   '流焰'],
-  [1800000,   '赤霄'],
-  [3000000,   '烈阳'],
-  [5000000,   '熔金'],
-  [8000000,   '炽天'],
-  [12000000,  '紫微'],
-  [20000000,  '曜极'],
-  [30000000,  '太一'],
+  [1200000,    '微光'],
+  [2400000,    '星火'],
+  [4000000,   '流焰'],
+  [7200000,   '赤霄'],
+  [12000000,   '烈阳'],
+  [20000000,   '熔金'],
+  [32000000,   '炽天'],
+  [48000000,  '紫微'],
+  [80000000,  '曜极'],
+  [120000000,  '太一'],
   // 太一在道家里已经是本源，再往上只能往「天地未开」那头走：
   // 无极生太极 —— 鸿蒙是未分之气，无极是没有边界，都排在太一之前/之上。
-  [40000000,  '鸿蒙'],
-  [50000000,  '无极'],
+  [160000000,  '鸿蒙'],
+  [200000000,  '无极'],
 ];
 // 段位 · 看累计总分。前七档是按「一局 10 万」铺的，实测一局能打三百万，
 // 所以王者二十局就到顶了。已有的阈值不动 —— 往上调等于把已经爬到的人降级，
@@ -350,15 +352,15 @@ const RANKS = [
 // 跟着 ×5（不是 ×10 —— 累计分涨得比单局快，局也变短了）。
 // 按 10~15 分钟一局 800 万算：王者 38 局、荣耀王者 62 局、传奇王者 150 局。
 const CAREER = [
-  [5000000,    '青铜'],
-  [20000000,   '白银'],
-  [45000000,   '黄金'],
-  [90000000,   '铂金'],
-  [150000000,  '钻石'],
-  [220000000,  '星耀'],
-  [300000000,  '王者'],
-  [500000000,  '荣耀王者'],
-  [1200000000, '传奇王者'],
+  [20000000,    '青铜'],
+  [80000000,   '白银'],
+  [180000000,   '黄金'],
+  [360000000,   '铂金'],
+  [600000000,  '钻石'],
+  [880000000,  '星耀'],
+  [1200000000,  '王者'],
+  [2000000000,  '荣耀王者'],
+  [4800000000, '传奇王者'],
 ];
 function tierOf(table, v){
   let hit = null;
@@ -387,7 +389,10 @@ const RUSH_EVERY = 10;         // 基础门槛，今天打得多会往下降，�
 // 狂欢局十局才摊上一次，它就该更值，只是不该值到把普通局挤没。
 // 燃点只在 200 行之后给 +17%，补不平普通局的深局加成（200 行时已经 ×2.28），
 // 所以底薪也要抬。1.8 → 2.2。
-const RUSH_MULT  = 2.2;        // 分数倍率（底薪，爆发交给燃点）
+// 狂欢局也吃上深局加成（基数 1.2）之后，3.0 的底薪叠上去过了头 —— 实测
+// 同时长 1.46~1.74 倍，太压普通局。收到 2.5，落在 1.15~1.45：中段略高，
+// 越深领先越多，形状保留。
+const RUSH_MULT  = 2.5;        // 分数倍率（底薪，爆发交给燃点）
 const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它只是纯加分）
 const RUSH_BAD   = 1.5;        // 坏事件权重
 const RUSH_KEY   = nsKey('rush.v1');
@@ -522,6 +527,10 @@ function clearSave(){
 }
 
 function restoreGame(d){
+  // 先把狂欢局的瞬态清干净（FEVER / 梭哈 / 事件 / 热度）。
+  // 目前只有首屏「接着上次玩」能走到这里，模块状态本来就是初值；
+  // 但这是个隐式前提，哪天续玩入口挪到暂停页，就会带着上一局的 FEVER 复活。
+  crazyReset();
   game.board = d.board;
   game.run = newRun();
   game.queue = d.queue || [];
@@ -1037,8 +1046,15 @@ function helpSections(){
         text: EVENTS.filter(e => EV_DEADLY.has(e.key)).map(e => e.name).join(' / ')
               + ' 不再出现，压实概率翻倍 —— 但暗幕 / 镜像 / 狂风 照旧' }])],
     ['热度　消行注入，停手 ' + (HEAT_TAU / 1000) + ' 秒掉到三分之一', [
-      { dot: '◈', name: '注入', meta: '', text: '一行 2 · 两行 5 · 三行 9 · 四行 16 · T-spin 6~26 · 全消 40' },
-      { dot: '◈', name: '倍率', meta: '不封顶', text: '热度 24 → ×3　48 → ×5　100 → ×7　160 → ×8.5' },
+      // 这两行原来是手写死的，heatGain 整体 ×1.5、拐点 48→90 之后就全错了
+      // （写着「一行 2」实际给 3，写着「热度 100 → ×7」实际 ×9.1）。改成现算。
+      { dot: '◈', name: '注入', meta: '',
+        text: ['一行', '两行', '三行', '四行'].map((s, i) => s + ' ' + heatGain(i + 1, null, false)).join(' · ')
+              + ' · T-spin ' + heatGain(1, 'mini', false) + '~' + heatGain(3, 'tspin', false)
+              + ' · 全消 ' + heatGain(0, null, true) },
+      { dot: '◈', name: '倍率', meta: '不封顶',
+        text: [24, 48, HEAT_KNEE, BURN_FROM]
+              .map(h => '热度 ' + h + ' → ×' + trimZeros(heatMultAt(h, false).toFixed(1))).join('　') },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
       { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
       { dot: '✦', name: '热流', meta: '×' + FLOW_MULT,
@@ -1046,10 +1062,10 @@ function helpSections(){
               + Math.round(FLOW_P[1] * 100) + '%、两行 ' + Math.round(FLOW_P[2] * 100)
               + '%、三行 ' + Math.round(FLOW_P[3] * 100) + '%、四行 ' + Math.round(FLOW_P[4] * 100) + '%' },
       { dot: '◈', name: '深局加成', meta: DEEP_FROM + ' 行起 ×' + DEEP_BASE,
-        text: '只在普通局生效（狂欢局已经有 ×' + RUSH_MULT + '）。过 ' + DEEP_FROM
-              + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +' + DEEP_STEP
-              + ' —— 200 行 ×' + (DEEP_BASE + 1.2 * DEEP_STEP).toFixed(1)
-              + '，400 行 ×' + (DEEP_BASE + 3.2 * DEEP_STEP).toFixed(1) },
+        text: '过 ' + DEEP_FROM + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +'
+              + DEEP_STEP + ' —— 200 行 ×' + (DEEP_BASE + 1.6 * DEEP_STEP).toFixed(1)
+              + '，400 行 ×' + (DEEP_BASE + 3.6 * DEEP_STEP).toFixed(1)
+              + '。狂欢局基数低一档（×' + DEEP_BASE_RUSH + '），它另有 ×' + RUSH_MULT + ' 和燃点' },
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
@@ -1168,7 +1184,7 @@ function fillRunLog(){
 // 阶段感」补一个节点 —— 分数原来只是个一直涨的数字。
 // 关口密一点，一局能多撞几次。大部分只报个数，整数关口才给一句话 ——
 // 每个都配文案的话，说得太满反而不值钱了。
-const MILE_W = [10, 30, 50, 100, 150, 200, 250, 300, 500, 800, 1000, 1500, 2000, 3000];
+const MILE_W = [50, 100, 200, 500, 800, 1000, 1500, 2000, 3000, 5000, 8000, 10000, 15000, 20000];
 const MILE_SAY = {
   10:   '十万',
   100:  '一百万，有点东西',
@@ -2919,18 +2935,23 @@ let heat = 0;
 const BURN_FROM = 200;
 const BURN_K = 1.2;
 
-function heatMult(){
+// 纯函数版：给定热度算倍率，不读当前局的状态。
+// 说明书要拿它举例，而 heatMult 读的是此刻的 heat 和 game.rush ——
+// 用后者渲染说明书，等于把「这一局现在的倍率」当成通用规则写上去。
+function heatMultAt(h, rush){
   if (!CRAZY) return 1;
   // 夹一下负数。现在没有能让 heat 变负的路径（衰减是乘 exp 且低于 .05 归零、
   // 换牌有余额判、赌输是减半），但公式本身没护栏 —— 真漏进来会算出负倍率，
   // 分数直接变负，排查起来毫无线索。
-  const h = heat > 0 ? heat : 0;
+  if (!(h > 0)) h = 0;
   const m = h <= HEAT_KNEE
     ? 1 + h / HEAT_DIV
     : HEAT_A + HEAT_B * Math.sqrt(h - HEAT_KNEE + HEAT_SOFT);
-  if (!game.rush || h <= BURN_FROM) return m;
+  if (!rush || h <= BURN_FROM) return m;
   return m * (1 + (h - BURN_FROM) / BURN_FROM * BURN_K);
 }
+
+function heatMult(){ return heatMultAt(heat, game.rush); }
 
 // 注入量按含金量给，不按行数摊：一次 TETRIS 给 16，拆成四次单行只给 8。
 // 想把倍率烧上去就得打大的。
@@ -3044,7 +3065,9 @@ function crazyOnLock(p){
 // 覆盖一小撮消行，调它们等于顺手改了平衡。
 // 现在是 1：道具/压实消行给分那条已经把整体抬了约 18%（狂欢局 33%），
 // 再乘就过头了。
-const CRAZY_TUNE = 1;
+// 深局加成改完普通局 100 行约 260 万，离 500 万还差 1.9 倍 —— 这个旋钮就是
+// 干这个的：均匀、精确、不牵动任何平衡。两边同乘，所以狂欢局也跟着到 550 万档。
+const CRAZY_TUNE = 1.9;
 
 // ── 深局加成（只给普通局）──
 // 狂欢局比普通局值多少，是三个常数乘出来的：热度 1.97 倍（梭哈连赢 + 道具
@@ -3058,13 +3081,21 @@ const CRAZY_TUNE = 1;
 // 用两局真实对局校准（普通 137 行 82.5 万 / 狂欢 265 行 1331 万），
 // 普通/狂欢 在各水平上的比值：
 //   150行 0.76   200行 0.86   250行 0.95   300行 1.02   383行 1.13
-const DEEP_FROM = 80;
-const DEEP_BASE = 1.8;
+// 80 行 ×1.8 → 40 行 ×3.0：目标改成「100 行要到 500 万档」，而普通局早期太薄
+// （100 行才 151 万，狂欢局 291 万）。把加成提前并加厚，补的正是这一段。
+// 狂欢局不再归零 —— 它也吃深局加成，只是基数低得多（1.2 对 3.0）。
+// 之前给它 0 的后果：同时长下它稳定落后 15%，因为灰线快 43%、同样时间打的
+// 行数少，而普通局那一大块加成它一分吃不到，RUSH_MULT 抬到 3.0 都补不平。
+// 现在差距靠系数拉开，而不是靠「有/没有」。
+const DEEP_FROM = 40;
+const DEEP_BASE = 3.0;
+const DEEP_BASE_RUSH = 1.2;
 const DEEP_STEP = .4;
 let deepSaid = false;
 function deepMult(){
-  if (!CRAZY || game.rush || game.lines < DEEP_FROM) return 1;
-  return DEEP_BASE + (game.lines - DEEP_FROM) / 100 * DEEP_STEP;
+  if (!CRAZY || game.lines < DEEP_FROM) return 1;
+  const base = game.rush ? DEEP_BASE_RUSH : DEEP_BASE;
+  return base + (game.lines - DEEP_FROM) / 100 * DEEP_STEP;
 }
 
 function crazyScoreMult(){
@@ -4572,7 +4603,7 @@ function init(){
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
-  heatMult, heatGain, rollMod, collapseCols, FLOW_MULT, FLOW_P, BURN_FROM, BURN_K,
+  heatMult, heatMultAt, heatGain, rollMod, collapseCols, FLOW_MULT, FLOW_P, BURN_FROM, BURN_K,
   BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
   get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
   bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
@@ -4588,7 +4619,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
-  deepMult, DEEP_FROM, DEEP_STEP,
+  deepMult, DEEP_FROM, DEEP_STEP, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
