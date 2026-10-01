@@ -3068,7 +3068,7 @@ function crazyReset(){
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
-  betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; flowHit = false; beams.length = 0;
+  betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
   delete document.body.dataset.ev;
   document.body.classList.remove('betting');
   const ew = $('evwarn'); if (ew) ew.classList.remove('on');
@@ -3788,6 +3788,10 @@ function syncReroll(){
 // 任务也从「消任意一行」提到「消两行以上」—— 前者对会打的人几乎白送，
 // 配上公平赔率就变成「永远接」，跟以前一样不是决策，只是反过来。
 const BET_MS = 10000;
+// 盘面上的提示只停这么久，之后交给右侧状态框。
+// 十秒的横幅等于十秒看不见方块；但完全不在盘面上露面又容易整局都没注意到它弹过。
+// 三秒是「看得见」和「不碍事」的折中。
+const BET_SHOW = 3000;
 const BET_LOSE = .5;     // 输：热度减半
 // 分档给奖励。为什么高档系数要拉得这么开：奖励挂在热度上，而热度倍率过了
 // 拐点是开方压的，系数的差会被压扁 —— 照「2行×1.8 / 5行×3.0」那组算，
@@ -3809,7 +3813,7 @@ const BET_COOL = 25000;   // 结算之后冷静这么久，别贴脸连弹
 let betLines = 0;         // 接了之后累计消了几行
 const BET_MIN_HEAT = 24;  // 热度太低时赌没意思
 let betCool = 0;
-let betOffer = 0, betLeft = 0;
+let betOffer = 0, betLeft = 0, betShow = 0;
 
 // 弹出。原来是盘面正中偏上一条 291×67 的横幅，压住第 1.8~4 行整整十秒 ——
 // 那正是方块出生之后你还在左右挪、看形状的那一段，等于十秒看不见自己在放什么。
@@ -3821,10 +3825,23 @@ function betMaybeOffer(n, spin){
   if (!CRAZY || betLeft > 0 || betOffer > 0 || betCool > 0) return;
   if (!(n >= BET_OFFER_NEED || spin) || heat < BET_MIN_HEAT) return;
   betOffer = BET_MS;
-  // 挪到余光里就必须给个明确的提示音，不然容易整局都没注意到它弹过
-  if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .34, '梭哈', '右侧可接', 'bet offer', 1.05);
+  betShow = BET_SHOW;
+  const tx = $('betFlashTxt');
+  // 档位表只在盘面上讲得下，侧栏那 64px 塞不进 —— 所以这三秒也是唯一说清规则的机会
+  if (tx) tx.innerHTML = '<b>梭哈</b>十秒内消 ' + BET_NEED + '~' + BET_CAP + ' 行<br>'
+    + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join('　') + '　不足 ' + BET_NEED + ' 行减半'
+    + '<br><i>点这里或右侧「接受」</i>';
+  const el = $('betFlash');
+  if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
   sfx('hold', 1.3); buzz([25, 40, 25]);
   syncFx();
+}
+
+// 盘面提示收掉。接受 / 过期 / 重开都要调，不然它会挂在那儿
+function betFlashHide(){
+  betShow = 0;
+  const el = $('betFlash');
+  if (el){ el.classList.remove('on'); el.setAttribute('aria-hidden', 'true'); }
 }
 
 // 梭哈结算。两条消行路径都要走这里 —— 原来只有正常锁定那条调，
@@ -3873,12 +3890,15 @@ function betAccept(){
 }
 
 function betHide(){
+  betFlashHide();
   document.body.classList.toggle('betting', betLeft > 0);
   syncFx();
 }
 
 function betStep(dt){
   if (betCool > 0) betCool -= dt;
+  // 三秒一到就把盘面让出来，右侧那行照旧走完十秒
+  if (betShow > 0 && (betShow -= dt) <= 0) betFlashHide();
   if (betOffer > 0){
     betOffer -= dt;
     if (betOffer <= 0){ betOffer = 0; betCool = BET_COOL; betHide(); }   // 没理会也冷却
@@ -4616,6 +4636,13 @@ function init(){
     box.addEventListener('touchstart', take, { passive: false });
     box.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
   }
+  // 盘面上那三秒的提示也能直接点 —— 画布本身不接受点击，所以不抢任何操作
+  const bf = $('betFlash');
+  if (bf){
+    const take = (e) => { e.preventDefault(); betAccept(); };
+    bf.addEventListener('touchstart', take, { passive: false });
+    bf.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
+  }
 
   const hs = $('holdSlot');
   hs.addEventListener('keydown', (e) => {
@@ -4671,7 +4698,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
-  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; },
+  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，

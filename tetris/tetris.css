@@ -1159,10 +1159,42 @@ body[data-ev="mirror"] .shaker{ outline: 2px dashed rgba(232,121,249,.55); outli
 /* ── 梭哈 ──
    压成一条横幅摆在顶上。第一版做成居中的大卡片，实测会把下落区整个盖住，
    而它偏偏只在打完大消除、正要接着打的时候出现 —— 最不该挡人的时机。 */
+/* 梭哈弹出时盘面上的三秒提示。
+   比旧横幅窄、贴得更靠上，而且三秒就走 —— 旧的那条 291×67 压在第 1.8~4 行
+   停满十秒，正好盖住你还在挪方块、看形状的那一段。 */
+.betflash{
+  position: absolute;
+  left: 50%; top: 5%;
+  transform: translate(-50%, 0);
+  width: min(90%, 272px);
+  display: none;
+  padding: 8px 12px;
+  border-radius: 12px;
+  text-align: center;
+  background: linear-gradient(120deg, rgba(52,26,72,.94), rgba(24,13,34,.94));
+  border: 1px solid rgba(255,193,71,.62);
+  box-shadow: 0 0 24px rgba(255,160,50,.24), 0 8px 24px rgba(0,0,0,.5);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.betflash.on{ display: block; animation: betflashIn .2s cubic-bezier(.2,.8,.3,1) forwards; }
+.betflash:active{ transform: translate(-50%, 1px); }
+@keyframes betflashIn{
+  from{ opacity: 0; transform: translate(-50%, -8px) scale(.96) }
+  to  { opacity: 1; transform: translate(-50%, 0) scale(1) }
+}
+.betflash-txt{ font-size: 10px; line-height: 1.6; color: var(--ink-soft); }
+.betflash-txt b{
+  font-family: var(--mono); font-size: 13px; letter-spacing: .16em;
+  color: #ffd166; margin-right: 6px;
+}
+.betflash-txt i{ font-style: normal; font-size: 9px; color: rgba(255,209,102,.78); }
+
 /* 赌约进行中：边框常亮提醒「你还欠一次消行」 */
 body.betting .shaker{ outline: 2px solid rgba(255,193,71,.7); outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce){
+  .betflash.on{ animation: none; opacity: 1; }
   .evwarn.on{ animation: none; }
   }
 

@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=4c9f92c7">
+<link rel="stylesheet" href="../tetris/tetris.css?v=d992b29b">
 </head>
 <body>
 <div class="topline"></div>
@@ -114,6 +114,12 @@
 
       <!-- 梭哈。整套机制里唯一需要玩家主动做决定的地方，所以给了一个够大的点击区；
            它只在打出 TETRIS / T-spin 且热度够高时出现，十秒不理会自动作废。 -->
+      <!-- 梭哈弹出时在盘面上停三秒，之后只剩右侧状态框那一行。
+           做成可点的：画布本身不接受点击，所以它不抢任何操作。 -->
+      <div class="betflash" id="betFlash" role="button" tabindex="-1" aria-hidden="true">
+        <span class="betflash-txt" id="betFlashTxt"></span>
+      </div>
+
       <!-- 狂欢局报幕。整局有效所以不做倒计时，只在开局压三秒让你知道这局不一样。 -->
       <div class="rushintro" id="rushIntro" aria-hidden="true">
         <b id="rushIntroName">狂欢局</b><span id="rushIntroSub">更难 · 但分数 ×2</span>
@@ -228,7 +234,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=a483a878"></script>
+<script src="../tetris/tetris.js?v=fe69b041"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
