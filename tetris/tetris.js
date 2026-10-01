@@ -1281,6 +1281,7 @@ function runTitle(r, secs){
   if (r.tspin >= 3)           return ['花活', `${r.tspin} 次 T-SPIN`];
   if (r.rerolls >= 5)         return ['挑食', `换掉了 ${r.rerolls} 块`];
   if (r.tetris >= 8)          return ['板砖工', `${r.tetris} 次四行`];
+  if (r.peak >= HEAT_TIERS[3]) return ['失控', `峰值 ×${r.peak.toFixed(1)}`];
   if (r.peak >= HEAT_TIERS[2]) return ['上头', `峰值 ×${r.peak.toFixed(1)}`];
   if (r.perfect > 0)          return ['干净', '打出过全消'];
   return ['稳', '没什么惊险，也没什么惊喜'];
@@ -1351,10 +1352,13 @@ function scoreFor(n, spin, perfect){
     popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), label, cls,
              st.scale * (hot ? 1.25 : 1));
 
-    // 附加特效按稀有度给：四行和全消横扫一道金光，T-spin 消行从中心爆开一圈紫环。
-    // 两者可以叠（T-spin 打出的全消），但不是必然一起来。
-    if (n === 4 || perfect) sweepRows(lastClearRows, '#ffd166');
+    // 附加特效按稀有度给：四行横扫一道金光，T-spin 消行从中心爆开一圈紫环。
+    // 两者可以叠（T-spin 打出的四行），但不是必然一起来。
+    if (n === 4) sweepRows(lastClearRows, '#ffd166');
     if (spin && n > 0) burstRing(lastClearRows, spin === 'tspin' ? '#ff6bd6' : '#c9a6ff');
+    // 全消单独一套。它原来和四行共用金色扫光 + 同一档震屏，等于没区别 ——
+    // 而全消是整局可能一次都打不出来的东西，稀有度差着量级。
+    if (perfect) perfectFx(py);
 
     const big = n === 4 || spin || perfect;
     if (big) shake(n === 4 || perfect);
@@ -1376,7 +1380,7 @@ function scoreFor(n, spin, perfect){
   // 总是和大消除同时发生，等于永远看不见。两者冲突时让里程碑赢，它更少见。
   checkMilestone();
   if (game.score > game.best){
-    if (game.best > 0 && !bestBeaten){ bestBeaten = true; showToast('破纪录！'); }
+    if (game.best > 0 && !bestBeaten){ bestBeaten = true; recordFx(); }
     game.best = game.score; writeBest(game.best);
   }
   syncStreak();
@@ -2055,6 +2059,34 @@ let sweeps = [];   // { y0, y1, color, t }
 let rings  = [];   // { x, y, color, t }
 const SWEEP_MS = 340, RING_MS = 420;
 
+// 全消：整局可能一次都打不出来的东西，值得一套独占表现。
+// 原来它和四行共用金色扫光 + 同一档震屏，玩家根本分不出来。
+// 四层叠加：整屏白闪 → 全盘自下而上双色扫光 → 中心爆环 → 飘字（走 pop
+// 通道不走 toast，toast 是共享的，紧接着一个 FEVER 就把它顶没了）。
+function perfectFx(py){
+  const el = $('board');
+  if (el){ el.classList.remove('flash-big'); void el.offsetWidth; el.classList.add('flash-big'); }
+  const all = [];
+  for (let y = BUFFER; y < TOTAL_ROWS; y++) all.push(y);
+  sweepRows(all, '#ffffff');
+  sweepRows(all, '#7cf4ff');
+  burstRing(all, '#ffffff');
+  if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .42, '全消', 'PERFECT CLEAR', 'perfect', 1.5);
+  sfx('tetris', 1.5); sfx('level', 2.0);
+  buzz([60, 40, 60, 40, 120]);
+}
+
+// 破纪录：刷分游戏里情绪最高的一下，原来只有一句 showToast ——
+// 而它在对局中途触发，那时 toast 正被消行 / FEVER / 里程碑轮流占用。
+// 改成在分数格本身做文章（那才是玩家盯着的地方）+ 飘字 + 独立音。
+function recordFx(){
+  const box = $('score') && $('score').parentElement;
+  if (box){ box.classList.remove('record'); void box.offsetWidth; box.classList.add('record'); }
+  if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .22, '破纪录', 'NEW BEST', 'record', 1.2);
+  sfx('level', 1.7); buzz([40, 30, 40, 30, 90]);
+  showToast('破纪录！');
+}
+
 function sweepRows(rows, color){
   if (!rows.length || !CELL) return;
   const y0 = Math.max(Math.min(...rows), BUFFER), y1 = Math.max(...rows);
@@ -2296,7 +2328,8 @@ function syncHeat(){
   el.classList.toggle('on', on);
   if (on) el.textContent = '×' + m.toFixed(1);
   // 分档改 data 属性，不逐帧写样式 —— 档位没变就什么都不做
-  const t = !on ? 0 : m < HEAT_TIERS[0] ? 1 : m < HEAT_TIERS[1] ? 2 : m < HEAT_TIERS[2] ? 3 : 4;
+  const t = !on ? 0 : m < HEAT_TIERS[0] ? 1 : m < HEAT_TIERS[1] ? 2
+          : m < HEAT_TIERS[2] ? 3 : m < HEAT_TIERS[3] ? 4 : 5;
   if (t !== heatTier){
     heatTier = t;
     document.body.dataset.heat = t;
@@ -2320,7 +2353,12 @@ function syncStreak(){
   const onB = !!game.b2b && !game.over;
   const onC = game.combo > 0 && !game.over;
   b2b.classList.toggle('on', onB);
-  document.body.classList.toggle('hotcombo', game.combo >= 5 && !game.over);
+  // 原来只有一个 combo>=5 的开关，连 5 次和连 15 次长得一样，
+  // 连击这条线在 5 之后就没追求了。改成三段递进。
+  const cb = game.over ? 0 : game.combo;
+  document.body.classList.toggle('hotcombo',  cb >= 5  && cb < 10);
+  document.body.classList.toggle('hotcombo2', cb >= 10 && cb < 15);
+  document.body.classList.toggle('hotcombo3', cb >= 15);
   cmb.classList.toggle('on', onC);
   if (onC) cmb.textContent = 'COMBO ×' + game.combo;
 }
@@ -2965,7 +3003,11 @@ const DANGER_ROW = 4;            // 堆顶到了这一行（含）算进危险�
 //
 // 旧值 3/6/10 是按平台 ×9.3 标的；衰减放慢后平台到 ×13.6，顶档会常年满格，
 // 徽章和边框就不再传递信息。现在平台落在第 3 档，顶档要超过平台才进。
-const HEAT_TIERS = [4, 8, 14];
+// 四条线 = 五档。原来只有三条线（四档），而第 4 档从 ×14 一直到封顶，
+// 倍率实际能冲到 ×35+ —— 实测截图里 ×8.5 和 ×35 的盘面几乎一模一样，
+// 从 ×14 往上爬那一段在屏幕上没有任何回报。
+// 加一条 22 的线，让顶档真的是「顶」。
+const HEAT_TIERS = [4, 8, 14, 22];
 const HEAT_TAU = 135000;
 const HEAT_DIV = 12;      // 拐点之前：倍率 = 1 + heat / HEAT_DIV
 // 拐点之后改走平方根。原来是一条直线，一局打长了热度能压到 160 上下，
@@ -3425,8 +3467,16 @@ function fillAt(p){
   }
   if (!n) return;
   staticDirty = true; needsDraw = true;
+  // 专属表现：被灌的那一段自上而下扫一道绿光（像灌水），配上行音。
+  // 原来只有通用的 boom 碎屑 + shake，和重锤一模一样 —— 而两者效果相反，
+  // 一个把堆压矮、一个把洞填平，玩家分不出刚才发生了什么。
+  const ys = [];
+  for (const x of cols) for (let y = bottom[x] + 1; y < TOTAL_ROWS; y++) ys.push(y);
+  if (ys.length) sweepRows(ys, '#8ef5c0');
   clearFullNow();            // 填满的行要正常消掉（冻结行、梭哈计数都走这里）
-  shake(false); sfx('drop', .66); buzz(40);
+  shake(false);
+  sfx('drop', .66); sfx('level', .9);
+  buzz([30, 20, 50]);
 }
 
 // 让这几列里的格子落下去填掉下方的空洞。
@@ -3744,6 +3794,10 @@ function doFreeze(){
   const y = rows[(rndFx() * Math.min(rows.length, 6)) | 0];   // 从最上面几行里挑，别冻在深处看不见
   for (let x = 0; x < COLS; x++) if (game.board[y][x]) game.board[y][x] = FROZEN;
   staticDirty = true; needsDraw = true;
+  // 原来冻完一声不响，只有通用的事件音 —— 玩家不知道是哪一行被冻了。
+  // 给那一行一道霜白扫过，位置就讲清楚了。
+  sweepRows([y], '#bfe9ff');
+  sfx('lock', 1.6);
   return true;
 }
 
@@ -3754,7 +3808,13 @@ function crazyThaw(rows){
     burstRow(y);
   }
   staticDirty = true; needsDraw = true;
-  showToast('冰裂！再消一次才掉');
+  // 「行凑满了却不消」是全游戏最容易被当成 bug 的瞬间，解释必须看得见。
+  // 原来走 showToast，而 toast 是共享通道 —— 解冻往往和消行同时发生，
+  // 那一下正好会被消行的 toast 顶掉，等于没解释。改走 pop。
+  if (CELL && rows.length){
+    const py = (rows.reduce((a, b) => a + b, 0) / rows.length - BUFFER + .5) * CELL;
+    popScore(CELL * COLS / 2, py, '冰裂', '再消一次才掉', 'thaw', 1.05);
+  }
   sfx('rotate', .72); buzz([25, 20, 25]);
 }
 
@@ -3816,6 +3876,7 @@ function evFire(){
   if (e.key === 'fill'   && !doFill())   return;    // 没洞可填，当没发生
   if (e.key === 'freeze' && !doFreeze()) return;    // 空盘冻不了，当没发生
   if (e.key === 'wall'   && !doWall())   return;
+  if (e.key === 'calm'){ sfx('hold', .7); sweepRows([TOTAL_ROWS - 1], '#5fe0c8'); }
   if (e.ms > 0){
     evActive = e; evLeft = e.ms;
     document.body.dataset.ev = e.key; staticDirty = true; needsDraw = true;
@@ -3869,6 +3930,9 @@ function doCompact(){
   holes.sort((a, b) => b[1] - a[1]);
   collapseCols(new Set(holes.slice(0, COMPACT_COLS).map(v => v[0])));
   shake(false);
+  // 原来只有一下震屏，连音都没有 —— 有利事件的表现一直弱于有害事件，
+  // 玩家潜意识会学成「事件 = 要倒霉」，哪怕权重已经接近对半。
+  sfx('drop', .85); buzz([30, 20, 30]);
 }
 
 // 填实：把堆里的洞直接补成实心格。
@@ -3891,16 +3955,23 @@ function doFill(){
   if (!spots.length) return false;
   // 先填靠下的：底下的行离凑满最近，填那儿最可能当场消掉
   spots.sort((a, b) => b[1] - a[1]);
-  for (const [x, y] of spots.slice(0, FILL_MAX)) game.board[y][x] = GARBAGE;
+  const used = spots.slice(0, FILL_MAX);
+  for (const [x, y] of used){ game.board[y][x] = GARBAGE; boom(x, y, '#8fd3f4'); }
   staticDirty = true; needsDraw = true;
+  // 和灌注区分：灌注是绿色、自上而下扫（你自己选的位置）；
+  // 填实是蓝色、被填的那几行同时闪（随机全盘，不是你挑的）
+  sweepRows(used.map(v => v[1]), '#8fd3f4');
   clearFullNow();
   shake(false);
+  sfx('lock', 1.25); buzz([25, 20, 25]);
   return true;
 }
 
 // 缓流：灰线暂停。不加分不消洞，纯粹给你一段喘息去整理盘面 ——
 // 它的价值随你堆得多高而变，堆得越险越值钱，所以不是白送。
 const evCalm = () => CRAZY && evActive && evActive.key === 'calm';
+// 缓流原来只有一圈边框换色，太含蓄 —— 它的价值（灰线停了）恰恰体现在
+// 那根预警条上，所以表现就该做在预警条上：停住 + 变青 + 一声「停」。
 
 const evBlackout = () => CRAZY && evActive && evActive.key === 'blackout';
 // 镜像：左右键对调。挂在 press 上，DAS 连发也跟着换向
@@ -4899,6 +4970,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
   evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
                       evPending = e; evFire(); return true; }, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
+  perfectFx, recordFx,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,

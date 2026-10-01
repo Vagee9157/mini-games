@@ -984,6 +984,28 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 .pop.bet.lose b{ color: #ff8f7a; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 20px rgba(244,63,94,.6); }
 .pop.bet.lose i{ color: #ff8f7a; }
 .pop.tool b{ color: #9fb4d0; text-shadow: 0 0 10px rgba(159,180,208,.35); }
+/* 全消：整局可能一次都打不出来，飘字要压得住场 */
+.pop.perfect b{
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0,0,0,.7), 0 0 30px rgba(124,244,255,.9), 0 0 60px rgba(124,244,255,.5);
+  letter-spacing: .22em;
+}
+.pop.perfect i{ color: #7cf4ff; letter-spacing: .3em; }
+/* 破纪录 */
+.pop.record b{ color: #ffd166; text-shadow: 0 2px 12px rgba(0,0,0,.7), 0 0 26px rgba(255,193,71,.8); }
+.pop.record i{ color: #ffb703; letter-spacing: .24em; }
+/* 冰裂：行凑满了却不消，这句话必须看得见 */
+.pop.thaw b{ color: #bfe9ff; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 20px rgba(191,233,255,.7); }
+.pop.thaw i{ color: #8fd3f4; }
+
+/* 破纪录时分数格本身高亮回弹 —— 那才是玩家盯着的地方 */
+.stat.record{ animation: recordPop .7s cubic-bezier(.2,.8,.3,1); }
+@keyframes recordPop{
+  0%  { transform: scale(1);    box-shadow: 0 0 0 rgba(255,193,71,0); }
+  28% { transform: scale(1.14); box-shadow: 0 0 22px rgba(255,193,71,.75); border-color: rgba(255,193,71,.9); }
+  100%{ transform: scale(1);    box-shadow: 0 0 0 rgba(255,193,71,0); }
+}
+@media (prefers-reduced-motion: reduce){ .stat.record{ animation: none; } }
 .pop.tool i{ color: #6f88a8; }
 /* 类型名固定小号：它是说明，不该跟着分数一起长大抢戏 */
 .pop i{
@@ -1083,6 +1105,12 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
   color: #fff; background: rgba(255,92,92,.28); border: 1px solid rgba(255,120,80,.85);
   animation: heatBeat .7s ease-in-out infinite;
 }
+/* 第 5 档：从 ×22 起。顶档要让人知道自己已经不正常了 */
+.badge.heat[data-tier="5"]{
+  color: #fff; background: rgba(255,60,120,.34); border: 1px solid rgba(255,90,140,.95);
+  animation: heatBeat .42s ease-in-out infinite, heatHue 1.6s linear infinite;
+  text-shadow: 0 0 10px rgba(255,120,160,.9);
+}
 @keyframes heatBeat{ 0%,100%{ transform: scale(1) } 50%{ transform: scale(1.12) } }
 
 /* ── 边框 = 热度计 ──
@@ -1094,6 +1122,11 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
    这一层只负责动画，因为 animation 不在内联里。 */
 body[data-heat="3"] .board-aura{ animation: auraPulse 1.5s ease-in-out infinite; }
 body[data-heat="4"] .board-aura{ animation: auraPulse .8s ease-in-out infinite, heatHue 3.2s linear infinite; }
+/* 第 5 档：光晕更亮、脉动更快、色相转得更凶 */
+body[data-heat="5"] .board-aura{
+  animation: auraPulse .5s ease-in-out infinite, heatHue 1.4s linear infinite;
+  opacity: 1;
+}
 @keyframes heatHue{ from{ filter: hue-rotate(0deg) } to{ filter: hue-rotate(360deg) } }
 
 /* ── 事件预告 ── */
@@ -1159,6 +1192,9 @@ body[data-ev="mirror"] .shaker{ outline: 2px dashed rgba(232,121,249,.55); outli
    狂欢局那圈金色都区分得开。有利事件要让人一眼看出「这次是好事」。 */
 body[data-ev="calm"] .shaker{ outline: 2px solid rgba(95,224,200,.6); outline-offset: 3px; }
 body[data-ev="calm"] #board{ filter: saturate(1.08); }
+/* 缓流：预警条停住并变青。它的价值就是「灰线停了」，表现就该做在那根条上 */
+body[data-ev="calm"] .gwarn i{ background: #5fe0c8 !important; animation: none !important; }
+body[data-ev="calm"] .gwarn{ box-shadow: 0 0 10px rgba(95,224,200,.5); }
 
 /* ── 梭哈 ──
    压成一条横幅摆在顶上。第一版做成居中的大卡片，实测会把下落区整个盖住，
@@ -1208,7 +1244,9 @@ body.betting .shaker{ outline: 2px solid rgba(255,193,71,.7); outline-offset: 3p
   .pop{ animation-duration: .01s; }
   .badge.heat[data-tier="4"]{ animation: none; }
   body[data-heat="3"] .board-aura,
-  body[data-heat="4"] .board-aura{ animation: none; opacity: .55; filter: none; }
+  body[data-heat="4"] .board-aura,
+  body[data-heat="5"] .board-aura{ animation: none; opacity: .55; filter: none; }
+  .badge.heat[data-tier="5"]{ animation: none; }
 }
 
 /* 音乐 / 音效 三选一 */
@@ -1280,8 +1318,28 @@ body.hotcombo .board-aura{
   animation: auraPulse 0.85s ease-in-out infinite;
 }
 body.hotcombo .badge.cmb{ box-shadow: 0 0 14px rgba(34,211,238,.55); }
+/* 连击 10+ / 15+：光晕一段比一段急，徽章一段比一段亮 */
+body.hotcombo2 .board-aura{
+  --au-ring: rgba(170,245,255,.95);
+  --au-glow: rgba(34,211,238,.6);
+  animation: auraPulse .6s ease-in-out infinite;
+}
+body.hotcombo2 .badge.cmb{ box-shadow: 0 0 20px rgba(34,211,238,.8); }
+body.hotcombo3 .board-aura{
+  --au-ring: rgba(255,255,255,.98);
+  --au-glow: rgba(124,244,255,.75);
+  animation: auraPulse .4s ease-in-out infinite, heatHue 2s linear infinite;
+  opacity: 1;
+}
+body.hotcombo3 .badge.cmb{
+  box-shadow: 0 0 26px rgba(124,244,255,.95);
+  animation: heatBeat .5s ease-in-out infinite;
+}
 
 @media (prefers-reduced-motion: reduce){
   body.fever .shaker::before{ animation: none; opacity: .5; }
-  body.hotcombo .board-aura{ animation: none; opacity: .7; }
+  body.hotcombo .board-aura,
+  body.hotcombo2 .board-aura,
+  body.hotcombo3 .board-aura{ animation: none; opacity: .7; }
+  body.hotcombo3 .badge.cmb{ animation: none; }
 }
