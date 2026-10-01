@@ -1079,11 +1079,16 @@ function helpSections(){
         text: '每次消行有概率把该次注入翻 ' + FLOW_MULT + ' 倍，行数越少概率越高 —— 单行 '
               + Math.round(FLOW_P[1] * 100) + '%、两行 ' + Math.round(FLOW_P[2] * 100)
               + '%、三行 ' + Math.round(FLOW_P[3] * 100) + '%、四行 ' + Math.round(FLOW_P[4] * 100) + '%' },
-      { dot: '◈', name: '深局加成', meta: DEEP_FROM + ' 行起 ×' + DEEP_BASE,
-        text: '过 ' + DEEP_FROM + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +'
-              + DEEP_STEP + ' —— 200 行 ×' + (DEEP_BASE + 1.6 * DEEP_STEP).toFixed(1)
-              + '，400 行 ×' + (DEEP_BASE + 3.6 * DEEP_STEP).toFixed(1)
-              + '。狂欢局基数低一档（×' + DEEP_BASE_RUSH + '），它另有 ×' + RUSH_MULT + ' 和燃点' },
+      // 两边的曲线形状不一样，所以分开讲，而且交叉点必须现算 —— 它是
+      // DEEP_BASE / DEEP_BASE_RUSH / 两个步长 / RUSH_MULT 五个数的交点，
+      // 写死任何一个数字，改一次常量就会过期。
+      { dot: '◈', name: '深局加成', meta: DEEP_FROM + ' 行起',
+        text: '普通局过 ' + DEEP_FROM + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +'
+              + DEEP_STEP + '（200 行 ×' + (DEEP_BASE + 1.6 * DEEP_STEP).toFixed(1)
+              + '，400 行 ×' + (DEEP_BASE + 3.6 * DEEP_STEP).toFixed(1) + '），越打越值。'
+              + '狂欢局是固定的 ×' + (DEEP_BASE_RUSH * RUSH_MULT).toFixed(2).replace(/\.?0+$/, '')
+              + '，不随行数涨 —— 前中段比普通局高，'
+              + deepCrossLines() + ' 行之后被普通局反超' },
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
@@ -2922,7 +2927,17 @@ const DANGER_ROW = 4;            // 堆顶到了这一行（含）算进危险�
 //
 // 不设上限是故意的：打得够猛它就该失控。实际会被衰减自然拉住，
 // 平衡点约等于「注入速率 × 45 秒」，所以上限由手速决定，不由代码决定。
-const HEAT_TAU = 45000;   // 衰减时间常数：停手 45 秒掉到三分之一
+// 45s → 135s（衰减放慢到三分之一）。
+//
+// 改这个要知道一件事：热度是**平衡点**不是存量。稳态 ≈ 注入速率 × 衰减时间，
+// 所以衰减放慢 3 倍，平台也跟着涨 3 倍 —— 实测热度 103 的局会稳在 ~309，
+// 倍率从 ×9.3 抬到 ×13.6。它一个人就越过了「要摸到 ×10」那个目标，
+// 所以原本打算一起上的倍率曲线改动（HEAT_DIV 12→10 / 拐点 90→110）撤回了，
+// 两个叠一起是 ×17.8，热度会常年停在拐点以上很远，曲线那头基本失去意义。
+//
+// 代价是「停手就掉」的压力大幅减弱：停 60 秒现在只剩 27，改后还剩 198。
+// 这是明知的取舍 —— 辛苦攒起来的热度转眼蒸发，是实际玩下来最挫败的一点。
+const HEAT_TAU = 135000;
 const HEAT_DIV = 12;      // 拐点之前：倍率 = 1 + heat / HEAT_DIV
 // 拐点之后改走平方根。原来是一条直线，一局打长了热度能压到 160 上下，
 // 倍率直接 ×14.5 —— 分数不是被关卡撑起来的，是被这条直线撑起来的，
@@ -3118,13 +3133,35 @@ const CRAZY_TUNE = 1.9;
 // 现在差距靠系数拉开，而不是靠「有/没有」。
 const DEEP_FROM = 40;
 const DEEP_BASE = 3.0;
-const DEEP_BASE_RUSH = 1.2;
-const DEEP_STEP = .4;
+// 狂欢局的基数从 1.2 提到 1.87（乘上 RUSH_MULT 2.5 后是 4.68），
+// 换来的是它不再随深度往上爬 —— 见下面 DEEP_STEP_RUSH。
+const DEEP_BASE_RUSH = 1.87;
+// 步长分模式，这是 v4 的主线改动。
+//
+// 原来两边步长都是 .4，但狂欢局那份还要再 ×2.5，于是差距随行数单调拉大：
+// 40 行持平、200 行 1.26 倍、600 行 1.64 倍 —— 正好是反的。
+// 想要的是「普通局是成长型，越深越高；狂欢局是爆发型，容易高但不随深度放大」。
+//
+// 现在普通局步长加倍、狂欢局归零，两条线在 250 行交叉：
+//   40行 1.56×　100行 1.34×　200行 1.09×　250行 持平　400行 0.80×　600行 0.63×
+// 注意狂欢局在实际会发生的那一段反而比以前更强（100 行从 1.11 提到 1.34），
+// 它只是把深局让给普通局 —— 而且它灰线快 43%，本来就更难活到 250 行。
+const DEEP_STEP = .8;
+const DEEP_STEP_RUSH = 0;
 let deepSaid = false;
+// 两条深局曲线的交叉行数，给说明书用。解 DEEP_BASE + (L-40)/100*DEEP_STEP
+// = DEEP_BASE_RUSH * RUSH_MULT；步长为 0 或永不相交时回 0，调用方自己兜。
+function deepCrossLines(){
+  const target = DEEP_BASE_RUSH * RUSH_MULT - DEEP_BASE;
+  if (DEEP_STEP <= DEEP_STEP_RUSH) return 0;
+  return Math.round(DEEP_FROM + target / (DEEP_STEP - DEEP_STEP_RUSH) * 100);
+}
+
 function deepMult(){
   if (!CRAZY || game.lines < DEEP_FROM) return 1;
   const base = game.rush ? DEEP_BASE_RUSH : DEEP_BASE;
-  return base + (game.lines - DEEP_FROM) / 100 * DEEP_STEP;
+  const step = game.rush ? DEEP_STEP_RUSH : DEEP_STEP;
+  return base + (game.lines - DEEP_FROM) / 100 * step;
 }
 
 function crazyScoreMult(){
@@ -4144,7 +4181,7 @@ window.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (act === 'restart'){ restart(true); return; }
+  if (act === 'restart'){ restart(); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
   if (act === 'fullscreen'){ toggleGameMode(); return; }
@@ -4383,12 +4420,21 @@ function resumeLoop(){
   if (!rafId) rafId = requestAnimationFrame(tick);
 }
 
-function restart(keepRush){
+function restart(){
   clearSave();
   endRushIntro();                    // 上一局的报幕没放完就重开，先收干净
-  // 狂欢局由保底计数决定，不是玩家选的。keepRush 只给「重开当前这局」用，
-  // 免得手滑按重开把已经拿到的机会冲掉。
-  game.rush = FORCE_RUSH || (CRAZY && (keepRush ? game.rush : takeRush()));
+  // 狂欢局由局末掷骰 + 保底计数决定，不是玩家选的。
+  //
+  // 任何重开都走一次兑现 —— 开始 / 再来一局 / 顶栏重开 / 键盘 R，不分死没死。
+  //
+  // 曾经有个 keepRush 例外，意思是「正打着狂欢局时按重开别把机会冲掉」。
+  // 它带来一个不显眼的洞：结算页上顶栏那个「重开」也走 keepRush，于是习惯
+  // 按它的人永远兑现不掉，掷出来的机会一直挂在 rush.next.v1 里，打多少局都
+  // 见不到狂欢局。保底也救不了 —— 问题不在掷不中，在中了兑不掉。
+  //
+  // 取消这个例外的代价：正打着狂欢局时按重开会把它丢掉。但掷骰在局末，
+  // 重开不会重掷，所以只会丢、刷不出来。
+  game.rush = FORCE_RUSH || (CRAZY && takeRush());
   document.body.classList.toggle('rushrun', !!game.rush);
   // 分数格的标签直接写出倍率，跟着 RUSH_MULT 走 —— 写死数字改一次倍率就会过期
   const sl = $('scoreLabel');
@@ -4570,9 +4616,8 @@ function init(){
   syncMusic();
 
   // 必须包一层：addEventListener 会把 Event 当第一个参数传进去，
-  // restart(event) 的 !!event 是 true，每次普通重开都会变成每日挑战
-  $('startBtn').addEventListener('click', () => restart(false));
-  $('againBtn').addEventListener('click', () => restart(false));
+  $('startBtn').addEventListener('click', () => restart());
+  $('againBtn').addEventListener('click', () => restart());
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
   const openHelpSheet = () => openHelp();
@@ -4603,7 +4648,7 @@ function init(){
   $('rankSheet').addEventListener('click', (e) => { if (e.target === $('rankSheet')) closeRank(); });
   $('resumeBtn').addEventListener('click', togglePause);
   $('pauseBtn').addEventListener('click', togglePause);
-  $('restartBtn').addEventListener('click', () => restart(true));
+  $('restartBtn').addEventListener('click', () => restart());
   $('muteBtn').addEventListener('click', toggleMute);
   $('skinBtn').addEventListener('click', () => toggleStylePanel());
   $('skinDone').addEventListener('click', () => toggleStylePanel(false));
@@ -4711,7 +4756,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
-  deepMult, DEEP_FROM, DEEP_STEP, DEEP_BASE, DEEP_BASE_RUSH,
+  deepMult, deepCrossLines, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
