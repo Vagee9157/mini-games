@@ -2204,6 +2204,12 @@ function flashEvent(e){
 
 function fxRows(){
   const out = [];
+  // 待接受的梭哈排在最前，而且带一个真按钮 —— 它是唯一要你当场动手的东西。
+  // v 写固定文案不写倒计时：倒计时交给下面那根条，否则每帧都在重建 innerHTML。
+  if (betOffer > 0){
+    out.push({ n: '梭哈', v: '×' + BET_TIERS[0][1] + '~' + BET_TIERS[BET_TIERS.length - 1][1],
+               k: 'betoffer', p: betOffer / BET_MS, go: '接受' });
+  }
   // 梭哈排第一：它是唯一有硬时限、且要你当场做事的东西
   if (betLeft > 0){
     const m = betMult(betLines);
@@ -2235,6 +2241,7 @@ function syncFx(){
       el.className = 'fxs' + (r ? ' ' + r.k : '');
       el.innerHTML = r
         ? `<div class="fxl"><b class="fxn">${r.n}</b><b class="fxv">${r.v}</b></div>`
+          + (r.go ? `<button class="fxgo" type="button">${r.go}</button>` : '')
           + (r.p == null ? '' : '<span class="fxbar"><i></i></span>')
         : '';
     }
@@ -3804,16 +3811,20 @@ const BET_MIN_HEAT = 24;  // 热度太低时赌没意思
 let betCool = 0;
 let betOffer = 0, betLeft = 0;
 
+// 弹出。原来是盘面正中偏上一条 291×67 的横幅，压住第 1.8~4 行整整十秒 ——
+// 那正是方块出生之后你还在左右挪、看形状的那一段，等于十秒看不见自己在放什么。
+// 调透明度救不了：背后是彩色方块，前面是金字加亮黄按钮，调到能看见方块的程度
+// 文字自己也糊了，而且那个按钮照样吃掉下面的点击。
+// 现在盘面上只闪一次飘字（走消行飘字那条通道，不到一秒自己飘走，全程不挡），
+// 「接受」挪进右侧状态框 —— 那儿本来就是机制状态区，接了之后的进度条也在那儿。
 function betMaybeOffer(n, spin){
   if (!CRAZY || betLeft > 0 || betOffer > 0 || betCool > 0) return;
   if (!(n >= BET_OFFER_NEED || spin) || heat < BET_MIN_HEAT) return;
   betOffer = BET_MS;
-  // 文案从档位表现算，改数值不用回来改字
-  const tx = $('allinTxt');
-  if (tx) tx.innerHTML = '<b>梭哈</b>十秒内消 ' + BET_NEED + '~' + BET_CAP + ' 行<br>'
-    + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join('　') + '　不足 ' + BET_NEED + ' 行减半';
-  const el = $('allin');
-  if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
+  // 挪到余光里就必须给个明确的提示音，不然容易整局都没注意到它弹过
+  if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .34, '梭哈', '右侧可接', 'bet offer', 1.05);
+  sfx('hold', 1.3); buzz([25, 40, 25]);
+  syncFx();
 }
 
 // 梭哈结算。两条消行路径都要走这里 —— 原来只有正常锁定那条调，
@@ -3862,9 +3873,8 @@ function betAccept(){
 }
 
 function betHide(){
-  const el = $('allin');
-  if (el){ el.classList.remove('on'); el.setAttribute('aria-hidden', 'true'); }
   document.body.classList.toggle('betting', betLeft > 0);
+  syncFx();
 }
 
 function betStep(dt){
@@ -4545,9 +4555,15 @@ function init(){
   const openHelpSheet = () => openHelp();
   $('helpLink').addEventListener('click', openHelpSheet);
   $('helpBtn').addEventListener('click', openHelpSheet);
-  $('fxBox').addEventListener('click', openHelpSheet);
+  // 点状态框开说明书，但点里面的「接受」不算 —— 两个监听器挂在同一个节点上，
+  // 按注册顺序跑，接受那条的 stopPropagation 拦不住先注册的这条（它已经执行完了），
+  // 所以判断得写在这头。
+  $('fxBox').addEventListener('click', (e) => { if (!e.target.closest('.fxgo')) openHelpSheet(); });
   $('fxBox').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openHelpSheet(); }
+    if (e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      if (e.target.closest('.fxgo')) betAccept(); else openHelpSheet();
+    }
   });
   const closeHelp = () => { $('helpSheet').hidden = true; };
   $('helpDone').addEventListener('click', closeHelp);
@@ -4589,11 +4605,16 @@ function init(){
   }
 
   // 点按走上面的映射表（touch 优先），这里只补键盘可达性
-  const ag = $('allinGo');
-  if (ag){
-    const take = (e) => { e.preventDefault(); betAccept(); };
-    ag.addEventListener('touchstart', take, { passive: false });
-    ag.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
+  // 接受按钮是 syncFx 用 innerHTML 重建出来的，挂不住监听器，所以走事件委托。
+  // 必须 stopPropagation：fxBox 自己是 role=button，冒上去会打开说明书。
+  const box = $('fxBox');
+  if (box){
+    const take = (e) => {
+      if (!e.target.closest('.fxgo')) return;
+      e.preventDefault(); e.stopImmediatePropagation(); betAccept();
+    };
+    box.addEventListener('touchstart', take, { passive: false });
+    box.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
   }
 
   const hs = $('holdSlot');

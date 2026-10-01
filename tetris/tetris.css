@@ -148,6 +148,26 @@ body{
 .fxbox .good b{ color: #b8f5e4 } .fxbox .good .fxbar i{ background: #5fe0c8 }
 .fxbox .fev  b{ color: #7fe3ff } .fxbox .fev  .fxbar i{ background: #7fe3ff }
 .fxbox .betrow b{ color: #ffd166 } .fxbox .betrow .fxbar i{ background: #ffb703 }
+/* 待接受的梭哈：这一行要能被点中，所以不吃 .fxs 那个 22px 的固定高 */
+.fxbox .betoffer{ height: auto; }
+.fxbox .betoffer b{ color: #ffd166 }
+.fxbox .betoffer .fxbar i{ background: #ffb703 }
+.fxbox .fxgo{
+  display: block; width: 100%;
+  margin: 3px 0 2px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  color: #241503;
+  background: linear-gradient(180deg, #ffd980, #ffb020);
+  border: 0; border-radius: 7px;
+  /* 侧栏只有 64px 宽，高度就得给够 —— 这个键十秒就没，点不中等于白给 */
+  min-height: 30px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.fxbox .fxgo:active{ transform: translateY(1px); }
+/* 盘面上那一下提示：跟梭哈结算共用飘字样式，只是换个颜色钩子 */
+.pop.bet.offer b{ color: #ffd166; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 22px rgba(255,193,71,.6); }
+.pop.bet.offer i{ color: #ffb703; }
 .fxbox .heat .fxn{ color: var(--ink-soft) } .fxbox .heat .fxv{ color: #ff8a5c }
 .fxbox .rush .fxn{ color: var(--ink-soft) } .fxbox .rush .fxv{ color: #ffd166 }
 /* 320 宽放不下：右栏内容 520px 而盘面只有 420px */
@@ -1139,46 +1159,12 @@ body[data-ev="mirror"] .shaker{ outline: 2px dashed rgba(232,121,249,.55); outli
 /* ── 梭哈 ──
    压成一条横幅摆在顶上。第一版做成居中的大卡片，实测会把下落区整个盖住，
    而它偏偏只在打完大消除、正要接着打的时候出现 —— 最不该挡人的时机。 */
-.allin{
-  position: absolute;
-  left: 50%; top: 9%;
-  transform: translate(-50%, 0) scale(.94);
-  width: min(94%, 300px);
-  display: none;
-  align-items: center; gap: 10px;
-  padding: 7px 8px 7px 12px;
-  border-radius: 13px;
-  background: linear-gradient(120deg, rgba(52,26,72,.95), rgba(24,13,34,.95));
-  border: 1px solid rgba(255,193,71,.62);
-  box-shadow: 0 0 24px rgba(255,160,50,.24), 0 8px 24px rgba(0,0,0,.5);
-}
-.allin.on{ display: flex; animation: allinIn .2s cubic-bezier(.2,.8,.3,1) forwards; }
-@keyframes allinIn{ from{ opacity:0; transform: translate(-50%,-8px) scale(.94) } to{ opacity:1; transform: translate(-50%,0) scale(1) } }
-.allin-txt{ flex: 1; font-size: 10px; line-height: 1.55; color: var(--ink-soft); text-align: left; }
-.allin-txt b{
-  font-family: var(--mono); font-size: 13px; letter-spacing: .16em;
-  color: #ffd166; margin-right: 6px;
-}
-.allin-go{
-  flex: none;
-  font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
-  color: #241503;
-  background: linear-gradient(180deg, #ffd980, #ffb020);
-  border: 0; border-radius: 999px;
-  /* 44px 是能稳稳点中的下限，这个键十秒就消失，点不中等于白给 */
-  min-height: 44px;
-  padding: 0 20px;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.allin-go:active{ transform: translateY(1px); }
 /* 赌约进行中：边框常亮提醒「你还欠一次消行」 */
 body.betting .shaker{ outline: 2px solid rgba(255,193,71,.7); outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce){
   .evwarn.on{ animation: none; }
-  .allin.on{ animation: none; opacity: 1; }
-}
+  }
 
 @media (prefers-reduced-motion: reduce){
   .shaker.shake, .shaker.shake-big{ animation: none; }
