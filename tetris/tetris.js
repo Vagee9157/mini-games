@@ -1258,7 +1258,7 @@ function runTitle(r, secs){
   if (r.tspin >= 3)           return ['花活', `${r.tspin} 次 T-SPIN`];
   if (r.rerolls >= 5)         return ['挑食', `换掉了 ${r.rerolls} 块`];
   if (r.tetris >= 8)          return ['板砖工', `${r.tetris} 次四行`];
-  if (r.peak >= 10)           return ['上头', `峰值 ×${r.peak.toFixed(1)}`];
+  if (r.peak >= HEAT_TIERS[2]) return ['上头', `峰值 ×${r.peak.toFixed(1)}`];
   if (r.perfect > 0)          return ['干净', '打出过全消'];
   return ['稳', '没什么惊险，也没什么惊喜'];
 }
@@ -2273,9 +2273,7 @@ function syncHeat(){
   el.classList.toggle('on', on);
   if (on) el.textContent = '×' + m.toFixed(1);
   // 分档改 data 属性，不逐帧写样式 —— 档位没变就什么都不做
-  // 阈值跟着新的倍率量程重标：旧的 3/6/10 是按平台 ×9.3 定的，
-  // 衰减放慢后平台到 ×13.6，第 4 档会常年顶满，边框和徽章就不再传递信息了。
-  const t = !on ? 0 : m < 4 ? 1 : m < 8 ? 2 : m < 14 ? 3 : 4;
+  const t = !on ? 0 : m < HEAT_TIERS[0] ? 1 : m < HEAT_TIERS[1] ? 2 : m < HEAT_TIERS[2] ? 3 : 4;
   if (t !== heatTier){
     heatTier = t;
     document.body.dataset.heat = t;
@@ -2939,6 +2937,12 @@ const DANGER_ROW = 4;            // 堆顶到了这一行（含）算进危险�
 //
 // 代价是「停手就掉」的压力大幅减弱：停 60 秒现在只剩 27，改后还剩 198。
 // 这是明知的取舍 —— 辛苦攒起来的热度转眼蒸发，是实际玩下来最挫败的一点。
+// 倍率分档的三条线。徽章配色、盘面光晕、结算页的「上头」评语共用这一组 ——
+// 分开写的话，改一次量程就会有一处忘了跟，两边各自漂。
+//
+// 旧值 3/6/10 是按平台 ×9.3 标的；衰减放慢后平台到 ×13.6，顶档会常年满格，
+// 徽章和边框就不再传递信息。现在平台落在第 3 档，顶档要超过平台才进。
+const HEAT_TIERS = [4, 8, 14];
 const HEAT_TAU = 135000;
 const HEAT_DIV = 12;      // 拐点之前：倍率 = 1 + heat / HEAT_DIV
 // 拐点之后改走平方根。原来是一条直线，一局打长了热度能压到 160 上下，
@@ -4757,6 +4761,8 @@ function init(){
 // 调试出口：在控制台里能看棋盘和当前块，排查手感问题用
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
+  // 常量全导出：说明书对账脚本靠这个面核对，漏导一个就等于那条审计不到
+  HEAT_DIV, HEAT_KNEE, HEAT_TIERS, HEAT_SOFT, HEAT_TAU, RUSH_MOD, RUSH_BAD, RUSH_FLOOR, FEVER_MULT, FEVER_MS, GOLD_MULT, GOLD_RATE, CHEST_RATE, CHEST_HEAT, PITY_DIV, DANGER_HEAT,
   heatMult, heatMultAt, heatGain, rollMod, collapseCols, FLOW_MULT, FLOW_P, BURN_FROM, BURN_K,
   BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
   get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
@@ -4771,7 +4777,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
                       evPending = e; evFire(); return true; }, doFreeze, doWall, setMuffle, syncTempo, spawnNext,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
-  rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
+  runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
   deepMult, deepCrossLines, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
