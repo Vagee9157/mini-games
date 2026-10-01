@@ -1155,6 +1155,10 @@ body[data-ev="slam"] .evfx{
 body[data-ev="blackout"] #board{ filter: brightness(.82); }
 /* 镜像：给个持续的提示，不然玩家只会以为是 bug */
 body[data-ev="mirror"] .shaker{ outline: 2px dashed rgba(232,121,249,.55); outline-offset: 3px; }
+/* 缓流：灰线停了。边框换成一圈静下来的青色，和镜像那圈虚线（紫）、
+   狂欢局那圈金色都区分得开。有利事件要让人一眼看出「这次是好事」。 */
+body[data-ev="calm"] .shaker{ outline: 2px solid rgba(95,224,200,.6); outline-offset: 3px; }
+body[data-ev="calm"] #board{ filter: saturate(1.08); }
 
 /* ── 梭哈 ──
    压成一条横幅摆在顶上。第一版做成居中的大卡片，实测会把下落区整个盖住，

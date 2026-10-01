@@ -1066,12 +1066,15 @@ function helpSections(){
   });
   return [
     ['变异块　约 ' + (Object.values(rate).reduce((a, b) => a + b, 0) * 100).toFixed(1) + '% 的方块',
-      ['gold', 'hammer', 'bomb', 'laser'].map(k => ({
+      ['gold', 'hammer', 'fill', 'bomb', 'laser'].map(k => ({
         mod: k, name: MOD_HELP.name[k], meta: fmtRate(rate[k]), text: MOD_HELP.mod[k] }))],
     ['事件　开局 ' + (EV_FIRST / 1000) + ' 秒第一次，最密 ' + (EV_MIN / 1000) + ' 秒一次，提前 ' + (EV_WARN / 1000) + ' 秒预告',
       evOn.concat(evNow).map(evLine).concat([{ dot: '◈', name: '堆到高处时', meta: '',
         text: EVENTS.filter(e => EV_DEADLY.has(e.key)).map(e => e.name).join(' / ')
-              + ' 不再出现，压实概率翻倍 —— 但暗幕 / 镜像 / 狂风 照旧' }])],
+              + ' 不再出现，'
+              + EVENTS.filter(e => !e.bad).map(e => e.name).join(' / ') + ' 概率翻倍 —— 但 '
+              + EVENTS.filter(e => e.bad && !EV_DEADLY.has(e.key)).map(e => e.name).join(' / ')
+              + ' 照旧' }])],
     ['热度　消行注入，停手 ' + (HEAT_TAU / 1000) + ' 秒掉到三分之一', [
       // 这两行原来是手写死的，heatGain 整体 ×1.5、拐点 48→90 之后就全错了
       // （写着「一行 2」实际给 3，写着「热度 100 → ×7」实际 ×9.1）。改成现算。
@@ -1127,13 +1130,20 @@ function helpSections(){
   ];
 }
 
+// 「填实」事件一次最多塞这么多格，别一发清半个盘。
+// 声明必须在 MOD_HELP 之前 —— MOD_HELP 是模块初始化时就求值的对象字面量，
+// 里面拼了这个常量，放在后面会踩 TDZ，整个页面起不来。
+const FILL_MAX = 14;
+
 const MOD_HELP = {
-  name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光' },
+  name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光', fill: '灌注' },
   mod: {
     gold:   '用它消行时，那一次得分 ×' + 3,
     hammer: '锁定后，它占到的每一列整列向下塌实，洞被挤掉',
     bomb:   '炸掉自身周围一圈，然后受影响的列塌实',
     laser:  '整块汽化，再从落点往下打穿中心那一列 —— 开出来的井正好是打四行的形状',
+    fill:   '落点下方那几列，空格全部填成实心 —— 堆高不变但行容易凑满，常当场就消。'
+            + '位置你自己挑，是激光和地震留下那些深坑的解药',
   },
   ev: {
     blackout: '方块只画轮廓，看不见填充，音效也变闷',
@@ -1142,7 +1152,10 @@ const MOD_HELP = {
     wall:     '随机封死一列当墙，不封出生区',
     slam:     '方块一出生就贴到底。落地后还能左右滑和转，失去的是边落边调整',
     quake:    '整个盘面左右平移一格，推出边界的格子直接消失',
-    compact:  '挑洞最多的三列塌实 —— 八个事件里唯一对你有利的',
+    compact:  '挑洞最多的三列塌实 —— 上面的砖掉下来，堆跟着变矮',
+    fill:     '把堆里的洞直接塞成实心（最多 ' + FILL_MAX + ' 格，先塞靠下的）'
+              + ' —— 堆高不变，但行容易凑满，常当场就消',
+    calm:     '灰线停止上涨。不加分不消洞，就是给你一段时间整理盘面',
     freeze:   '冻住上方某一行。冻住的行凑满时不消，只解冻，要消两次才掉',
   },
 };
@@ -3302,10 +3315,12 @@ function feverEnd(){
 const MOD_RATES = [
   ['laser',  1 / 130],
   ['bomb',   1 / 110],
+  // 灌注比重锤稀一点：它能当场凑满好几行，威力比重锤大
+  ['fill',   1 / 120],
   ['hammer', 1 / 90],
   ['gold',   GOLD_RATE],   // 1/38
 ];
-const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff' };
+const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff', fill:'#8ef5c0' };
 
 // ── 变异块图标 ──
 // 原来只靠混色区分，但方块本身有七种颜色，混出来必然撞车 ——
@@ -3325,6 +3340,8 @@ function drawModIcon(c, cx, cy, r, mod){
   if (mod === 'gold'){                       // ◆ 菱形
     c.moveTo(cx, cy - r); c.lineTo(cx + r * .78, cy);
     c.lineTo(cx, cy + r); c.lineTo(cx - r * .78, cy); c.closePath();
+  } else if (mod === 'fill'){                // ▮ 实心竖条：下方被塞实
+    c.rect(cx - r * .62, cy - r * .86, r * 1.24, r * 1.72);
   } else if (mod === 'hammer'){              // ▼ 下三角
     c.moveTo(cx - r * .88, cy - r * .62); c.lineTo(cx + r * .88, cy - r * .62);
     c.lineTo(cx, cy + r * .82); c.closePath();
@@ -3373,12 +3390,43 @@ function rollMod(){
   return null;
 }
 
-// 三种效果刻意分成「减堆 / 挖井 / 修洞」，各解决一类困境，不互相重复
+// 四种效果刻意分成「减堆 / 挖井 / 修洞 / 填实」，各解决一类困境，不互相重复
 function crazyApplyMod(p){
   if (!CRAZY || !p.mod || p.mod === 'gold') return;
   if (p.mod === 'bomb')   bombAt(p);
   if (p.mod === 'laser')  laserAt(p);
   if (p.mod === 'hammer') hammerAt(p);
+  if (p.mod === 'fill')   fillAt(p);
+}
+
+// 灌注：落点下方那几列，空格全部填成实心。
+//
+// 激光开井、地震把边列推掉，都会留下又深又窄、几乎填不回去的空。
+// 重锤是把上面的砖掉下来（堆变矮，行不一定凑满），灌注是把下面塞满
+// （堆高不变，行直接凑满，常常当场就消）—— 两者方向相反，不重复。
+//
+// 和「填实」事件的区别在于**你能选位置**：事件是随机全盘挑洞，
+// 这个是你自己决定扔在哪，所以它是个可规划的工具，不是运气。
+function fillAt(p){
+  const cells = cellsOf(p.type, p.rot);
+  const cols = new Set(cells.map(c => p.x + c[0]));
+  // 每一列从这块的最底下那格往下找，空的就填实
+  const bottom = {};
+  for (const [cx, cy] of cells){
+    const x = p.x + cx, y = p.y + cy;
+    if (bottom[x] == null || y > bottom[x]) bottom[x] = y;
+  }
+  let n = 0;
+  for (const x of cols){
+    if (x < 0 || x >= COLS) continue;
+    for (let y = bottom[x] + 1; y < TOTAL_ROWS; y++){
+      if (!game.board[y][x]){ game.board[y][x] = GARBAGE; n++; boom(x, y, '#8ef5c0'); }
+    }
+  }
+  if (!n) return;
+  staticDirty = true; needsDraw = true;
+  clearFullNow();            // 填满的行要正常消掉（冻结行、梭哈计数都走这里）
+  shake(false); sfx('drop', .66); buzz(40);
 }
 
 // 让这几列里的格子落下去填掉下方的空洞。
@@ -3652,11 +3700,17 @@ const EV_WARN   = 3000;         // 预告多久
 const EV_FIRST  = 45000;        // 开局多久来第一次
 const EV_MIN    = 20000;        // 最密
 const EV_TAU    = 240000;       // 加密的时间常数
+// 事件池原来 8 个里只有 1 个对玩家有利（压实），占权重 15.8% —— 事件等于
+// 纯惩罚，看到预告只会皱眉，没有任何期待感。
+// 现在压实权重翻倍，另加两个有利事件，有利占比提到约 45%：预告弹出来时
+// 「可能是好事」才成立，事件才从惩罚变成赌头。
 const EVENTS = [
   { key:'blackout', name:'暗幕',   tip:'方块要隐形了', bad:true,  ms:5000, w:3 },
   { key:'mirror',   name:'镜像',   tip:'左右要对调了', bad:true,  ms:8000, w:3 },
   { key:'quake',    name:'地震',   tip:'整堆要平移了', bad:true,  ms:0,    w:2 },
-  { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:3 },
+  { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:6 },
+  { key:'fill',     name:'填实',   tip:'洞要被塞实了', bad:false, ms:0,    w:5 },
+  { key:'calm',     name:'缓流',   tip:'灰线要停了',   bad:false, ms:9000, w:4 },
   { key:'freeze',   name:'冰冻',   tip:'有一行要冻住了', bad:true,  ms:0,    w:2 },
   { key:'wind',     name:'狂风',   tip:'方块要被吹偏了', bad:true,  ms:7000, w:2 },
   { key:'wall',     name:'封锁',   tip:'有一列要封了',   bad:true,  ms:9000, w:2 },
@@ -3759,6 +3813,7 @@ function evFire(){
   if (e.ms <= 0) flashEvent(e);          // 瞬发的没时长，闪一下表示刚发生过
   if (e.key === 'quake')   doQuake();
   if (e.key === 'compact') doCompact();
+  if (e.key === 'fill'   && !doFill())   return;    // 没洞可填，当没发生
   if (e.key === 'freeze' && !doFreeze()) return;    // 空盘冻不了，当没发生
   if (e.key === 'wall'   && !doWall())   return;
   if (e.ms > 0){
@@ -3815,6 +3870,37 @@ function doCompact(){
   collapseCols(new Set(holes.slice(0, COMPACT_COLS).map(v => v[0])));
   shake(false);
 }
+
+// 填实：把堆里的洞直接补成实心格。
+//
+// 和压实的区别：压实是把上面的砖掉下来（堆变矮，行不一定凑满），
+// 填实是把洞塞上（堆高不变，行直接凑满，很可能当场就消）。
+// 激光开井、地震推掉边列都会留下难填的空，这个事件是它们的对侧。
+//
+// 只填「上方有砖压着」的洞，不碰露天的空格 —— 否则等于凭空给你半个盘面。
+// 填出来的满行走 clearFullNow，所以冻结行、梭哈计数那些都会正常走到。
+function doFill(){
+  const spots = [];
+  for (let x = 0; x < COLS; x++){
+    let seen = false;
+    for (let y = 0; y < TOTAL_ROWS; y++){
+      if (game.board[y][x]) seen = true;
+      else if (seen) spots.push([x, y]);
+    }
+  }
+  if (!spots.length) return false;
+  // 先填靠下的：底下的行离凑满最近，填那儿最可能当场消掉
+  spots.sort((a, b) => b[1] - a[1]);
+  for (const [x, y] of spots.slice(0, FILL_MAX)) game.board[y][x] = GARBAGE;
+  staticDirty = true; needsDraw = true;
+  clearFullNow();
+  shake(false);
+  return true;
+}
+
+// 缓流：灰线暂停。不加分不消洞，纯粹给你一段喘息去整理盘面 ——
+// 它的价值随你堆得多高而变，堆得越险越值钱，所以不是白送。
+const evCalm = () => CRAZY && evActive && evActive.key === 'calm';
 
 const evBlackout = () => CRAZY && evActive && evActive.key === 'blackout';
 // 镜像：左右键对调。挂在 press 上，DAS 连发也跟着换向
@@ -4047,15 +4133,15 @@ function stepOnce(dt){
   if (!clearing && game.piece){
     game.elapsed += dt;
     // FEVER 期间灰线暂停 —— 这比「重力减半」有感知得多（重力本来就不痛）
-    if (feverLeft <= 0) garbageTimer += dt;
+    if (feverLeft <= 0 && !evCalm()) garbageTimer += dt;    // FEVER 和缓流都冻结灰线钟
     const period = garbagePeriod();
     // 所有事件都有三秒预告，偏偏真正杀你的灰线是无声的。补一道。
     // 看着像削难度，其实是加紧张感 —— 你会盯着它倒数，然后决定这三秒
     // 要不要再赌一块。也只有知道它什么时候来，「压哨」才谈得上抢。
     // 只给疯狂版。这条其实对标准版也是好的（真正杀你的东西本来就该有预告），
     // 但标准版的表现一直承诺不动，要加得单独说。
-    syncGarbageWarn(CRAZY && !game.noGarbage && feverLeft <= 0 ? period - garbageTimer : -1);
-    if (!game.noGarbage && feverLeft <= 0 && garbageTimer >= period){
+    syncGarbageWarn(CRAZY && !game.noGarbage && feverLeft <= 0 && !evCalm() ? period - garbageTimer : -1);
+    if (!game.noGarbage && feverLeft <= 0 && !evCalm() && garbageTimer >= period){
       garbageTimer -= period;
       riseGarbage();
     }
@@ -4478,17 +4564,20 @@ function resumeLoop(){
 function restart(){
   clearSave();
   endRushIntro();                    // 上一局的报幕没放完就重开，先收干净
-  // 狂欢局由局末掷骰 + 保底计数决定，不是玩家选的。
+  // ── 狂欢局怎么来的 ──
   //
-  // 任何重开都走一次兑现 —— 开始 / 再来一局 / 顶栏重开 / 键盘 R，不分死没死。
+  // 掷骰在**局末**（countRush），结果存进 rush.next.v1；开局只负责**兑现**
+  // （takeRush）。掷骰不在开局，是因为开局掷的话没中就重开再掷，30% 等于
+  // 想要多少有多少。
   //
-  // 曾经有个 keepRush 例外，意思是「正打着狂欢局时按重开别把机会冲掉」。
-  // 它带来一个不显眼的洞：结算页上顶栏那个「重开」也走 keepRush，于是习惯
-  // 按它的人永远兑现不掉，掷出来的机会一直挂在 rush.next.v1 里，打多少局都
-  // 见不到狂欢局。保底也救不了 —— 问题不在掷不中，在中了兑不掉。
+  // 但「重开」原来不走局末 —— endGame 根本没跑，所以它只是在反复兑现一个
+  // 空标记。打到一半按重开，不管按多少次都掷不出狂欢局。这和玩家的直觉
+  // 完全相反：按下重开就是「这局不要了，重新开」，那就该算一局。
   //
-  // 取消这个例外的代价：正打着狂欢局时按重开会把它丢掉。但掷骰在局末，
-  // 重开不会重掷，所以只会丢、刷不出来。
+  // 现在：重开前，如果这一局已经够得上「有效局」（落够 RUSH_MIN_PIECES 块
+  // 或打够 RUSH_MIN_MS），就先补一次局末掷骰，再兑现。
+  // 防刷仍然成立 —— 秒开秒重开够不到有效局门槛，掷不了骰。
+  if (CRAZY && !FORCE_RUSH && game.started && !game.over && isRealRun()) countRush();
   game.rush = FORCE_RUSH || (CRAZY && takeRush());
   document.body.classList.toggle('rushrun', !!game.rush);
   // 分数格的标签直接写出倍率，跟着 RUSH_MULT 走 —— 写死数字改一次倍率就会过期
@@ -4800,12 +4889,12 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   heatMult, heatMultAt, heatGain, rollMod, collapseCols, FLOW_MULT, FLOW_P, BURN_FROM, BURN_K,
   BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
   get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
-  bombAt, laserAt, hammerAt, doQuake, doCompact, betAccept,
+  bombAt, laserAt, hammerAt, fillAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
-  evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
+  evFire, pickEvent, doFill, FILL_MAX, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
   evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
