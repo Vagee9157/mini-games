@@ -395,7 +395,9 @@ const RUSH_EVERY = 10;         // 基础门槛，今天打得多会往下降，�
 const RUSH_MULT  = 2.5;        // 分数倍率（底薪，爆发交给燃点）
 const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它只是纯加分）
 const RUSH_BAD   = 1.5;        // 坏事件权重
+const RUSH_RATE  = .30;        // 每局 30% 概率直接中
 const RUSH_KEY   = nsKey('rush.v1');
+const RUSH_NEXT_KEY = nsKey('rush.next.v1');   // 「下一局是狂欢局」，局末掷出来的
 const RUSH_INTRO = 3000;       // 狂欢局开局先停这么久报幕
 
 // 今天打得越多，门槛越低：每多打 10 局降一格，50 局起封在 5。
@@ -446,16 +448,32 @@ function readRushCount(){
   try { return parseInt(localStorage.getItem(RUSH_KEY) || '0', 10) || 0; }
   catch { return 0; }
 }
-// 局末调：有效局才推进一格
-function countRush(){
-  try { localStorage.setItem(RUSH_KEY, String(readRushCount() + 1)); } catch { /* 忽略 */ }
+function readRushNext(){
+  try { return localStorage.getItem(RUSH_NEXT_KEY) === '1'; } catch { return false; }
 }
-// 开局调：够了就消耗掉并返回 true。
-// 阈值用 rushEvery() 本身而不是减一 —— 计数是在局末推进的，减一会让实际间隔
-// 比标称少一格（「每 10 局」跑出来是 8~9 局一次）。
+function writeRushNext(v){
+  try { localStorage.setItem(RUSH_NEXT_KEY, v ? '1' : '0'); } catch { /* 忽略 */ }
+}
+
+// 局末调：有效局才走这里。掷 30%，没中就把保底往前推一格；保底满了照样给。
+//
+// 骰子刻意掷在局末、结果存下来，而不是开局现掷 —— 开局掷的话没中就重开再掷，
+// 30% 等于想要多少有多少，保底那套防刷也就白写了。局末掷完结果就定死，
+// 重开多少次拿到的都是同一个答案。
+// 代价是第一局永远不可能是狂欢局（还没有哪一局的局末可掷），可以接受。
+function countRush(){
+  const n = readRushCount() + 1;
+  const hit = rndFx() < RUSH_RATE || n >= rushEvery();
+  try { localStorage.setItem(RUSH_KEY, String(hit ? 0 : n)); } catch { /* 忽略 */ }
+  if (hit) writeRushNext(true);
+}
+
+// 开局调：把局末掷出来的结果消耗掉。
+// 保底阈值用 rushEvery() 本身而不是减一 —— 计数是在局末推进的，减一会让实际
+// 间隔比标称少一格（「每 10 局」跑出来是 8~9 局一次）。
 function takeRush(){
-  if (readRushCount() < rushEvery()) return false;
-  try { localStorage.setItem(RUSH_KEY, '0'); } catch { /* 忽略 */ }
+  if (!readRushNext()) return false;
+  writeRushNext(false);
   return true;
 }
 
@@ -1080,7 +1098,7 @@ function helpSections(){
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
     ]],
-    ['狂欢局　' + RUSH_EVERY + ' 局攒一次，今天打得多门槛会降', [
+    ['狂欢局　每局 ' + Math.round(RUSH_RATE * 100) + '% 概率，最多 ' + RUSH_EVERY + ' 局必出一次', [
       { dot: '★', name: '分数', meta: '×' + RUSH_MULT, text: '整局有效，不计时' },
       { dot: '✦', name: '燃点', meta: '热度 >' + BURN_FROM,
         text: '热度过 ' + BURN_FROM + ' 之后倍率额外起飞，越高涨得越凶。'
@@ -1089,7 +1107,8 @@ function helpSections(){
       { dot: '▲', name: '灰线', meta: '快 ' + Math.round((1 / RUSH_GARBAGE - 1) * 100) + '%', text: '这是它的代价' },
       { dot: '▲', name: '坏事件', meta: '×' + RUSH_BAD, text: '权重提高，好事件相对更少' },
       { dot: '◈', name: '有效局', meta: RUSH_MIN_PIECES + ' 块 / ' + (RUSH_MIN_MS / 1000) + ' 秒',
-        text: '一局要落够方块或打够时间才算一格，秒死重开刷不出来' },
+        text: '一局要落够方块或打够时间才算数，秒死重开刷不出来。'
+              + '骰子在局末掷，重开换不来第二次。今天打得多保底会收紧，最紧 ' + RUSH_FLOOR + ' 局' },
     ]],
   ];
 }
@@ -4643,7 +4662,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
   deepMult, DEEP_FROM, DEEP_STEP, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
-  readRushCount, countRush, takeRush, isRealRun, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
+  readRushCount, countRush, takeRush, isRealRun, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
