@@ -340,20 +340,20 @@ function addTotal(v){
 // 按「取整到 1/2/5」会把比例压歪（试过一版，赤霄和烈阳挨得过近、
 // 熔金又凭空翻倍）。现在按 2 位有效数字取整，档间距漂移 ≤3%。
 const RANKS = [
-  [2400000,    '微光'],
-  [4800000,    '星火'],
-  [8000000,   '流焰'],
-  [14000000,   '赤霄'],
-  [24000000,   '烈阳'],
-  [40000000,   '熔金'],
-  [64000000,   '炽天'],
-  [96000000,  '紫微'],
-  [160000000,  '曜极'],
-  [240000000,  '太一'],
+  [3600000,    '微光'],
+  [7200000,    '星火'],
+  [12000000,  '流焰'],
+  [21000000,  '赤霄'],
+  [36000000,   '烈阳'],
+  [60000000,   '熔金'],
+  [96000000,   '炽天'],
+  [140000000, '紫微'],
+  [240000000, '曜极'],
+  [360000000,  '太一'],
   // 太一在道家里已经是本源，再往上只能往「天地未开」那头走：
   // 无极生太极 —— 鸿蒙是未分之气，无极是没有边界，都排在太一之前/之上。
-  [320000000,  '鸿蒙'],
-  [400000000,  '无极'],
+  [480000000,  '鸿蒙'],
+  [600000000,  '无极'],
 ];
 // 段位 · 看累计总分。前七档是按「一局 10 万」铺的，实测一局能打三百万，
 // 所以王者二十局就到顶了。已有的阈值不动 —— 往上调等于把已经爬到的人降级，
@@ -361,15 +361,15 @@ const RANKS = [
 // 跟着 ×5（不是 ×10 —— 累计分涨得比单局快，局也变短了）。
 // 按 10~15 分钟一局 800 万算：王者 38 局、荣耀王者 62 局、传奇王者 150 局。
 const CAREER = [
-  [40000000,    '青铜'],
-  [160000000,   '白银'],
-  [360000000,   '黄金'],
-  [720000000,   '铂金'],
-  [1200000000,  '钻石'],
-  [1800000000,  '星耀'],
-  [2400000000,  '王者'],
-  [4000000000,  '荣耀王者'],
-  [9600000000, '传奇王者'],
+  [60000000,    '青铜'],
+  [240000000,   '白银'],
+  [540000000,   '黄金'],
+  [1100000000,  '铂金'],
+  [1800000000,  '钻石'],
+  [2700000000,  '星耀'],
+  [3600000000,  '王者'],
+  [6000000000,  '荣耀王者'],
+  [14000000000, '传奇王者'],
 ];
 function tierOf(table, v){
   let hit = null;
@@ -1096,7 +1096,7 @@ function helpSections(){
               + DEEP_STEP + '（200 行 ×' + (DEEP_BASE + 1.6 * DEEP_STEP).toFixed(1)
               + '，400 行 ×' + (DEEP_BASE + 3.6 * DEEP_STEP).toFixed(1) + '），越打越值。'
               + '狂欢局是固定的 ×' + (DEEP_BASE_RUSH * RUSH_MULT).toFixed(2).replace(/\.?0+$/, '')
-              + '，不随行数涨 —— 前中段比普通局高，'
+              + '，不随行数涨，但道具概率翻倍另算 —— 前中段比普通局高，'
               + deepCrossLines() + ' 行之后被普通局反超' },
     ]],
     ['宝箱与梭哈', [
@@ -1217,16 +1217,16 @@ function fillRunLog(){
 // 阶段感」补一个节点 —— 分数原来只是个一直涨的数字。
 // 关口密一点，一局能多撞几次。大部分只报个数，整数关口才给一句话 ——
 // 每个都配文案的话，说得太满反而不值钱了。
-const MILE_W = [100, 200, 400, 1000, 1600, 2000, 3000, 4000, 6000, 10000, 16000, 20000, 30000, 40000];
+const MILE_W = [150, 300, 600, 1500, 2400, 3000, 4500, 6000, 9000, 15000, 24000, 30000, 45000, 60000];
 // key 是「万」数，必须在 MILE_W 里真实存在，否则这条台词永远不会出现。
 // 梯子 ×2 之后 300/500/800 这些 key 全落空了，跟着挪到新的档位上。
 const MILE_SAY = {
-  100:  '一百万，有点东西',
-  400:  '四百万',
-  1000: '一千万，你认真的?',
-  2000: '两千万',
-  4000: '四千万，离谱',
-  10000: '一亿。没话说了',
+  150:   '一百五十万，有点东西',
+  600:   '六百万',
+  1500:  '一千五百万，你认真的?',
+  3000:  '三千万',
+  6000:  '六千万，离谱',
+  15000: '一亿五千万。没话说了',
 };
 const MILESTONES = MILE_W.map(w => [w * 10000, MILE_SAY[w] || (w + ' 万')]);
 function checkMilestone(){
@@ -3172,14 +3172,38 @@ const DEEP_BASE_RUSH = 1.87;
 //   40行 1.56×　100行 1.34×　200行 1.09×　250行 持平　400行 0.80×　600行 0.63×
 // 注意狂欢局在实际会发生的那一段反而比以前更强（100 行从 1.11 提到 1.34），
 // 它只是把深局让给普通局 —— 而且它灰线快 43%，本来就更难活到 250 行。
-const DEEP_STEP = .8;
+// .8 → 3.6（2026-10-01 二调）。
+//
+// 第一版只按**深局加成**算交叉点，得出 249 行。但实测发现总比值比它高
+// 约 1.5 倍 —— 多出来的是道具翻倍（RUSH_MOD = 2，金块 ×3、炸弹/激光/
+// 重锤直接产分），那部分不随行数变，等于给狂欢局一个恒定加成 C ≈ 1.49。
+// 把 C 算进去，真实交叉点其实在 ~535 行，普通局根本追不上。
+//
+// 前移用的是「加大普通局步长」而不是「压低狂欢局基数」：后者会把狂欢局
+// 前期的优势一起削掉（50 行处从 2.07× 掉到 1.26×），而那正是它的身份。
+// 加大普通局步长则两头都要：交叉点前移到 ~150 行，狂欢局前期分毫不动，
+// 普通局深局分数还大涨（136 行 ×1.71、300 行 ×2.43）。
+//
+// C 的估计区间是 1.32~1.68（n=3，噪声大），对应交叉点 128~175 行，
+// 括住目标 150。要更准得跑 n≥30。
+const DEEP_STEP = 3.6;
 const DEEP_STEP_RUSH = 0;
+// 狂欢局在深局加成之外还有的那一份优势，主要来自道具翻倍（RUSH_MOD = 2，
+// 金块 ×3、炸弹/激光/重锤直接产分）。它不随行数变，所以是个恒定系数。
+// 1.49 是实测值：8 局机器人，同 50 行处总比 2.55× / 深局比 1.52× = 1.68，
+// 同 100 行处 1.77× / 1.34× = 1.32，取几何平均。n=3 噪声大，区间 1.32~1.68。
+// 只用来算「几行之后被普通局反超」这一句说明文案，不参与任何计分。
+const RUSH_EXTRA = 1.49;
 let deepSaid = false;
-// 两条深局曲线的交叉行数，给说明书用。解 DEEP_BASE + (L-40)/100*DEEP_STEP
-// = DEEP_BASE_RUSH * RUSH_MULT；步长为 0 或永不相交时回 0，调用方自己兜。
+// 狂欢局被普通局反超的行数，给说明书用。
+//
+// 不能只解两条深局曲线的交点 —— 那只算了深局加成这一项，而狂欢局还有
+// 道具翻倍带来的 RUSH_EXTRA。只按深局算会得出 87 行，实际要到 ~150 行，
+// 说明书照着写就是在骗人。要解的是**总比值**等于 1：
+//   DEEP_BASE_RUSH * RUSH_MULT * RUSH_EXTRA = DEEP_BASE + (L-DEEP_FROM)/100 * DEEP_STEP
 function deepCrossLines(){
-  const target = DEEP_BASE_RUSH * RUSH_MULT - DEEP_BASE;
   if (DEEP_STEP <= DEEP_STEP_RUSH) return 0;
+  const target = DEEP_BASE_RUSH * RUSH_MULT * RUSH_EXTRA - DEEP_BASE;
   return Math.round(DEEP_FROM + target / (DEEP_STEP - DEEP_STEP_RUSH) * 100);
 }
 
@@ -4789,7 +4813,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
-  deepMult, deepCrossLines, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
+  deepMult, deepCrossLines, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
