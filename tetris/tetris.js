@@ -2222,7 +2222,10 @@ function fxRows(){
                            k: flashFx.bad ? 'bad' : 'good', p: flashLeft / FX_FLASH });
   if (feverLeft > 0) out.push({ n: 'FEVER', v: '×' + FEVER_MULT, k: 'fev', p: feverLeft / FEVER_MS });
   if (game.rush) out.push({ n: '狂欢', v: '×' + RUSH_MULT, k: 'rush' });
-  out.push({ n: '热度', v: '×' + heatMult().toFixed(1), k: 'heat' });
+  // 右侧显示热度值本身，左上角徽章显示倍率 —— 两处各管一个，不重复。
+  // 原来两处都是倍率，热度这个被反复提到的数字一处都看不见，
+  // 结果就是没人（包括我自己）说得清自己打到过多少热度。
+  out.push({ n: '热度', v: String(Math.round(heat)), k: 'heat' });
   return out.slice(0, 3);
 }
 
