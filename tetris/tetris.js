@@ -1092,7 +1092,7 @@ function helpSections(){
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
-        text: '每条灰线有这么大概率带宝箱，消掉那一行才算开。34% FEVER / 36% 热度 +30 / 30% 下一块是炸弹' },
+        text: '每条灰线有这么大概率带宝箱，消掉那一行才算开。34% FEVER / 36% 热度 +' + CHEST_HEAT + ' / 30% 下一块是炸弹' },
       { dot: '✦', name: 'FEVER', meta: (FEVER_MS / 1000) + ' 秒 ×' + FEVER_MULT,
         text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减' },
       { dot: '⚄', name: '梭哈', meta: BET_MS / 1000 + ' 秒',
@@ -2273,7 +2273,9 @@ function syncHeat(){
   el.classList.toggle('on', on);
   if (on) el.textContent = '×' + m.toFixed(1);
   // 分档改 data 属性，不逐帧写样式 —— 档位没变就什么都不做
-  const t = !on ? 0 : m < 3 ? 1 : m < 6 ? 2 : m < 10 ? 3 : 4;
+  // 阈值跟着新的倍率量程重标：旧的 3/6/10 是按平台 ×9.3 定的，
+  // 衰减放慢后平台到 ×13.6，第 4 档会常年顶满，边框和徽章就不再传递信息了。
+  const t = !on ? 0 : m < 4 ? 1 : m < 8 ? 2 : m < 14 ? 3 : 4;
   if (t !== heatTier){
     heatTier = t;
     document.body.dataset.heat = t;
@@ -2976,7 +2978,16 @@ let heat = 0;
 // 200 行约 228 —— 300 的门槛基本点不着，狂欢局只剩底薪，实测反而比普通局
 // 低 24~29%（普通局有深局加成）。
 // 取 200：100 行仍点不着，200 行开口（+17%），之后越打越凶。
-const BURN_FROM = 200;
+// 200 → 600，跟着热度平台一起 ×3。
+//
+// 燃点是「例外」不是「常态」—— 旧平台 103 够不到 200，所以它从不触发；
+// 但衰减放慢 3 倍之后平台抬到 ~309，200 变成常年开着，狂欢局白拿 1.65 倍。
+// 那会把深局形状（DEEP_STEP 分模式）直接打穿：形状把 100 行的狂欢/普通
+// 定在 1.34×，燃点一常开就变成 2.22×。
+//
+// ⚠ 600 是按「平台 ×3」等比换算的，不是实测定的。等机器人在新衰减下的
+// 热度分布跑出来要复核一次：够不到就调低，常年开着就调高。
+const BURN_FROM = 600;
 const BURN_K = 1.2;
 
 // 纯函数版：给定热度算倍率，不读当前局的状态。
@@ -3027,6 +3038,7 @@ const DANGER_HEAT = 2;           // 危险区里消行的热度倍数
 // 实测开出来的数（机器人，一局六七分钟）：普通局中位 3 个，
 // 狂欢局灰线快 82%、所以中位 8 个。
 const CHEST_RATE = 1 / 4;
+const CHEST_HEAT = 90;      // 开箱给的热度，跟着平台一起从 30 提到 90
 let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压哨」用
 
 // 消掉带宝箱的行就开箱。三选一，都是当场能感觉到的东西。
@@ -3039,7 +3051,7 @@ function claimChests(rows){
   for (let i = 0; i < n; i++){
     const r = rndFx();
     if (r < .34 && feverLeft <= 0){ tip('开箱　FEVER！', 0); feverStart(); }
-    else if (r < .70){ heat += 30; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +30', 0); }
+    else if (r < .70){ heat += CHEST_HEAT; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +' + CHEST_HEAT, 0); }
     else { game.mods[0] = 'bomb'; previewDirty = true; tip('开箱　下一块是炸弹', 0); }
   }
   sfx('tetris', 1.34); buzz([30, 20, 30, 20, 60]);
@@ -3789,7 +3801,11 @@ function lockDelay(){ return evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY; }
 //
 // 被换下来的那块塞回队列尾部而不是丢掉 —— 丢掉等于白嫖 7-bag 的保证，
 // 而且你还能看见它什么时候回来。
-const REROLL_COST = 15;
+// 15 → 45，跟着热度平台一起 ×3。
+// 换牌要是个真决策（「这块 S 我放不下，换不换？换了倍率掉一截」），
+// 代价就得是热度的固定比例。15 在旧平台 103 上是 15%、倍率掉 ×0.95，
+// 在新平台 309 上只剩 5%、倍率掉 ×0.21 —— 等于白送。
+const REROLL_COST = 45;
 
 function canReroll(){
   return CRAZY && game.started && !game.over && !game.paused && !clearing && !!game.piece;
@@ -3851,7 +3867,8 @@ function betMult(lines){
 const BET_OFFER_NEED = 3;
 const BET_COOL = 25000;   // 结算之后冷静这么久，别贴脸连弹
 let betLines = 0;         // 接了之后累计消了几行
-const BET_MIN_HEAT = 24;  // 热度太低时赌没意思
+// 24 → 72，跟着热度平台一起 ×3。24 在新平台上只占 8%，门槛恒为真等于没有。
+const BET_MIN_HEAT = 72;  // 热度太低时赌没意思
 let betCool = 0;
 let betOffer = 0, betLeft = 0, betShow = 0;
 
