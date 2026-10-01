@@ -1130,11 +1130,6 @@ function helpSections(){
   ];
 }
 
-// 「填实」事件一次最多塞这么多格，别一发清半个盘。
-// 声明必须在 MOD_HELP 之前 —— MOD_HELP 是模块初始化时就求值的对象字面量，
-// 里面拼了这个常量，放在后面会踩 TDZ，整个页面起不来。
-const FILL_MAX = 14;
-
 const MOD_HELP = {
   name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光', fill: '灌注' },
   mod: {
@@ -1153,8 +1148,6 @@ const MOD_HELP = {
     slam:     '方块一出生就贴到底。落地后还能左右滑和转，失去的是边落边调整',
     quake:    '整个盘面左右平移一格，推出边界的格子直接消失',
     compact:  '挑洞最多的三列塌实 —— 上面的砖掉下来，堆跟着变矮',
-    fill:     '把堆里的洞直接塞成实心（最多 ' + FILL_MAX + ' 格，先塞靠下的）'
-              + ' —— 堆高不变，但行容易凑满，常当场就消',
     calm:     '灰线停止上涨。不加分不消洞，就是给你一段时间整理盘面',
     freeze:   '冻住上方某一行。冻住的行凑满时不消，只解冻，要消两次才掉',
   },
@@ -3752,14 +3745,17 @@ const EV_MIN    = 20000;        // 最密
 const EV_TAU    = 240000;       // 加密的时间常数
 // 事件池原来 8 个里只有 1 个对玩家有利（压实），占权重 15.8% —— 事件等于
 // 纯惩罚，看到预告只会皱眉，没有任何期待感。
-// 现在压实权重翻倍，另加两个有利事件，有利占比提到约 45%：预告弹出来时
+// 现在压实权重翻倍、另加「缓流」，有利占比提到 38.5%：预告弹出来时
 // 「可能是好事」才成立，事件才从惩罚变成赌头。
+//
+// 曾经还有个「填实」事件（全盘挑最靠下的洞塞实），实测太强 —— 它不要你
+// 做任何事就把盘面救回来，而且是随机白送的，把难度直接抹平了。已删除。
+// 同名的**变异块**「灌注」保留：那个要你自己选落点，是工具不是运气。
 const EVENTS = [
   { key:'blackout', name:'暗幕',   tip:'方块要隐形了', bad:true,  ms:5000, w:3 },
   { key:'mirror',   name:'镜像',   tip:'左右要对调了', bad:true,  ms:8000, w:3 },
   { key:'quake',    name:'地震',   tip:'整堆要平移了', bad:true,  ms:0,    w:2 },
   { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:6 },
-  { key:'fill',     name:'填实',   tip:'洞要被塞实了', bad:false, ms:0,    w:5 },
   { key:'calm',     name:'缓流',   tip:'灰线要停了',   bad:false, ms:9000, w:4 },
   { key:'freeze',   name:'冰冻',   tip:'有一行要冻住了', bad:true,  ms:0,    w:2 },
   { key:'wind',     name:'狂风',   tip:'方块要被吹偏了', bad:true,  ms:7000, w:2 },
@@ -3873,7 +3869,6 @@ function evFire(){
   if (e.ms <= 0) flashEvent(e);          // 瞬发的没时长，闪一下表示刚发生过
   if (e.key === 'quake')   doQuake();
   if (e.key === 'compact') doCompact();
-  if (e.key === 'fill'   && !doFill())   return;    // 没洞可填，当没发生
   if (e.key === 'freeze' && !doFreeze()) return;    // 空盘冻不了，当没发生
   if (e.key === 'wall'   && !doWall())   return;
   if (e.key === 'calm'){ sfx('hold', .7); sweepRows([TOTAL_ROWS - 1], '#5fe0c8'); }
@@ -3933,38 +3928,6 @@ function doCompact(){
   // 原来只有一下震屏，连音都没有 —— 有利事件的表现一直弱于有害事件，
   // 玩家潜意识会学成「事件 = 要倒霉」，哪怕权重已经接近对半。
   sfx('drop', .85); buzz([30, 20, 30]);
-}
-
-// 填实：把堆里的洞直接补成实心格。
-//
-// 和压实的区别：压实是把上面的砖掉下来（堆变矮，行不一定凑满），
-// 填实是把洞塞上（堆高不变，行直接凑满，很可能当场就消）。
-// 激光开井、地震推掉边列都会留下难填的空，这个事件是它们的对侧。
-//
-// 只填「上方有砖压着」的洞，不碰露天的空格 —— 否则等于凭空给你半个盘面。
-// 填出来的满行走 clearFullNow，所以冻结行、梭哈计数那些都会正常走到。
-function doFill(){
-  const spots = [];
-  for (let x = 0; x < COLS; x++){
-    let seen = false;
-    for (let y = 0; y < TOTAL_ROWS; y++){
-      if (game.board[y][x]) seen = true;
-      else if (seen) spots.push([x, y]);
-    }
-  }
-  if (!spots.length) return false;
-  // 先填靠下的：底下的行离凑满最近，填那儿最可能当场消掉
-  spots.sort((a, b) => b[1] - a[1]);
-  const used = spots.slice(0, FILL_MAX);
-  for (const [x, y] of used){ game.board[y][x] = GARBAGE; boom(x, y, '#8fd3f4'); }
-  staticDirty = true; needsDraw = true;
-  // 和灌注区分：灌注是绿色、自上而下扫（你自己选的位置）；
-  // 填实是蓝色、被填的那几行同时闪（随机全盘，不是你挑的）
-  sweepRows(used.map(v => v[1]), '#8fd3f4');
-  clearFullNow();
-  shake(false);
-  sfx('lock', 1.25); buzz([25, 20, 25]);
-  return true;
 }
 
 // 缓流：灰线暂停。不加分不消洞，纯粹给你一段喘息去整理盘面 ——
@@ -4965,7 +4928,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
-  evFire, pickEvent, doFill, FILL_MAX, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
+  evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
   evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
