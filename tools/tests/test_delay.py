@@ -64,6 +64,20 @@ JS = r"""() => {
   T.syncFx();
   const b = document.querySelector('#fxBox .fxgo[data-act="delay"]');
   ok(!!b, '状态框出现缓期按钮且带 data-act');
+
+  // 注意位置：这一段必须排在上面那次重开**之后**。
+  // 第一版插在 calm 测试和重开之间，于是「ZONE 期间不提供缓期」
+  // 其实是被 calm 挡住才通过的，跟 ZONE 一点关系没有 —— 假阳性。
+  // ZONE 期间钟是停的，不该提供缓期
+  T.heat = 2000; T.garbageTimer = T.garbagePeriod() - 2000;
+  T.zoneCharge = T.zoneNeed(); T.zoneStart();
+  ok(!T.canDelay(), 'ZONE 期间不提供缓期（钟本来就停着）');
+  const hz = T.heat; T.doDelay();
+  ok(T.heat === hz, 'ZONE 期间 doDelay 不扣热度');
+  T.zoneEnd('');
+  T.heat = 2000; T.garbageTimer = T.garbagePeriod() - 2000;
+  ok(T.canDelay(), 'ZONE 结束后又能缓了');
+
   // 真点交给 Playwright —— 处理器有 `if (!e.detail) return`（防 touchstart 重复触发），
   // JS 合成的 el.click() detail 是 0，会被挡掉，不是 bug
   return L;

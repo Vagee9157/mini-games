@@ -111,6 +111,37 @@ JS = r"""() => {
   T.upOffer(1);
   ok(!!document.getElementById('upSkip'), '面板上有「不选」按钮');
 
+  // ── 存档往返 ──
+  // 上一段结尾留了一次没消的 offer，不清掉的话 upStep 会因为 upLeft > 0 早退，
+  // upNext 不前进，后面两条断言就成了假阳性
+  while (T.upLeft > 0) T.upSkip();
+  T.ups.length = 0; T.ups.push('forge', 'ember');
+  T.game.lines = T.UP_EVERY + 5; T.upStep(); 
+  const owed = T.upLeft;
+  const c3 = document.querySelector('#upList [data-up]'); if (c3) T.upTake(c3.dataset.up);
+  T.saveGame(true);
+  const raw = JSON.parse(localStorage.getItem(T.SAVE_KEY));
+  ok(Array.isArray(raw.ups) && raw.ups.length >= 2, '存档里有 ups');
+  ok(raw.upNext === T.UP_EVERY * 2, `存档里有 upNext（${raw.upNext}）`);
+  ok(!('upLeft' in raw), '刻意不存 upLeft —— 存了会让这局之后再也不发修行');
+  const want = T.ups.slice();
+  T.restoreGame(raw);
+  ok(JSON.stringify(T.ups) === JSON.stringify(want), '续玩把修行卡接回来了');
+  T.upStep();
+  ok(T.upLeft === 0, '续玩之后不连环弹面板');
+  // 老存档里的未知 key 要被过滤掉
+  T.restoreGame(Object.assign({}, raw, { ups: ['forge', '这张卡已经删了'] }));
+  ok(T.ups.length === 1 && T.ups[0] === 'forge', '续玩过滤掉未知的修行 key');
+
+  // ── Esc 必须走 upSkip，不能只是把面板藏起来 ──
+  T.ups.length = 0;
+  T.upOffer(1);
+  ok(T.game.frozen === true, 'Esc 前：面板开着、方块停住');
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+  ok(document.getElementById('upSheet').hidden, 'Esc 关掉了面板');
+  ok(T.game.frozen === false && T.upLeft === 0,
+     `Esc 走的是 upSkip 不是直接 hidden（frozen=${T.game.frozen} upLeft=${T.upLeft}）—— 否则整局卡死`);
+
   // 重开要清空
   document.getElementById('againBtn')?.click();
   ok(T.ups.length <= 1, `重开后 ups 清空（现在 ${T.ups.length} 张，开局那次刚发）`);

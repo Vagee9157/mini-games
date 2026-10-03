@@ -609,6 +609,16 @@ function saveGame(force){
       garbage: game.garbage,
       elapsed: game.elapsed,
       heat,
+      // 修行要存。不存的话续玩会把这局选的卡全抹掉 —— 和当年「续玩把狂欢局
+      // 静默降成普通局」是同一类 bug：玩家看不见自己被削了什么。
+      ups,
+      upNext,                   // 不存的话续玩会拿 lines 去比默认值，连环弹面板
+      zoneCharge,
+      delayUsed,
+      // 刻意不存 upLeft：续玩不会开面板，而 upStep 见到 upLeft > 0 就早退 ——
+      // 存了反而会让这局之后再也不发修行。欠的那一次宁可丢掉。
+      // 也不存 zoneLeft：ZONE 是十秒的窗口，隔一次重开再接着倒计时没有意义。
+      // 盘底那几行死行靠 restoreGame 直接从盘面数出来再结算，见那边。
       at: Date.now(),
     }));
   } catch { /* 存不下就算了，不影响玩 */ }
@@ -661,6 +671,18 @@ function restoreGame(d){
   const sl = $('scoreLabel');
   if (sl) sl.textContent = game.rush ? 'SCORE ×' + RUSH_MULT : 'SCORE';
   heat = CRAZY ? (+d.heat || 0) : 0;
+  // 修行接回来。过滤一遍未知 key —— 老存档里可能有已经删掉的卡。
+  ups = CRAZY && Array.isArray(d.ups) ? d.ups.filter(k => UP_BY[k]) : [];
+  upNext = typeof d.upNext === 'number' ? d.upNext : UP_EVERY;
+  zoneCharge = CRAZY ? (+d.zoneCharge || 0) : 0;
+  delayUsed = !!d.delayUsed;
+  // ZONE 的死行：**从盘面数出来**，不信任存档字段。
+  // 这样连这次改动之前存的那些坏档也能自愈 —— 它们盘面里有死行但没有计数，
+  // 于是 zoneEnd 看到 zoneRows=0 直接早退，那几行永久卡在盘底、地板一直被顶高。
+  if (CRAZY){
+    zoneRows = game.board.filter(row => row.every(c => c === ZONE)).length;
+    if (zoneRows > 0) zoneEnd('');     // 行是玩家打出来的，照常结算再清掉
+  }
   syncFx();
   syncEdge();
   garbageTimer = 0;
@@ -3378,7 +3400,10 @@ function delayCost(){ return Math.round(Math.max(DELAY_MIN, heat * DELAY_FRAC) *
 // 梭哈待接时不提供 —— 状态框只有三槽，而梭哈是有硬时限的，不能被挤掉。
 function canDelay(){
   if (!CRAZY || !game.started || game.over || game.noGarbage) return false;
-  if (feverLeft > 0 || evCalm()) return false;        // 钟本来就停着，没得缓
+  // 钟本来就停着的三种情况，都没得缓。ZONE 是后加的，一开始漏了 ——
+  // 于是 ZONE 期间会弹出缓期按钮，点了白花热度（钟没在走），
+  // 而那时灰线预警条是藏着的，按钮等于凭空冒出来。
+  if (feverLeft > 0 || evCalm() || zoneLeft > 0) return false;
   if (delayUsed || betOffer > 0) return false;
   if (heat < delayCost()) return false;
   return garbagePeriod() - garbageTimer <= DELAY_WIN;
@@ -5253,7 +5278,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['upSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -5268,7 +5293,10 @@ window.addEventListener('keydown', (e) => {
   if (sheet){
     // Esc 关掉它，其它键一律吞掉
     if (act === 'pause'){
-      if (sheet.id === 'styleSheet') toggleStylePanel(false);
+      // 修行面板必须走 upSkip：直接 hidden = true 会把 upLeft 和 game.frozen
+      // 留在原地，整局就卡死在「方块不往下掉、也没有面板可点」。
+      if (sheet.id === 'upSheet') upSkip();
+      else if (sheet.id === 'styleSheet') toggleStylePanel(false);
       else sheet.hidden = true;
     }
     return;
@@ -5915,7 +5943,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
   deepMult, deepAt, deepCrossLines, DEEP_PER, DEEP_EG, SNIPE_MS, SNIPE_HEAT, CHEST_P, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
-  saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  saveGame, restoreGame, upNever, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
