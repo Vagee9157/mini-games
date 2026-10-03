@@ -31,6 +31,9 @@ JS = r"""() => {
   T.heat = 0; T.crazyOnClear(1, null, false);
   ok(T.heat > 0, `热度注入（单行 +${T.heat.toFixed(1)}）`);
   ok(T.heatMultAt(400,false) > T.heatMultAt(100,false), '热度越高倍率越高');
+  // 必须先确保不在 FEVER 里 —— FEVER 期间热度**设计上**就不衰减，
+  // 而上一行的 crazyOnClear 有 1/55 概率掷中它，不清掉这条断言是 flaky 的
+  if (T.fever > 0) T.feverEnd();
   T.heat = 1000; T.crazyStep(T.HEAT_TAU);
   ok(T.heat < 1000 * .4, `热度会衰减（${T.HEAT_TAU/1000}s 后剩 ${Math.round(T.heat)}）`);
 
@@ -275,6 +278,34 @@ JS = r"""() => {
   ok(T.fxRows().filter(r => r.go).length === 0, '平时状态框一个按钮都没有');
   T.crazyOnClear(T.BET_OFFER_NEED, null, false);
   ok(T.fxRows().filter(r => r.go).length === 1, '只有梭哈会给按钮');
+
+  // ── 提示不打架 ──
+  fresh();
+  // 开局点「不选」之后，第二次不能还叫「开局修行」（看着像游戏自己重开了）
+  T.upSkip();
+  ok(T.upRound === 1, '开局那次也算发过一次');
+  T.game.lines = T.UP_EVERY + 1; T.upStep();
+  const title = document.getElementById('upTitle').textContent;
+  ok(!/开局/.test(title), `第二次标题不再是「开局修行」（实为「${title}」）`);
+  ok(T.ups.length === 0, '而且这时确实一张都没选');
+  T.upSkip();
+
+  // 梭哈进行中不弹修行面板
+  fresh(); T.heat = 5000;
+  T.crazyOnClear(T.BET_OFFER_NEED, null, false);
+  ok(T.betOffer > 0, '梭哈待接');
+  T.game.lines = T.UP_EVERY + 1; T.upStep();
+  ok(document.getElementById('upSheet').hidden, '梭哈待接时不弹修行面板');
+  T.betAccept();
+  T.upStep();
+  ok(document.getElementById('upSheet').hidden, '梭哈进行中也不弹');
+  T.step(T.BET_MS + 500);
+  T.upStep();
+  ok(!document.getElementById('upSheet').hidden, '梭哈结束后补上，不会漏');
+  T.upSkip();
+
+  // 盘面提示的重叠审计搬到了 test_prompts.py —— 它要等 toast 的渐显动画跑完，
+  // 而这个大 JS 块是同步执行的，等不了。
 
   // ── 目标线 / 收手 ──
   fresh();

@@ -3556,6 +3556,10 @@ const UPS = [
 const UP_BY = Object.fromEntries(UPS.map(u => [u.k, u]));
 
 let ups = [];            // 这局已选的 key
+// 发过几次（不是选中几张）。标题必须读这个 ——
+// 读 ups.length 的话，开局点了「不选」之后第 50 行那次会再标成「开局修行」，
+// 看着就像游戏自己重开了。
+let upRound = 0;
 let upLeft = 0;          // 还欠几次选择
 let upNext = UP_EVERY;   // 下一次给选择的行数
 
@@ -3594,10 +3598,11 @@ function upOpen(){
   if (!sheet || !list) return;
   const cards = upDraw();
   if (!cards.length){ upLeft = 0; return; }     // 池子抽干了就不再打扰
+  upRound++;
   list.innerHTML = cards.map(u =>
     '<button class="upcard' + (u.vow ? ' vow' : '') + '" type="button" data-up="' + u.k + '">'
     + '<b>' + u.n + (u.vow ? '<em>血契</em>' : '') + '</b><span>' + u.t + '</span></button>').join('');
-  $('upTitle').textContent = ups.length ? '修行　第 ' + (ups.length + 1) + ' 次' : '开局修行';
+  $('upTitle').textContent = upRound > 1 ? '修行　第 ' + upRound + ' 次' : '开局修行';
   const sk = $('upSkip');
   if (sk) sk.textContent = ups.length ? '这次不选' : '不选，直接开';
   sheet.hidden = false;
@@ -3640,6 +3645,10 @@ function zoneAuto(){
 
 function upStep(){
   if (!CRAZY || upLeft > 0) return;
+  // 梭哈待接或进行中不打断。面板会把整局冻住，虽然梭哈的计时也跟着冻、
+  // 不会判你输，但「正打到一半被一个全屏弹窗拦下」本身就是提示混乱。
+  // 等它结束再发，upNext 已经推过了，不会漏。
+  if (betOffer > 0 || betLeft > 0) return;
   if (game.lines >= upNext){ upNext += UP_EVERY; upOffer(1); }
 }
 
@@ -3848,7 +3857,7 @@ function crazyReset(){
   swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false; rainMarkSig = '';
   actKind = ''; actLast = ''; for (const k of Object.keys(actSeen)) delete actSeen[k];
   zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
-  ups = []; upLeft = 0; upNext = UP_EVERY;
+  ups = []; upLeft = 0; upNext = UP_EVERY; upRound = 0;
   if ($('upSheet')) $('upSheet').hidden = true;
   document.body.classList.remove('zoning');
   burnLeft = 0; burnHist.length = 0; burnT = 0; burnClock = 0;
@@ -5109,6 +5118,8 @@ function actFlash(kind){
   el.dataset.act = kind;
   el.classList.add('on');
   el.setAttribute('aria-hidden', 'false');
+  // toast 默认在盘面 14% 处，正好落在横幅（5%~31%）中间。横幅亮着时把它推下去。
+  document.body.classList.add('flashing');
   sfx('hold', 1.3); buzz([25, 40, 25]);
   syncFx();
 }
@@ -5134,6 +5145,7 @@ function actStep(dt){
 
 function betFlashHide(){
   actKind = '';
+  document.body.classList.remove('flashing');
   betShow = 0;
   const el = $('betFlash');
   if (el){ el.classList.remove('on'); el.setAttribute('aria-hidden', 'true'); }
@@ -6091,7 +6103,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
   crazyStep,
   UPS, UP_BY, UP_FIRST, UP_EVERY, UP_PICK, upMul, upNever, upDraw, upOffer, upOpen, upTake, upSkip, upStep, zoneNeed,
-  get ups(){ return ups; }, get upLeft(){ return upLeft; },
+  get ups(){ return ups; }, get upRound(){ return upRound; }, get upLeft(){ return upLeft; },
   ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
@@ -6113,7 +6125,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   saveGame, restoreGame, upNever, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
-  fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
+  showToast, syncStreak, fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
   feverStart, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,

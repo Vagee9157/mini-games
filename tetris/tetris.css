@@ -1237,7 +1237,10 @@ body[data-ev="calm"] .gwarn{ box-shadow: 0 0 10px rgba(95,224,200,.5); }
    停满十秒，正好盖住你还在挪方块、看形状的那一段。 */
 .betflash{
   position: absolute;
-  left: 50%; top: 5%;
+  left: 50%;
+  /* 不能贴到 5% —— 左上角那列徽章（热度 / B2B / COMBO）最高能长到盘面 13%，
+     横幅会把它们整个盖住。下移到徽章之下。 */
+  top: 16%;
   transform: translate(-50%, 0);
   width: min(90%, 272px);
   display: none;
@@ -1484,3 +1487,8 @@ body.zoning .board-aura{
   box-shadow: 0 0 24px rgba(60,200,180,.24), 0 8px 24px rgba(0,0,0,.5); }
 .betflash[data-act="delay"] .betflash-txt b{ color: #8ff0de; }
 .betflash[data-act="delay"] .betflash-txt i{ color: rgba(143,240,222,.8); }
+
+/* 梭哈横幅亮着时，toast 让到它下面。
+   横幅占盘面 5%~31%，而 toast 默认 14% —— 正好压在横幅中间，
+   两条提示叠在一起谁也读不清。 */
+body.flashing .toast{ top: 38%; }
