@@ -263,12 +263,17 @@ JS = r"""() => {
   clean();                                   // 盘面空 → 不在危险区
   T.garbageTimer = T.garbagePeriod() - 2000;
   const h1 = T.heat; T.delayAuto();
-  ok(T.heat === h1, '不危险的时候缓期一分不动');
+  ok(T.heat === h1, '堆不高的时候缓期一分不动');
+  ok(!T.delayRisk(), '空盘面不算风险');
   // 堆到危险区
   for (let y = 2; y < R; y++) fillRow(y, 5);
   T.syncDanger ? T.syncDanger() : null;
   T.step(20);
-  ok(T.heat < h1, `进危险区后自动付（${Math.round(h1)} → ${Math.round(T.heat)}）`);
+  ok(T.delayRisk(), `堆到一半以上算风险（门槛剩 ${T.DELAY_RISK} 行）`);
+  ok(T.heat < h1, `到风险线后自动付（${Math.round(h1)} → ${Math.round(T.heat)}）`);
+  // 风险线不能定得和 dangerOn 一样苛刻 —— 那条线要求只剩 3 行，
+  // 实测「危险区 ∩ 可缓期」是 0 帧，机制等于不存在
+  ok(T.DELAY_RISK >= 6, `风险线比危险区宽松（危险区只剩 3 行就触发，这里是 ${T.DELAY_RISK}）`);
   ok(T.fxRows().every(r => r.act !== 'delay'), '状态框不再给缓期按钮');
 
   // ── 状态框里没有任何按钮，除非是梭哈 ──

@@ -1242,11 +1242,12 @@ function helpSections(){
               + ' 基数，再乘你当时的倍率）。'
               + '消行本身照常计分，ZONE 给的是额外那一笔 —— 所以问题永远是「还敢不敢再消一行」' },
       { dot: '⏳', name: '缓期', meta: Math.round(DELAY_FRAC * 100) + '% 热度',
-        text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒、而堆已经进了危险区时**自动**花热度，'
+        text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒、而堆已经占到盘面一半以上时**自动**花热度，'
               + '把灰线钟往回推 ' + (DELAY_MS / 1000) + ' 秒。价格是当前热度的 '
               + Math.round(DELAY_FRAC * 100) + '%（最低 ' + DELAY_MIN + '）—— 按比例收所以穷富一个价。'
               + '每行灰线只能缓一次，钟还在走，它是延后不是取消。'
-              + '平时一分不动，只有快被埋的时候才会动用' },
+              + '平时一分不动，只有堆高了才会动用。'
+              + 'FEVER / ZONE / 缓流 期间不动用 —— 那时灰线钟本来就停着，推它没意义' },
       { dot: '✹', name: '彩虹行', meta: '×' + RAIN_MULT,
         text: '棋盘右框外会有个小三角指着某一行，消到它时那一次得分 ×' + RAIN_MULT
               + '。消掉或 ' + Math.round(RAIN_MS / 1000) + ' 秒没消掉就换一行' },
@@ -3455,8 +3456,20 @@ function canDelay(){
 // 偷偷削你的分数。绑在危险区上之后它的含义很清楚 —— 热度是保命资源，
 // 快被埋的时候自己会顶上去，平时一分不动。
 // 为什么不留给玩家按：见 zoneAuto 上面那段。
+// 自动缓期的风险门槛：堆顶离可见区顶部还剩几行以内算「该出手了」。
+//
+// 原来用的是 dangerOn，但那条线要求只剩 3 行（20 行里堆了 17 行）—— 那时候
+// 已经快死了，缓 9 秒也救不回来。实测 4604 帧里「危险区 ∩ 可缓期」是 **0 帧**：
+// 危险区本身只占 3%，和灰线窗口的重叠又被 FEVER / ZONE / 缓流 全部挡掉
+//（那几种情况灰线钟本来就停着，花热度推它没意义，挡是对的）。
+// 结果就是这个机制在实战里等于不存在。
+const DELAY_RISK = 10;
+function delayRisk(){
+  const top = stackTopRow();
+  return top < TOTAL_ROWS && (top - BUFFER) <= DELAY_RISK;
+}
 function delayAuto(){
-  if (!canDelay() || !dangerOn) return;
+  if (!canDelay() || !delayRisk()) return;
   doDelay();
 }
 
@@ -6113,7 +6126,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
-  canDelay, doDelay, delayAuto, syncDanger, get dangerOn(){ return dangerOn; }, zoneAuto, delayCost, garbagePeriod, riseGarbage,
+  canDelay, doDelay, delayAuto, delayRisk, DELAY_RISK, syncDanger, get dangerOn(){ return dangerOn; }, zoneAuto, delayCost, garbagePeriod, riseGarbage,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
   syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
