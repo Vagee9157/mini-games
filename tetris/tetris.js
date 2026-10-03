@@ -1090,6 +1090,12 @@ function helpSections(){
               .map(h => '热度 ' + h + ' → ×' + trimZeros(heatMultAt(h, false).toFixed(1))).join('　') },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
       { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
+      { dot: '✦', name: '燃点', meta: '×' + BURN_MULT,
+        text: Math.round(BURN_WIN / 1000) + ' 秒内热度涨超 ' + Math.round(BURN_RISE * 100) + '%'
+              + ' 就点着 ' + Math.round(BURN_MS / 1000) + ' 秒，这期间得分 ×' + BURN_MULT
+              + '。看的是**涨得快**不是**够高** —— 攒着不动点不着，要连续猛攻。'
+              + '狂欢局更容易点（涨 ' + Math.round(BURN_RISE_RUSH * 100) + '% 就够）'
+              + '、烧得更久（' + Math.round(BURN_MS_RUSH / 1000) + ' 秒）' },
       { dot: '✦', name: '热流', meta: '×' + FLOW_MULT,
         text: '每次消行有概率把该次注入翻 ' + FLOW_MULT + ' 倍，行数越少概率越高 —— 单行 '
               + Math.round(FLOW_P[1] * 100) + '%、两行 ' + Math.round(FLOW_P[2] * 100)
@@ -1680,7 +1686,10 @@ function syncEdge(){
   // 注意这里写的是内联样式 —— CSS 里再写一套 body[data-heat] #board 是压不过的，
   // 所以热度必须折进这个函数，不能单独走样式表。
   const h = CRAZY ? clamp((heatMult() - 1) / 12, 0, 1) : 0;
-  const c = h > 0 ? mix(edgeColor(L), HEAT_EDGE, h) : edgeColor(L);
+  let c = h > 0 ? mix(edgeColor(L), HEAT_EDGE, h) : edgeColor(L);
+  // 燃点期间整圈往橙红推。必须在这里做 —— --au-ring / --bd-ring 是上面
+  // 这几行用内联样式写的，CSS 里再写一套 body.burning .board-aura 压不过它。
+  if (burnOn()) c = mix(c, BURN_EDGE, .75);
   const st = canvas.style;
   st.setProperty('--bd-w',    (1 + t * 1.4 + h * 1.6).toFixed(2) + 'px');
   st.setProperty('--bd-ring', rgba(c, Math.min(.98, .18 + t * .52 + h * .28)));
@@ -2273,6 +2282,8 @@ function fxRows(){
                            k: evActive.bad ? 'bad' : 'good', p: evLeft / evActive.ms });
   else if (flashLeft > 0 && flashFx) out.push({ n: flashFx.name, v: '已发生',
                            k: flashFx.bad ? 'bad' : 'good', p: flashLeft / FX_FLASH });
+  if (burnLeft > 0) out.push({ n: '燃点', v: '×' + BURN_MULT, k: 'burn',
+                               p: burnLeft / (game.rush ? BURN_MS_RUSH : BURN_MS) });
   if (feverLeft > 0) out.push({ n: 'FEVER', v: '×' + FEVER_MULT, k: 'fev', p: feverLeft / FEVER_MS });
   if (game.rush) out.push({ n: '狂欢', v: '×' + RUSH_MULT, k: 'rush' });
   // 右侧显示热度值本身，左上角徽章显示倍率 —— 两处各管一个，不重复。
@@ -3118,9 +3129,90 @@ function crazyStep(dt){
   if (heat < .05) heat = 0;
 }
 
+// ── 燃点 v2（2026-10-03 重做）──
+//
+// 旧版是「热度 > 绝对值就额外加成，而且是线性的」，三个结构性毛病：
+//   1. 线性叠在开方上 —— 基础倍率过拐点用开方压就是为了给它一个界，
+//      再乘线性项等于把界取消。实测真人峰值热度下会被推到 ×619。
+//   2. 阈值是绝对热度 —— 而量程会变（机器人 550 / 真人 7400，差 13 倍），
+//      改一次 HEAT_TAU 又整体平移 3 倍，写死的阈值活不过下次调参。
+//   3. 只给狂欢局 —— 和「150 行后普通局反超」的形状正面冲突。
+//
+// v2 改成挂在**涨得快**而不是**够高**上：最近 BURN_WIN 毫秒里热度净增
+// 超过 BURN_RISE，就点着 BURN_MS 毫秒，期间固定 ×BURN_MULT。
+//
+//   · 相对增幅 → 天然跟着量程走，不用再标绝对值
+//   · 奖励「连续猛攻」这个动作，不是「攒着不动」的存量
+//     （攒到 7400 停手不动 = 没有加成；高热且在猛攻才点得着）
+//   · 固定时长 × 固定倍率 → 完全有界，平均贡献可算，能折进形状计算
+//   · 也更贴这个名字：点火要持续供氧，不是柴火够多就自燃
+//
+// 狂欢局的身份放在「更容易点着 + 烧得更久」上，而不是「倍率更高」——
+// 后者无界，前者有界且可计算。
+const BURN_WIN  = 10000;   // 观察窗口
+const BURN_RISE = .40;     // 窗口内净增超过这个比例就点着
+const BURN_RISE_RUSH = .30;
+const BURN_MS   = 8000;    // 烧多久
+const BURN_MS_RUSH = 12000;
+const BURN_MULT = 1.6;     // 期间的倍率，固定值
+// 热度太低时不参与 —— 从 2 涨到 5 也是 +150%，但那没有任何意义，
+// 而且会让开局必定点着一次。这个下限只用来掐掉噪声，不是设计阈值。
+const BURN_FLOOR = 50;
+const BURN_SAMPLE = 500;   // 每隔这么久记一个热度样本
+// 燃点的边框色。注意两点：
+//   · mix() 收的是 hex 字符串，不是数组 —— 传数组会在 hex() 里变成垃圾值
+//   · 不能用橙红：HEAT_EDGE 本来就是 #ff6a3c，高热时光晕已经是橙红了，
+//     燃点再推橙红等于没区别。往「更烫」的方向走 —— 亮金。
+const BURN_EDGE = '#ffd24a';
+
+let burnLeft = 0;          // 剩余燃烧时间
+let burnHist = [];         // [{t, h}]，只保留窗口内的
+let burnT = 0;             // 采样计时
+
+function burnOn(){ return CRAZY && burnLeft > 0; }
+
+// 每帧推进：采样、判定、倒计时
+function burnStep(dt){
+  if (!CRAZY) return;
+  if (burnLeft > 0){
+    burnLeft -= dt;
+    if (burnLeft <= 0){ burnLeft = 0; syncBurn(); }
+  }
+  burnT += dt;
+  if (burnT < BURN_SAMPLE) return;
+  burnT = 0;
+  const now = game.elapsed;
+  // 时间倒流就整段作废。窗口清理是「now - 最老样本 > 窗口」，一旦 elapsed
+  // 往回跳（重开、或任何把 elapsed 调小的路径），这个判断恒为假，老样本
+  // 永远清不掉 —— 而开局那批样本热度是 0，卡在下面的 BURN_FLOOR 直接 return，
+  // 燃点就再也点不着了。crazyReset 虽然会清历史，但别把正确性押在「调用方
+  // 一定记得清」上。
+  if (burnHist.length && now < burnHist[burnHist.length - 1].t) burnHist.length = 0;
+  burnHist.push({ t: now, h: heat });
+  while (burnHist.length && now - burnHist[0].t > BURN_WIN) burnHist.shift();
+  if (burnLeft > 0 || burnHist.length < 2) return;
+  const old = burnHist[0].h;
+  if (old < BURN_FLOOR) return;
+  const rise = (heat - old) / old;
+  const need = game.rush ? BURN_RISE_RUSH : BURN_RISE;
+  if (rise < need) return;
+  burnLeft = game.rush ? BURN_MS_RUSH : BURN_MS;
+  burnHist.length = 0;                 // 点着之后重新攒窗口，免得同一波连点
+  syncBurn();
+  if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .3, '燃点', '×' + BURN_MULT, 'burn', 1.15);
+  sfx('tetris', 1.35); buzz([40, 25, 40, 25, 70]);
+}
+
+function syncBurn(){
+  document.body.classList.toggle('burning', burnOn());
+  syncEdge();
+  syncFx();
+}
+
 // 事件和赌局的钟要一直走，热度是 0 也得走 —— 上面那个函数会提前 return
 function crazyClocks(dt){
   if (!CRAZY) return;
+  burnStep(dt);
   // 狂风：每隔一会儿把下落中的方块吹偏一格。撞墙就算了，不硬推。
   if (evActive && evActive.key === 'wind' && game.piece && !clearing){
     windTimer += dt;
@@ -3150,6 +3242,8 @@ function crazyReset(){
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
+  burnLeft = 0; burnHist.length = 0; burnT = 0;
+  document.body.classList.remove('burning');
   delete document.body.dataset.ev;
   document.body.classList.remove('betting');
   const ew = $('evwarn'); if (ew) ew.classList.remove('on');
@@ -3254,6 +3348,7 @@ function deepMult(){
 function crazyScoreMult(){
   if (!CRAZY) return 1;
   let m = heatMult() * CRAZY_TUNE * deepMult();
+  if (burnLeft > 0) m *= BURN_MULT;
   if (game.rush) m *= RUSH_MULT;
   if (goldPending) m *= GOLD_MULT;
   if (feverLeft > 0) m *= FEVER_MULT;
@@ -4912,7 +5007,8 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
   // 常量全导出：说明书对账脚本靠这个面核对，漏导一个就等于那条审计不到
   HEAT_DIV, HEAT_KNEE, HEAT_TIERS, HEAT_SOFT, HEAT_TAU, RUSH_MOD, RUSH_BAD, RUSH_FLOOR, FEVER_MULT, FEVER_MS, GOLD_MULT, GOLD_RATE, CHEST_RATE, CHEST_HEAT, PITY_DIV, DANGER_HEAT,
-  heatMult, heatMultAt, heatGain, rollMod, collapseCols, FLOW_MULT, FLOW_P,
+  heatMult, heatMultAt, heatGain, rollMod, burnStep, burnOn, BURN_WIN, BURN_RISE, BURN_RISE_RUSH, BURN_MS, BURN_MS_RUSH, BURN_MULT, BURN_FLOOR,
+  get burnLeft(){ return burnLeft; }, collapseCols, FLOW_MULT, FLOW_P,
   BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
   get betCool(){ return betCool; }, get betLines(){ return betLines; }, betMaybeOffer, betStep,
   bombAt, laserAt, hammerAt, fillAt, doQuake, doCompact, betAccept,

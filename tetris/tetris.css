@@ -147,6 +147,7 @@ body{
 .fxbox .bad  b{ color: #ffb4a6 } .fxbox .bad  .fxbar i{ background: #f43f5e }
 .fxbox .good b{ color: #b8f5e4 } .fxbox .good .fxbar i{ background: #5fe0c8 }
 .fxbox .fev  b{ color: #7fe3ff } .fxbox .fev  .fxbar i{ background: #7fe3ff }
+.fxbox .burn b{ color: #ffb86b } .fxbox .burn .fxbar i{ background: #ff8a3c }
 .fxbox .betrow b{ color: #ffd166 } .fxbox .betrow .fxbar i{ background: #ffb703 }
 /* 待接受的梭哈：这一行要能被点中，所以不吃 .fxs 那个 22px 的固定高 */
 .fxbox .betoffer{ height: auto; }
@@ -996,6 +997,9 @@ body.immersive .tbtn{ font-size: 10.5px; padding: 5px 10px; }
 .pop.record i{ color: #ffb703; letter-spacing: .24em; }
 /* 冰裂：行凑满了却不消，这句话必须看得见 */
 .pop.thaw b{ color: #bfe9ff; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 20px rgba(191,233,255,.7); }
+/* 燃点：橙红，和 FEVER 的青、梭哈的金都分得开 */
+.pop.burn b{ color: #ff9a4d; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 24px rgba(255,120,50,.85); }
+.pop.burn i{ color: #ffb86b; letter-spacing: .2em; }
 .pop.thaw i{ color: #8fd3f4; }
 
 /* 破纪录时分数格本身高亮回弹 —— 那才是玩家盯着的地方 */
@@ -1192,6 +1196,18 @@ body[data-ev="mirror"] .shaker{ outline: 2px dashed rgba(232,121,249,.55); outli
    狂欢局那圈金色都区分得开。有利事件要让人一眼看出「这次是好事」。 */
 body[data-ev="calm"] .shaker{ outline: 2px solid rgba(95,224,200,.6); outline-offset: 3px; }
 body[data-ev="calm"] #board{ filter: saturate(1.08); }
+/* 燃点进行中：盘面光晕烧成橙红并急促脉动。
+   不能用 .shaker::after —— 那个已经被狂欢局的金环占了，::before 被 FEVER
+   背景流动占了，两个伪元素都没空位。改挂在 .board-aura 这个真实元素上，
+   狂欢局 + 燃点同时发生时两者各用各的层，不打架。 */
+body.burning .board-aura{
+  /* 颜色由 syncEdge 写内联（CSS 压不过它），这里只管节奏和亮度 */
+  animation: auraPulse .45s ease-in-out infinite !important;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce){
+  body.burning .board-aura{ animation: none !important; opacity: .8; }
+}
 /* 缓流：预警条停住并变青。它的价值就是「灰线停了」，表现就该做在那根条上 */
 body[data-ev="calm"] .gwarn i{ background: #5fe0c8 !important; animation: none !important; }
 body[data-ev="calm"] .gwarn{ box-shadow: 0 0 10px rgba(95,224,200,.5); }
