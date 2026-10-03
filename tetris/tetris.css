@@ -1446,3 +1446,22 @@ body.zoning .board-aura{
 /* 「不选」。刻意做成安静的那一个 —— 它是出口不是第四张卡，
    但也不能藏起来，一上来被必答题拦住是纯摩擦。 */
 .upskip{ width: 100%; margin-top: 10px; }
+
+/* 彩虹行指示：棋盘右框外侧的小三角，尖端朝左指那一行。
+   用 border 画三角，这样它完全在 canvas 之外，一个格子都挡不到。 */
+.rainmark{
+  position: absolute;
+  /* 整个三角都要在棋盘外侧，所以偏移量要把自身宽度算进去。
+     只写 right:-3px 的话三角本体还压在盘内，会挡住最后一列。 */
+  right: calc(-3px - var(--rm-w, 10px));
+  width: 0; height: 0;
+  border-top: var(--rm-h) solid transparent;
+  border-bottom: var(--rm-h) solid transparent;
+  border-right: var(--rm-w) solid #ff6bd6;
+  filter: drop-shadow(0 0 6px rgba(255,107,214,.95));
+  animation: rainPulse 1.5s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 3;
+}
+@keyframes rainPulse{ from{ opacity: .72 } to{ opacity: 1 } }
+@media (prefers-reduced-motion: reduce){ .rainmark{ animation: none; } }

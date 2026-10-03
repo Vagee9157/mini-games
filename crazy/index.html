@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=5fed11d5">
+<link rel="stylesheet" href="../tetris/tetris.css?v=40da82b4">
 </head>
 <body>
 <div class="topline"></div>
@@ -47,6 +47,9 @@
        <div class="board-aura" id="boardAura" aria-hidden="true"></div>
        <div class="danger" id="danger" aria-hidden="true"></div>
       </div>
+      <!-- 彩虹行指示：贴在棋盘右框外侧的小三角。
+           盘面之内不画任何常驻装饰 —— 之前在盘面里画过两版都被否了。 -->
+      <div class="rainmark" id="rainMark" hidden aria-hidden="true"></div>
       <div class="fx" id="fx" aria-hidden="true"></div>
       <div class="feverbar" aria-hidden="true">FEVER ×4</div>
       <div class="streak" id="streak" aria-hidden="true">
@@ -252,7 +255,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=4f4d9f5d"></script>
+<script src="../tetris/tetris.js?v=c6bb0164"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

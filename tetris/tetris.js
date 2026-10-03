@@ -1223,7 +1223,7 @@ function helpSections(){
               + '%（最低 ' + DELAY_MIN + '）—— 按比例收所以穷富一个价。'
               + '每行灰线只能缓一次，钟还在走，它是延后不是取消' },
       { dot: '✹', name: '彩虹行', meta: '×' + RAIN_MULT,
-        text: '盘面上随机一行会发光，消到它时那一次得分 ×' + RAIN_MULT
+        text: '棋盘右框外会有个小三角指着某一行，消到它时那一次得分 ×' + RAIN_MULT
               + '。消掉或 ' + Math.round(RAIN_MS / 1000) + ' 秒没消掉就换一行' },
       { dot: '⇄', name: '挪列', meta: SWAP_COST + ' 热度',
         text: '点盘面选一列、再点相邻那列，两列整个对调。'
@@ -2088,31 +2088,7 @@ function draw(){
     ctx.restore();
   }
   if (CRAZY) drawCracks();
-  // 彩虹行标记。
-  //
-  // 原来是「整行用 lighter 刷一层彩色 + 压一个 75% 白框」。实机上这是灾难：
-  // lighter 把底下方块的颜色洗白、空格也被涂满，整条看着像个 UI 故障而不是
-  // 游戏元素 —— 用户第一反应是「这是什么？不需要」。
-  //
-  // 重画的原则：**不盖任何格子**。标记只落在行的下沿一道细光 +
-  // 向上很浅的一层渐隐，方块和空格都照原样看得见。
-  if (CRAZY && rainRow >= BUFFER && CELL && !game.over){
-    const y = (rainRow - BUFFER) * CELL;
-    const W = CELL * COLS;
-    const puls = .55 + .25 * Math.sin(game.elapsed / 420);   // 比原来慢一倍，余光里不晃眼
-    ctx.save();
-    // 上下各一道细线把那一行夹住。只画一道会有歧义 —— 看不出指的是线上面
-    // 那行还是下面那行。两道就没这个问题，而且格子上一点东西都不画。
-    const line = ctx.createLinearGradient(0, 0, W, 0);
-    line.addColorStop(0,   'rgba(255,107,214,' + puls.toFixed(2) + ')');
-    line.addColorStop(.4,  'rgba(255,209,102,' + puls.toFixed(2) + ')');
-    line.addColorStop(.75, 'rgba(95,224,200,'  + puls.toFixed(2) + ')');
-    line.addColorStop(1,   'rgba(124,180,255,' + puls.toFixed(2) + ')');
-    ctx.fillStyle = line;
-    ctx.fillRect(0, y, W, 2);
-    ctx.fillRect(0, y + CELL - 2, W, 2);
-    ctx.restore();
-  }
+  syncRainMark();
   // 挪列选中的那一列：描边 + 轻微提亮，和危险带、封锁墙都区分得开
   if (swapSel >= 0 && CELL){
     ctx.save();
@@ -3781,7 +3757,7 @@ function crazyReset(){
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
-  swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false;
+  swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false; rainMarkSig = '';
   zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
   ups = []; upLeft = 0; upNext = UP_EVERY;
   if ($('upSheet')) $('upSheet').hidden = true;
@@ -4743,6 +4719,29 @@ function rainPick(){
   rainRow = cand.length ? cand[(rndFx() * cand.length) | 0] : -1;
   rainLeft = RAIN_MS * upMul('rain');
   needsDraw = true;
+}
+
+// 彩虹行指示器。不画在 canvas 上 —— 盘面之内不放常驻装饰，这条规矩是撞出来的：
+//   v1「整行用 lighter 刷彩色 + 压 75% 白框」：方块被洗白、空格被涂满，
+//      看着像渲染故障，第一反应是「这是什么？」
+//   v2「上下两道细线夹住那一行」：不盖格子了，但两条横线横穿盘面照样是噪声。
+//   v3「画在 canvas 右边缘的三角」：不横穿了，但还是压着最后一列 44%。
+//   v4（现在）：DOM 元素挂在棋盘右框**外侧**，一个格子都挡不到。
+// 顺带它在 .shaker 外面，所以震屏时不跟着抖 —— 它是边框上的指示器不是盘面元素。
+let rainMarkSig = '';
+function syncRainMark(){
+  const el = $('rainMark');
+  if (!el) return;
+  const on = CRAZY && rainRow >= BUFFER && CELL > 0 && !game.over;
+  const sig = on ? rainRow + '/' + CELL : '';
+  if (sig === rainMarkSig) return;               // 只在真的变了的时候写 DOM
+  rainMarkSig = sig;
+  el.hidden = !on;
+  if (!on) return;
+  const h = CELL * .4, w = CELL * .42;
+  el.style.setProperty('--rm-h', h.toFixed(1) + 'px');
+  el.style.setProperty('--rm-w', w.toFixed(1) + 'px');
+  el.style.top = ((rainRow - BUFFER) * CELL + CELL / 2 - h).toFixed(1) + 'px';
 }
 
 function rainStep(dt){
@@ -5904,7 +5903,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   canDelay, doDelay, delayCost, garbagePeriod, riseGarbage,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
-  rainPick, rainStep, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
+  syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
   crazyOnClear, evTail, evBlind, doGlean, GLEAN_N, forkAt, dyeAt, MOD_TINT,
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
