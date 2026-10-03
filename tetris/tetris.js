@@ -248,6 +248,7 @@ function garbagePeriod(){
   const over = game.level - G_OVER_FROM;
   if (over > 0) p *= Math.pow(G_OVER_RATE, over);
   if (game.rush) p *= RUSH_GARBAGE;
+  p *= upMul('garb');            // 薄冰：灰线更快
   return Math.max(G_HARD_MIN, p);
 }
 
@@ -894,6 +895,7 @@ function hardDrop(){
 
 function holdPiece(){
   if (!game.piece || game.holdUsed) return;
+  if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
   if (game.hold){
     const h = game.hold, hm = game.holdMod || null;
@@ -1201,6 +1203,11 @@ function helpSections(){
               + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
+      { dot: '✸', name: '修行', meta: '开局 + 每 ' + UP_EVERY + ' 行',
+        text: '开局给 ' + UP_FIRST + ' 次三选一，之后每打够 ' + UP_EVERY + ' 行再给一次。'
+              + '选中的整局有效、不可更换，一共 ' + UPS.length + ' 张卡。'
+              + '其中 ' + UPS.filter(u => u.vow).length + ' 张是血契 —— 有明码标价的代价，'
+              + '不是更强的卡，是换一种打法。同时最多挂两张血契' },
       { dot: '◉', name: 'ZONE', meta: '攒 ' + ZONE_NEED + ' 行',
         text: '消够 ' + ZONE_NEED + ' 行后状态框给出启动按钮。开启 ' + (ZONE_MS / 1000)
               + ' 秒：重力、灰线、事件三个钟全停，你随便摆。但这期间消掉的行不会消失，'
@@ -1324,6 +1331,7 @@ function fillRunLog(){
   if (r.rerolls) add('换牌', r.rerolls + ' 次');
   if (r.delays) add('缓期', r.delays + ' 次');
   if (r.zones) add('ZONE', r.zones + ' 次 / 最多 ' + r.zoneRows + ' 行');
+  if (r.ups && r.ups.length) add('修行', r.ups.map(k => UP_BY[k] ? UP_BY[k].n : k).join(' · '));
   // 写成 4:47 而不是「4 分 47 秒」—— 后者在 320px 宽的屏上会被截掉尾巴
   add('这局用了', Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0'));
 
@@ -1374,7 +1382,7 @@ function countHoles(){
 function newRun(){
   return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0,
            bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0,
-           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0, zones: 0, zoneRows: 0 };
+           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0, zones: 0, zoneRows: 0, ups: [] };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -1537,7 +1545,7 @@ function riseGarbage(){
   row[gap] = null;                                      // 留个缺口，不然没法消
   // 宝箱：灰线现在只有坏处，这给了它第二个身份 —— 一个看得见、够得到的目标。
   // 状态存在盘面格子里（和冰冻行同一套），塌陷、上顶、地震都会跟着走。
-  if (CRAZY && rndFx() < CHEST_RATE){
+  if (CRAZY && rndFx() < CHEST_RATE * upMul('chest')){
     let x = (rndFx() * COLS) | 0;
     if (x === gap) x = (x + 1) % COLS;
     row[x] = CHEST;
@@ -1856,6 +1864,8 @@ function syncEdge(){
   // 燃点期间整圈往橙红推。必须在这里做 —— --au-ring / --bd-ring 是上面
   // 这几行用内联样式写的，CSS 里再写一套 body.burning .board-aura 压不过它。
   if (burnOn()) c = mix(c, BURN_EDGE, .75);
+  // ZONE 同理，而且要排在燃点之后 —— ZONE 期间时间都停了，它该是最强的那个信号
+  if (CRAZY && zoneLeft > 0) c = mix(c, ZONE_EDGE, .85);
   const st = canvas.style;
   st.setProperty('--bd-w',    (1 + t * 1.4 + h * 1.6).toFixed(2) + 'px');
   st.setProperty('--bd-ring', rgba(c, Math.min(.98, .18 + t * .52 + h * .28)));
@@ -2501,7 +2511,10 @@ function fxRows(){
                k: 'betrow', p: betLeft / BET_MS });
   }
   // ZONE 进行中排在事件之前：它有硬时限，而且你正靠它做决定
-  if (zoneLeft > 0) out.push({ n: 'ZONE ' + zoneRows + '行', v: (zoneLeft / 1000).toFixed(1) + 's',
+  // 侧栏只有 64px 宽，名字 + 行数 + 秒数三样塞不下，会被截成「ZO… 5行 1…」。
+  // 秒数让给那根进度条（它本来就在表时间），数字位留给行数 ——
+  // 奖金是按行数**平方**给的，k 是唯一要你当场做决定的量。
+  if (zoneLeft > 0) out.push({ n: 'ZONE', v: zoneRows + '行',
                                k: 'zone', p: zoneLeft / ZONE_MS });
   else if (zoneReady()) out.push({ n: 'ZONE', v: '就绪', k: 'zoneon', go: '启动', act: 'zone' });
   if (evActive) out.push({ n: evActive.name, v: (evLeft / 1000).toFixed(1) + 's',
@@ -3311,6 +3324,9 @@ function heatMult(){ return heatMultAt(heat, game.rush); }
 // 想把倍率烧上去就得打大的。
 // 整体 ×1.5：热度升得更快。梯度保持原样（四行仍是单行的 8 倍）。
 function heatGain(n, spin, perfect){
+  return heatGainBase(n, spin, perfect) * upMul('heat');
+}
+function heatGainBase(n, spin, perfect){
   if (perfect) return 60;
   if (spin === 'tspin') return [9, 15, 27, 39][n] ?? 39;
   if (spin === 'mini')  return [5, 6, 11][n] ?? 11;
@@ -3365,7 +3381,7 @@ const DELAY_WIN  = 8000;         // 灰线还剩多久时开始提供缓期（�
 let delayUsed = false;           // 这一行灰线是否已经缓过
 
 // 价格现算 —— 说明书和扣费读的是同一个函数，不会对不上
-function delayCost(){ return Math.max(DELAY_MIN, Math.round(heat * DELAY_FRAC)); }
+function delayCost(){ return Math.round(Math.max(DELAY_MIN, heat * DELAY_FRAC) * upMul('delay')); }
 
 // 能不能缓：疯狂版、灰线钟真的在走、进了窗口、热度够、这行还没缓过。
 // 梭哈待接时不提供 —— 状态框只有三槽，而梭哈是有硬时限的，不能被挤掉。
@@ -3418,6 +3434,7 @@ const ZONE_MAX   = 12;           // 最多沉多少行，到顶提前结算
 const ZONE_UNIT  = 100;          // 奖金基数（和单行消除的 base 同量级）
 const ZONE_CURVE = 4;            // 奖金 = UNIT × k² / CURVE
 const ZONE_EG = [4, 8, 12];      // 说明书举的三个行数例子
+function zoneNeed(){ return Math.round(ZONE_NEED * upMul('zone')); }
 let zoneCharge = 0;              // 已攒行数
 let zoneLeft = 0;                // 剩余毫秒
 let zoneRows = 0;                // 已沉下去几行
@@ -3435,8 +3452,111 @@ function zoneFloor(){
   return y;
 }
 
+// ═══════════ 修行（开局三选一 + 局内升级三选一）═══════════
+//
+// 清单第 2 期列了六条：波次制 / 局内升级三选一 / 热度商店 / 开局三选一 /
+// 血契 / 每局契约。它们收成了这一套，理由：
+//
+// · 波次制和局内升级三选一被评审标了「必须二选一」—— 都是「停下来做个选择」
+//   的载体。这游戏是无尽刷分，波次制要重构整个对局结构，升级三选一是加法，选后者。
+// · 血契（有代价的强化）和每局契约（有条件的强化）本质上就是选项池里的两类卡，
+//   单独做等于三套 UI 干一件事。
+// · 热度商店和升级三选一是同一件事的两种付费方式。而热度已经有换牌 / 挪列 /
+//   缓期三个出口了，再加第四个只会把每个都稀释掉。
+//
+// 实现上只有一个约定：每张卡声明自己乘在**哪个字段**上，计算点统一读 upMul()。
+// 这样加一张卡不用碰任何计算代码，也不会出现「这张卡改了 A 忘了改 B」。
+const UP_FIRST = 1;              // 开局给几次选择
+const UP_EVERY = 50;             // 之后每多少行再给一次
+const UP_PICK  = 3;              // 每次给几张候选
+
+// mul 里的字段名就是 upMul() 的参数。never 列出的是「这局禁用什么」。
+const UPS = [
+  { k:'forge',  n:'熔炉', t:'消行的热度注入 +25%',          mul:{ heat: 1.25 } },
+  { k:'ember',  n:'余烬', t:'热度衰减慢 40%，攒得住',       mul:{ tau: 1.4 } },
+  { k:'scav',   n:'拾荒', t:'变异块出现概率 +50%',          mul:{ mod: 1.5 } },
+  { k:'well',   n:'深井', t:'深局每段的加成 +50%',          mul:{ deep: 1.5 } },
+  { k:'vein',   n:'富矿', t:'灰线带宝箱的概率 +80%',        mul:{ chest: 1.8 } },
+  { k:'lamp',   n:'长明', t:'ZONE 少攒 30% 行就能开',       mul:{ zone: .7 } },
+  { k:'buf',    n:'缓冲', t:'缓期只要一半热度',             mul:{ delay: .5 } },
+  { k:'steady', n:'稳手', t:'落地后的锁定延迟 +50%',        mul:{ lock: 1.5 } },
+  { k:'ribbon', n:'彩练', t:'彩虹行停留时间 +60%',          mul:{ rain: 1.6 } },
+  // 血契：有明码标价的代价。它们不是「更强的卡」，是**换一种打法**。
+  { k:'ice',    n:'薄冰', t:'灰线快 28%，但全局得分 ×1.3',  mul:{ garb: .78, score: 1.3 }, vow: true },
+  { k:'vow',    n:'断舍', t:'不能用 HOLD，但热度注入 +45%',  mul:{ heat: 1.45 }, never: 'hold', vow: true },
+  { k:'bare',   n:'孤注', t:'不再出变异块，但全局得分 ×1.45', mul:{ score: 1.45 }, never: 'mod', vow: true },
+];
+const UP_BY = Object.fromEntries(UPS.map(u => [u.k, u]));
+
+let ups = [];            // 这局已选的 key
+let upLeft = 0;          // 还欠几次选择
+let upNext = UP_EVERY;   // 下一次给选择的行数
+
+// 某个字段的总乘数。没有任何卡命中就是 1，所以计算点写法统一：× upMul('heat')
+function upMul(field){
+  let m = 1;
+  for (const k of ups){ const v = UP_BY[k]; if (v && v.mul && v.mul[field]) m *= v.mul[field]; }
+  return m;
+}
+// 这局是否禁用了某样东西（断舍禁 HOLD、孤注禁变异块）
+function upNever(what){
+  for (const k of ups){ if (UP_BY[k] && UP_BY[k].never === what) return true; }
+  return false;
+}
+
+// 抽候选：已选过的不再出；血契最多同时挂两张（三张血契的局基本没法玩）
+function upDraw(){
+  const vows = ups.filter(k => UP_BY[k] && UP_BY[k].vow).length;
+  const pool = UPS.filter(u => !ups.includes(u.k) && !(u.vow && vows >= 2));
+  const out = [];
+  const bag = pool.slice();
+  while (out.length < UP_PICK && bag.length){
+    out.push(bag.splice((rndFx() * bag.length) | 0, 1)[0]);
+  }
+  return out;
+}
+
+function upOffer(n){
+  if (!CRAZY) return;
+  upLeft += n;
+  if (upLeft > 0 && $('upSheet') && $('upSheet').hidden) upOpen();
+}
+
+function upOpen(){
+  const sheet = $('upSheet'), list = $('upList');
+  if (!sheet || !list) return;
+  const cards = upDraw();
+  if (!cards.length){ upLeft = 0; return; }     // 池子抽干了就不再打扰
+  list.innerHTML = cards.map(u =>
+    '<button class="upcard' + (u.vow ? ' vow' : '') + '" type="button" data-up="' + u.k + '">'
+    + '<b>' + u.n + (u.vow ? '<em>血契</em>' : '') + '</b><span>' + u.t + '</span></button>').join('');
+  $('upTitle').textContent = ups.length ? '修行　第 ' + (ups.length + 1) + ' 次' : '开局修行';
+  sheet.hidden = false;
+  game.frozen = true;          // 选的时候方块别接着掉
+}
+
+function upTake(k){
+  const u = UP_BY[k];
+  if (!u || ups.includes(k)) return;
+  ups.push(k);
+  upLeft--;
+  $('upSheet').hidden = true;
+  game.frozen = false;
+  if (game.run) game.run.ups = ups.slice();
+  showToast(u.n + '　' + u.t);
+  sfx('tetris', 1.1); buzz([35, 20, 35]);
+  // 立刻生效的那几张要刷一下 UI
+  heatQuant = -1; syncHeat(); syncEdge(); syncFx(); syncHud();
+  if (upLeft > 0) upOpen(); else resumeLoop();
+}
+
+function upStep(){
+  if (!CRAZY || upLeft > 0) return;
+  if (game.lines >= upNext){ upNext += UP_EVERY; upOffer(1); }
+}
+
 function zoneReady(){
-  return CRAZY && game.started && !game.over && zoneLeft <= 0 && zoneCharge >= ZONE_NEED;
+  return CRAZY && game.started && !game.over && zoneLeft <= 0 && zoneCharge >= zoneNeed();
 }
 
 function zoneStart(){
@@ -3511,7 +3631,7 @@ function crazyStep(dt){
   // FEVER 期间不衰减 —— 那二十秒变成「把热度冻住往上堆」的黄金窗口，
   // 而不只是个 ×4
   if (feverLeft > 0) return;
-  heat *= Math.exp(-dt / HEAT_TAU);
+  heat *= Math.exp(-dt / (HEAT_TAU * upMul('tau')));
   if (heat < .05) heat = 0;
 }
 
@@ -3550,6 +3670,7 @@ const BURN_SAMPLE = 500;   // 每隔这么久记一个热度样本
 //   · 不能用橙红：HEAT_EDGE 本来就是 #ff6a3c，高热时光晕已经是橙红了，
 //     燃点再推橙红等于没区别。往「更烫」的方向走 —— 亮金。
 const BURN_EDGE = '#ffd24a';
+const ZONE_EDGE = '#b49bff';   // ZONE 期间的边框色，和燃点一样必须折进 syncEdge
 
 let burnLeft = 0;          // 剩余燃烧时间
 let burnHist = [];         // [{t, h}]，只保留窗口内的
@@ -3635,6 +3756,8 @@ function crazyReset(){
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
   swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false;
   zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
+  ups = []; upLeft = 0; upNext = UP_EVERY;
+  if ($('upSheet')) $('upSheet').hidden = true;
   document.body.classList.remove('zoning');
   burnLeft = 0; burnHist.length = 0; burnT = 0; burnClock = 0;
   document.body.classList.remove('burning');
@@ -3762,7 +3885,7 @@ const DEEP_EG = [200, 400];    // 说明书举的两个行数例子
 function deepAt(lines, rush){
   if (lines < DEEP_FROM) return 1;
   const base = rush ? DEEP_BASE_RUSH : DEEP_BASE;
-  const step = rush ? DEEP_STEP_RUSH : DEEP_STEP;
+  const step = (rush ? DEEP_STEP_RUSH : DEEP_STEP) * upMul('deep');
   return base + (lines - DEEP_FROM) / DEEP_PER * step;
 }
 function deepMult(){
@@ -3772,7 +3895,7 @@ function deepMult(){
 
 function crazyScoreMult(){
   if (!CRAZY) return 1;
-  let m = heatMult() * CRAZY_TUNE * deepMult();
+  let m = heatMult() * CRAZY_TUNE * deepMult() * upMul('score');
   if (burnLeft > 0) m *= BURN_MULT;
   if (game.rush) m *= RUSH_MULT;
   if (goldPending) m *= GOLD_MULT;
@@ -3801,7 +3924,7 @@ function crazyOnClear(lines, spin, perfect){
   }
   // ZONE 攒条。只数真正消掉的行 —— 空转 T-spin 不算，道具清行走的是另一条路也不算。
   // ZONE 进行中不攒：不然一边用一边就把下一次攒出来了。
-  if (lines > 0 && zoneLeft <= 0) zoneCharge = Math.min(ZONE_NEED, zoneCharge + lines);
+  if (lines > 0 && zoneLeft <= 0) zoneCharge = Math.min(zoneNeed(), zoneCharge + lines);
   // 压哨：灰线刚顶上来就立刻消掉一行
   if (lines > 0 && game.elapsed - lastRiseAt < SNIPE_MS){
     gain += SNIPE_HEAT;
@@ -3930,9 +4053,9 @@ function rollMod(){
   // 但那意味着正确性挂在「每个调用方都记得判」上 —— 新加一处忘了判，
   // 变异块就会漏进标准版，而标准版的卖点正是「纯 Guideline，什么都不加」。
   // heatMult / deepMult / crazyScoreMult 都是自己守的，这里保持一致。
-  if (!CRAZY) return null;
+  if (!CRAZY || upNever('mod')) return null;        // 孤注：这局不出变异块
   // 狂欢局里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
-  const k2 = game.rush ? RUSH_MOD : 1;
+  const k2 = (game.rush ? RUSH_MOD : 1) * upMul('mod');
   let r = rndFx();
   for (const [k, rate] of MOD_RATES){
     const p = k === 'gold' ? rate : rate * k2;
@@ -4474,7 +4597,7 @@ const evSlam     = () => CRAZY && evActive && evActive.key === 'slam';
 // 瞬落时放宽锁定延迟。20G 本身不难，难的是「贴底之后只剩半秒调整」——
 // 那半秒里你既要看清落点又要滑过去，配 500ms 就不是难度是反应力测试。
 // 标准的 20G 玩法都会给更长的锁定窗口，这里给 1.8 倍。
-function lockDelay(){ return evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY; }
+function lockDelay(){ return (evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY) * upMul('lock'); }
 
 // ═══════════ 彩虹行 ═══════════
 //
@@ -4503,7 +4626,7 @@ function rainPick(){
     cand.push(y);
   }
   rainRow = cand.length ? cand[(rndFx() * cand.length) | 0] : -1;
-  rainLeft = RAIN_MS;
+  rainLeft = RAIN_MS * upMul('rain');
   needsDraw = true;
 }
 
@@ -4827,6 +4950,7 @@ function stepOnce(dt){
     if (feverLeft <= 0) feverEnd();
   }
   zoneStep(dt);
+  upStep();
   if (!clearing && game.piece){
     game.elapsed += dt;
     // FEVER 期间灰线暂停 —— 这比「重力减半」有感知得多（重力本来就不痛）
@@ -5355,6 +5479,9 @@ function restart(){
   if (game.rush) showRushIntro();     // 报幕结束时才 spawnNext
   else spawnNext();
   syncHud();
+  // 开局修行放在最后：它会把 game.frozen 置上，所以必须等盘面、队列、报幕
+  // 都铺好再开，否则关掉面板之后看到的是个半成品
+  if (CRAZY) upOffer(UP_FIRST);
   lastFrame = performance.now();
   cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(tick);
@@ -5485,6 +5612,12 @@ function init(){
   // 必须包一层：addEventListener 会把 Event 当第一个参数传进去，
   $('startBtn').addEventListener('click', () => restart());
   $('againBtn').addEventListener('click', () => restart());
+  // 修行卡。委托到容器上 —— 卡片是 innerHTML 重建的，挂不住监听器
+  const ul = $('upList');
+  if (ul) ul.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-up]');
+    if (c) upTake(c.dataset.up);
+  });
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
   const openHelpSheet = () => openHelp();
@@ -5645,7 +5778,10 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
-  zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
+  crazyStep,
+  UPS, UP_BY, UP_FIRST, UP_EVERY, UP_PICK, upMul, upNever, upDraw, upOffer, upOpen, upTake, upStep, zoneNeed,
+  get ups(){ return ups; }, get upLeft(){ return upLeft; },
+  ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
   canDelay, doDelay, delayCost, garbagePeriod, riseGarbage,

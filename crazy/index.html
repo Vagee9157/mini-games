@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=0e5df702">
+<link rel="stylesheet" href="../tetris/tetris.css?v=0e490d3f">
 </head>
 <body>
 <div class="topline"></div>
@@ -196,6 +196,16 @@
   </div>
 
   <!-- 称号面板。两条梯子各自从高往低排，拿到的在上、亮着；没拿到的灰着并写出门槛。 -->
+  <!-- 修行三选一。刻意不给关闭按钮、也不进 Esc 的关闭名单 ——
+       它是一次必须做的选择，不是一个可以划走的弹窗。 -->
+  <div class="sheet upsheet" id="upSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3 id="upTitle">开局修行</h3></div>
+      <span class="sheet-lb">选一个，整局有效</span>
+      <div class="ups" id="upList"></div>
+    </div>
+  </div>
+
   <div class="sheet" id="rankSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>称号</h3></div>
@@ -241,7 +251,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=24748619"></script>
+<script src="../tetris/tetris.js?v=b3684d98"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

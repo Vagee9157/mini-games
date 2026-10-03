@@ -1401,7 +1401,8 @@ body.hotcombo3 .badge.cmb{
 .pop.zone b{ color: #d4c4ff; text-shadow: 0 0 14px rgba(180,155,255,.9); }
 
 /* ZONE 进行中：盘面压一层紫，光晕换色。重力停了，这层底色是唯一的「时间不一样了」的信号 */
-body.zoning .board-wrap{ --au-ring: #b49bff; }
+/* 边框/光晕的颜色不写在这里 —— --au-ring 是 syncEdge() 用内联样式写的，
+   CSS 压不过它。ZONE 的染色折在 syncEdge 里（和燃点同一个坑）。 */
 body.zoning .shaker{ filter: saturate(1.15) hue-rotate(-8deg); }
 body.zoning .board-aura{
   box-shadow: 0 0 44px rgba(180,155,255,.55), inset 0 0 70px rgba(107,79,216,.3);
@@ -1409,3 +1410,35 @@ body.zoning .board-aura{
 }
 @keyframes zonePulse{ from{ opacity: .7 } to{ opacity: 1 } }
 @media (prefers-reduced-motion: reduce){ body.zoning .board-aura{ animation: none; } }
+
+/* 修行三选一。卡片要够大 —— 手机上这是唯一一个「停下来认真读一下」的界面 */
+.ups{ display: flex; flex-direction: column; gap: 10px; margin: 10px 0 4px; }
+.upcard{
+  display: block; width: 100%; text-align: left;
+  padding: 13px 15px; border-radius: 13px;
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.03));
+  border: 1px solid rgba(255,255,255,.14);
+  color: var(--ink); font: inherit; cursor: pointer;
+  transition: transform .12s, border-color .12s, background .12s;
+}
+.upcard:hover, .upcard:focus-visible{
+  border-color: rgba(127,227,255,.6);
+  background: linear-gradient(180deg, rgba(127,227,255,.14), rgba(127,227,255,.05));
+  transform: translateY(-1px);
+}
+.upcard:active{ transform: translateY(1px); }
+.upcard b{ display: block; font-size: 16px; margin-bottom: 3px; color: #7fe3ff; }
+.upcard span{ display: block; font-size: 13px; line-height: 1.5; opacity: .82; }
+/* 血契：有代价的卡要一眼能认出来，不能让人误以为是纯加强 */
+.upcard.vow b{ color: #ff9f6e; }
+.upcard.vow:hover, .upcard.vow:focus-visible{
+  border-color: rgba(255,159,110,.6);
+  background: linear-gradient(180deg, rgba(255,159,110,.14), rgba(255,159,110,.05));
+}
+.upcard b em{
+  font-style: normal; font-size: 11px; margin-left: 7px;
+  padding: 1px 6px; border-radius: 6px; vertical-align: 1px;
+  background: rgba(255,159,110,.2); color: #ffb98f;
+}
+/* 这个面板没有「好了」按钮，底部留白要自己补 */
+.upsheet .sheet-box{ padding-bottom: 16px; }

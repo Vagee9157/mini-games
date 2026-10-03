@@ -9,6 +9,9 @@ from playwright.sync_api import sync_playwright
 JS = r"""() => {
   const T = __tetris, L = [];
   const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
+  // 开局修行面板是硬门禁，不选完什么都动不了。测试里先随手选一张。
+  const passUp = () => { const c = document.querySelector('#upList [data-up]');
+                         if (c && !document.getElementById('upSheet').hidden) T.upTake(c.dataset.up); };
   const Z = T.ZONE;   // 别写死：标记字母改过一次（原来撞了 Z 型方块）
   const B = () => T.game.board;
   const ROWS = B().length, COLS = B()[0].length;
@@ -18,7 +21,7 @@ JS = r"""() => {
   const fill = (y) => { for (let x=0;x<COLS;x++) B()[y][x]='T'; };
   const sink = (n) => { for (let i=0;i<n;i++){ fill(ROWS-1-T.zoneRows); T.applyClear([ROWS-1-T.zoneRows]); } };
 
-  document.getElementById('startBtn').click();
+  document.getElementById('startBtn').click(); passUp();
 
   // 每个工具试一遍：死行必须完好无损
   for (const [name, run] of [

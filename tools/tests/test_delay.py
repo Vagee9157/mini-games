@@ -8,7 +8,10 @@ from playwright.sync_api import sync_playwright
 JS = r"""() => {
   const T = __tetris, L = [];
   const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
-  document.getElementById('startBtn').click();
+  // 开局修行面板是硬门禁，不选完什么都动不了。测试里先随手选一张。
+  const passUp = () => { const c = document.querySelector('#upList [data-up]');
+                         if (c && !document.getElementById('upSheet').hidden) T.upTake(c.dataset.up); };
+  document.getElementById('startBtn').click(); passUp();
   T.heat = 2000;
   const per = T.garbagePeriod();
 
@@ -55,7 +58,7 @@ JS = r"""() => {
   // 状态框按钮带 data-act
   // 瞬发事件不会覆盖 evActive，所以顶不掉 calm —— 直接重开一局拿干净状态
   document.getElementById('againBtn')?.click();
-  document.getElementById('startBtn')?.click();
+  document.getElementById('startBtn')?.click(); passUp();
   ok(!T.evActive, '重开后没有残留事件');
   T.heat = 2000; T.garbageTimer = T.garbagePeriod() - 2000;
   T.syncFx();
@@ -73,7 +76,7 @@ with sync_playwright() as p:
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
         if name=='标准版':
-            r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click();
+            r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click(); passUp();
               T.heat=99999; T.garbageTimer = T.garbagePeriod()-2000;
               const before=T.heat; T.doDelay();
               return ['标准版 canDelay = '+T.canDelay()+' (要 false)', '标准版 doDelay 无副作用 = '+(T.heat===before)]; }""")
