@@ -50,7 +50,8 @@ with sync_playwright() as p:
           // 把能同时出现的提示全逼出来：左上角三个徽章 + 梭哈横幅 + toast
           T.heat = 3000; T.game.combo = 12; T.game.b2b = true; T.syncStreak();
           T.crazyOnClear(T.BET_OFFER_NEED, null, false);
-          T.showToast('压实　洞被填上了'); }""")
+          // 故意用最长的一条文案：toast 曾经 nowrap 且无宽度上限
+          T.showToast('断舍　不能用 HOLD，但热度注入 +45%'); }""")
         pg.wait_for_timeout(500)          # 等 toast 渐显完
         r=pg.evaluate(MEASURE)
         print(f"== {dev} ==  JS错误 {len(errs)}")
@@ -62,6 +63,23 @@ with sync_playwright() as p:
             print(f"   FAIL 只逼出 {n} 个提示，审计没有意义"); fails += 1
         else:
             print(f"   PASS 同时逼出 {n} 个提示")
+        # 还要确认没有横着溢出棋盘 —— toast 曾经是 nowrap 且没宽度上限，
+        # 稍长的文案直接跑到画面外
+        over=pg.evaluate("""() => {
+          const cv=document.getElementById('board').getBoundingClientRect();
+          const out=[];
+          for (const id of ['betFlash','toast','evwarn']){
+            const e=document.getElementById(id); if(!e) continue;
+            const cs=getComputedStyle(e), r=e.getBoundingClientRect();
+            if (cs.display==='none'||r.height<1||+cs.opacity===0) continue;
+            if (r.left < cv.left-2 || r.right > cv.right+2)
+              out.push(id+'(左'+Math.round(r.left-cv.left)+' 右'+Math.round(r.right-cv.right)+')');
+          }
+          return out; }""")
+        if over:
+            print("   FAIL 溢出棋盘：", '、'.join(over)); fails += 1
+        else:
+            print("   PASS 没有横着溢出棋盘")
         if r['重叠']:
             print("   FAIL 重叠：", '、'.join(r['重叠'])); fails += 1
         else:

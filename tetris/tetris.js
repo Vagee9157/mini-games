@@ -3612,9 +3612,13 @@ function upOpen(){
   const cards = upDraw();
   if (!cards.length){ upLeft = 0; return; }     // 池子抽干了就不再打扰
   upRound++;
+  // 单行排版：名字和描述同一行。
+  // 原来是两行卡片，整个面板 393px，在 iPhone 上盖住盘面的 57~62% ——
+  // 而那正好是堆所在的下半部分，选完回来等于丢了对局面的记忆。
   list.innerHTML = cards.map(u =>
     '<button class="upcard' + (u.vow ? ' vow' : '') + '" type="button" data-up="' + u.k + '">'
-    + '<b>' + u.n + (u.vow ? '<em>血契</em>' : '') + '</b><span>' + u.t + '</span></button>').join('');
+    + '<b>' + u.n + '</b>' + (u.vow ? '<em>血契</em>' : '')
+    + '<span>' + u.t + '</span></button>').join('');
   $('upTitle').textContent = upRound > 1 ? '修行　第 ' + upRound + ' 次' : '开局修行';
   const sk = $('upSkip');
   if (sk) sk.textContent = ups.length ? '这次不选' : '不选，直接开';
