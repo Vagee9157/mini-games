@@ -1388,3 +1388,24 @@ body.hotcombo3 .badge.cmb{
   border-color: rgba(95,224,200,.55);
   color: #8ff0de;
 }
+
+/* ZONE。紫色 —— 盘面上没有别的东西用紫，灰线是蓝灰、冰是浅蓝、
+   燃点是金、缓期是青，不会认错。 */
+.fxs.zone{ --fx: #b49bff; }
+.fxs.zone .fxn, .fxs.zoneon .fxn{ color: #b49bff; }
+.fxs.zoneon .fxgo{
+  background: linear-gradient(180deg, rgba(180,155,255,.26), rgba(180,155,255,.12));
+  border-color: rgba(180,155,255,.6);
+  color: #d4c4ff;
+}
+.pop.zone b{ color: #d4c4ff; text-shadow: 0 0 14px rgba(180,155,255,.9); }
+
+/* ZONE 进行中：盘面压一层紫，光晕换色。重力停了，这层底色是唯一的「时间不一样了」的信号 */
+body.zoning .board-wrap{ --au-ring: #b49bff; }
+body.zoning .shaker{ filter: saturate(1.15) hue-rotate(-8deg); }
+body.zoning .board-aura{
+  box-shadow: 0 0 44px rgba(180,155,255,.55), inset 0 0 70px rgba(107,79,216,.3);
+  animation: zonePulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes zonePulse{ from{ opacity: .7 } to{ opacity: 1 } }
+@media (prefers-reduced-motion: reduce){ body.zoning .board-aura{ animation: none; } }

@@ -63,6 +63,7 @@ function colorOf(type){
   if (type === GARBAGE) return '#93a4c4';
   if (type === FROZEN)  return '#8fd8ff';
   if (type === CHEST)   return '#ffd23f';
+  if (type === ZONE)    return '#6b4fd8';
   return PALETTES[activePal || skin.pal][type];
 }
 
@@ -203,9 +204,14 @@ function gravityFor(lvl){
 // G_LINE_BONUS 曾经是 1200（每消一行给难度钟多推 1.2 秒），现在设 0。
 // 模拟发现它专门惩罚打得好的人：熟练档一局消 150 行，等于白送难度钟 180 秒，
 // 越会玩、灰线来得越凶。去掉之后难度钟就是纯已玩时长，对谁都一样。
+// ⚠️ 这四个标记和方块类型（I O T S Z J L）共用同一个格子字段，所以**不能撞字母**。
+// 已经栽过一次：ZONE 原本写成 'Z'，和 Z 型方块同字母 —— Z 块落下去被当成死行画，
+// 而且一整行 Z 块会被判成「死行」永远消不掉（那条扫描不只在 ZONE 期间跑）。
+// tools/audit.py 现在会拦这个。往下加标记前先确认字母没被占。
 const GARBAGE = 'X';
 const FROZEN  = 'F';   // 冰冻格：整行要消两次才掉
 const CHEST   = 'C';   // 灰线里的宝箱：消掉那一行就开
+const ZONE    = '@';   // ZONE 期间沉到底部的死行：是实心的（会把堆顶上去），但不算满行
 // 疯狂版灰线更凶：FEVER 的「灰线暂停」和行雨的「清灰线」都得有东西可对抗，
 // 取消灰线这两个机制就空转了
 // 疯狂版比标准版凶得多。灰线钟走的是绝对时间、跟手速无关，所以它是唯一
@@ -978,6 +984,8 @@ function lockPiece(){
   const full = [], thaw = [];
   for (let y = 0; y < TOTAL_ROWS; y++){
     if (!game.board[y].every(c => c)) continue;
+    // 沉在底部的 ZONE 行天生就是「满」的，不能当满行消掉 —— 它们要等 ZONE 结束一起结算
+    if (CRAZY && game.board[y].every(c => c === ZONE)) continue;
     if (CRAZY && game.board[y].some(c => c === FROZEN)) thaw.push(y); else full.push(y);
   }
   if (thaw.length) crazyThaw(thaw);
@@ -1193,6 +1201,14 @@ function helpSections(){
               + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
+      { dot: '◉', name: 'ZONE', meta: '攒 ' + ZONE_NEED + ' 行',
+        text: '消够 ' + ZONE_NEED + ' 行后状态框给出启动按钮。开启 ' + (ZONE_MS / 1000)
+              + ' 秒：重力、灰线、事件三个钟全停，你随便摆。但这期间消掉的行不会消失，'
+              + '而是沉到盘面底部变成死行 —— 地板一格一格往上涨，最多 ' + ZONE_MAX + ' 行就提前结算。'
+              + '结束时死行一次清空，按行数的平方给奖金（' + ZONE_EG.map(k =>
+                  k + ' 行约 +' + Math.round(ZONE_UNIT * k * k / ZONE_CURVE)).join(' / ')
+              + ' 基数，再乘你当时的倍率）。'
+              + '消行本身照常计分，ZONE 给的是额外那一笔 —— 所以问题永远是「还敢不敢再消一行」' },
       { dot: '⏳', name: '缓期', meta: Math.round(DELAY_FRAC * 100) + '% 热度',
         text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒时状态框给出按钮，点它把灰线钟往回推 '
               + (DELAY_MS / 1000) + ' 秒。价格是当前热度的 ' + Math.round(DELAY_FRAC * 100)
@@ -1307,6 +1323,7 @@ function fillRunLog(){
   if (r.bets) add('梭哈', `${r.betWins}/${r.bets}`);
   if (r.rerolls) add('换牌', r.rerolls + ' 次');
   if (r.delays) add('缓期', r.delays + ' 次');
+  if (r.zones) add('ZONE', r.zones + ' 次 / 最多 ' + r.zoneRows + ' 行');
   // 写成 4:47 而不是「4 分 47 秒」—— 后者在 320px 宽的屏上会被截掉尾巴
   add('这局用了', Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0'));
 
@@ -1357,7 +1374,7 @@ function countHoles(){
 function newRun(){
   return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0,
            bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0,
-           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0 };
+           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0, zones: 0, zoneRows: 0 };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -1491,10 +1508,22 @@ function applyClear(rows){
   const set = new Set(rows);
   const kept = [];
   for (let y = 0; y < TOTAL_ROWS; y++) if (!set.has(y)) kept.push(game.board[y]);
+  if (zoneLeft > 0){
+    // ZONE 期间消掉的行不会消失，而是沉到底部变成死行 —— 盘面从下往上缩。
+    // 行数守恒：拿掉 n 行、底部补 n 行，所以消行之上的堆**原地不动**，
+    // 而消行之下的堆被抬高 n 格。地板在涨，这就是 ZONE 的代价。
+    for (let i = 0; i < rows.length; i++){
+      kept.push(new Array(COLS).fill(ZONE));
+      zoneRows++;
+    }
+    // 不能在这里直接 zoneEnd —— 新盘面还在 kept 里没赋值，zoneEnd 会对着旧盘面动手
+    if (zoneRows >= ZONE_MAX) zoneFull = true;
+  }
   while (kept.length < TOTAL_ROWS) kept.unshift(new Array(COLS).fill(null));
   game.board = kept;
   staticDirty = true;
   needsDraw = true;
+  if (zoneFull){ zoneFull = false; zoneEnd('盘面满了'); }
 }
 
 // 底部塞一行带缺口的灰线，整盘往上顶一格
@@ -1548,6 +1577,9 @@ function endGame(why){
   // FEVER 的视觉不能留到结算页 —— crazyReset 要等重开才跑，中间这段
   // 背景条纹会一直在动
   if (CRAZY && feverLeft > 0) feverEnd();
+  // ZONE 也一样：正在 ZONE 里死掉的话，底部那几行死行要先结算掉，
+  // 否则这局的奖金凭空消失、body.zoning 还会一直挂着
+  if (CRAZY) zoneEnd('');
   game.why = why || '?';
   game.piece = null;
   game.paused = false;              // 收手是从暂停页进来的，不复位的话状态会打架
@@ -2468,6 +2500,10 @@ function fxRows(){
     out.push({ n: '梭哈 ' + betLines + '行', v: (betLeft / 1000).toFixed(1) + 's ' + (m ? '×' + m : '—'),
                k: 'betrow', p: betLeft / BET_MS });
   }
+  // ZONE 进行中排在事件之前：它有硬时限，而且你正靠它做决定
+  if (zoneLeft > 0) out.push({ n: 'ZONE ' + zoneRows + '行', v: (zoneLeft / 1000).toFixed(1) + 's',
+                               k: 'zone', p: zoneLeft / ZONE_MS });
+  else if (zoneReady()) out.push({ n: 'ZONE', v: '就绪', k: 'zoneon', go: '启动', act: 'zone' });
   if (evActive) out.push({ n: evActive.name, v: (evLeft / 1000).toFixed(1) + 's',
                            k: evActive.bad ? 'bad' : 'good', p: evLeft / evActive.ms });
   else if (flashLeft > 0 && flashFx) out.push({ n: flashFx.name, v: '已发生',
@@ -3351,8 +3387,101 @@ function doDelay(){
   heatQuant = -1; syncHeat(); syncEdge(); syncFx();
   if (game.run) game.run.delays = (game.run.delays || 0) + 1;
   showToast(`缓期　−${c} 热度`);
-  popScore('+' + (DELAY_MS / 1000) + 's', 'thaw');
+  popScore(CELL * COLS / 2, (TOTAL_ROWS - BUFFER - 2) * CELL,
+           '+' + (DELAY_MS / 1000) + 's', '灰线', 'thaw');
   sfx('drop', .7); buzz([25, 15, 40]);
+}
+
+// ── ZONE（2026-10-03）──
+//
+// 游戏里已经有三个「限时加倍窗口」：FEVER ×4 二十秒、燃点 ×1.6 八秒、
+// 梭哈十秒按档结算。再加第四个平倍率窗口等于什么都没加。
+// ZONE 的价值在于**形状不同** —— 它是唯一一个拿盘面空间换分数的机制：
+//
+//   · 开启期间重力停、灰线钟停、事件钟停 —— 你有十秒随便摆
+//   · 消掉的行不会消失，而是沉到盘面底部变成死行，地板一格一格往上涨
+//   · 结束时死行一次清空，按**行数的平方**给一笔奖金
+//
+// 所以它的张力是「还敢不敢再消一行」：每多沉一行，奖金涨得更快，
+// 但你的可用高度也少一格。盘面塞满（ZONE_MAX）就提前结算。
+//
+// 一个刻意的简化：ZONE 期间的消行**照常计分、照常推连击/B2B/梭哈行数**，
+// ZONE 只在结束时额外给奖金。把得分推迟到结算听着更带感，但那会让
+// 「一次消除」变得含糊 —— betLines、combo、b2b、彩虹行、压哨全要跟着改，
+// 评审里专门点过这个坑。照常结算 + 额外奖金拿到的手感几乎一样，风险小一个量级。
+//
+// 奖金 = ZONE_UNIT × k² / ZONE_CURVE，再乘和普通消行同一套倍率。
+// 相对「这 k 行按单行消掉」的净增益：k=4 约 2 倍、k=8 约 3 倍、k=12 约 4 倍。
+const ZONE_NEED  = 20;           // 攒够多少行才能开一次
+const ZONE_MS    = 10000;        // 持续时长
+const ZONE_MAX   = 12;           // 最多沉多少行，到顶提前结算
+const ZONE_UNIT  = 100;          // 奖金基数（和单行消除的 base 同量级）
+const ZONE_CURVE = 4;            // 奖金 = UNIT × k² / CURVE
+const ZONE_EG = [4, 8, 12];      // 说明书举的三个行数例子
+let zoneCharge = 0;              // 已攒行数
+let zoneLeft = 0;                // 剩余毫秒
+let zoneRows = 0;                // 已沉下去几行
+let zoneFull = false;            // applyClear 里置位，赋值完盘面再消费
+
+// 死行区的上沿。没有死行时等于 TOTAL_ROWS（也就是「没有地板」）。
+//
+// 所有会**改写已落地格子**的东西都必须在这条线以上收手：炸弹、激光、重锤、地震。
+// 打穿一行死行的后果很隐蔽 —— 那行不再是 every(c === ZONE)，于是
+// ① 满行扫描不再跳过它，② zoneEnd 的 filter 也不认它，
+// 结果它既不会被消掉也不会被清掉，永久卡在盘底，zoneRows 还跟着对不上。
+function zoneFloor(){
+  let y = TOTAL_ROWS;
+  while (y > 0 && game.board[y - 1].every(c => c === ZONE)) y--;
+  return y;
+}
+
+function zoneReady(){
+  return CRAZY && game.started && !game.over && zoneLeft <= 0 && zoneCharge >= ZONE_NEED;
+}
+
+function zoneStart(){
+  if (!zoneReady()) return;
+  zoneCharge = 0; zoneLeft = ZONE_MS; zoneRows = 0; zoneFull = false;
+  document.body.classList.add('zoning');
+  if (game.run) game.run.zones = (game.run.zones || 0) + 1;
+  showToast('ZONE　重力停了');
+  sfx('tetris', .8); buzz([60, 30, 60, 30, 90]);
+  syncFx();
+}
+
+// 结算：底部死行一次清空，盘面落回来，按行数平方给奖金
+function zoneEnd(why){
+  if (zoneLeft <= 0 && zoneRows <= 0) return;
+  zoneLeft = 0;
+  document.body.classList.remove('zoning');
+  const k = zoneRows;
+  zoneRows = 0;
+  if (k > 0){
+    // 把底部那 k 行死行拿掉，顶上补 k 行空的
+    const kept = game.board.filter(row => !row.every(c => c === ZONE));
+    while (kept.length < TOTAL_ROWS) kept.unshift(new Array(COLS).fill(null));
+    game.board = kept;
+    const gain = Math.round(ZONE_UNIT * k * k / ZONE_CURVE
+                            * levelMult(game.level) * crazyScoreMult());
+    game.score += gain;
+    if (game.run && gain > game.run.bestHit) game.run.bestHit = gain;
+    if (game.run) game.run.zoneRows = Math.max(game.run.zoneRows || 0, k);
+    sweepRows([TOTAL_ROWS - 1], '#b49bff');
+    popScore(CELL * COLS / 2, (TOTAL_ROWS - BUFFER - 1) * CELL,
+             '+' + gain.toLocaleString(), k + ' 行', 'zone');
+    shake(k >= 6); sfx('tetris', 1.2); buzz([40, 25, 40, 25, 90]);
+    syncHud();
+  } else if (why){
+    showToast('ZONE 结束　' + why);
+  }
+  staticDirty = true; needsDraw = true;
+  syncFx();
+}
+
+function zoneStep(dt){
+  if (!CRAZY || zoneLeft <= 0) return;
+  zoneLeft -= dt;
+  if (zoneLeft <= 0) zoneEnd('');
 }
 
 const SNIPE_MS = 1000;           // 灰线顶上来多久内消行算压哨
@@ -3505,6 +3634,8 @@ function crazyReset(){
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
   swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false;
+  zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
+  document.body.classList.remove('zoning');
   burnLeft = 0; burnHist.length = 0; burnT = 0; burnClock = 0;
   document.body.classList.remove('burning');
   delete document.body.dataset.ev;
@@ -3668,6 +3799,9 @@ function crazyOnClear(lines, spin, perfect){
     gain *= DANGER_HEAT;
     tip('险中取栗　热度 ×' + DANGER_HEAT, 4000);
   }
+  // ZONE 攒条。只数真正消掉的行 —— 空转 T-spin 不算，道具清行走的是另一条路也不算。
+  // ZONE 进行中不攒：不然一边用一边就把下一次攒出来了。
+  if (lines > 0 && zoneLeft <= 0) zoneCharge = Math.min(ZONE_NEED, zoneCharge + lines);
   // 压哨：灰线刚顶上来就立刻消掉一行
   if (lines > 0 && game.elapsed - lastRiseAt < SNIPE_MS){
     gain += SNIPE_HEAT;
@@ -3858,10 +3992,11 @@ function fillAt(p){
 // 让这几列里的格子落下去填掉下方的空洞。
 // 俄罗斯方块本身没有这种重力，所以它只能是特效，必须有明确的视觉来源。
 function collapseCols(cols){
+  const floor = zoneFloor();                   // 塌实只在死行之上进行
   for (const x of cols){
     if (x < 0 || x >= COLS) continue;
-    let w = TOTAL_ROWS - 1;
-    for (let y = TOTAL_ROWS - 1; y >= 0; y--){
+    let w = floor - 1;
+    for (let y = floor - 1; y >= 0; y--){
       const v = game.board[y][x];
       if (!v) continue;
       game.board[w][x] = v;
@@ -3886,6 +4021,8 @@ function clearFullNow(){
   const full = [], thaw = [];
   for (let y = 0; y < TOTAL_ROWS; y++){
     if (!game.board[y].every(c => c)) continue;
+    // 沉在底部的 ZONE 行天生就是「满」的，不能当满行消掉 —— 它们要等 ZONE 结束一起结算
+    if (CRAZY && game.board[y].every(c => c === ZONE)) continue;
     if (CRAZY && game.board[y].some(c => c === FROZEN)) thaw.push(y); else full.push(y);
   }
   if (thaw.length) crazyThaw(thaw);
@@ -3926,8 +4063,10 @@ function bombAt(p){
       kill.add(y * COLS + x); cols.add(x);
     }
   }
+  const floor = zoneFloor();
   for (const k of kill){
     const y = (k / COLS) | 0, x = k % COLS;
+    if (y >= floor) continue;                  // 死行是地板，炸不动
     if (y >= BUFFER && game.board[y][x]) boom(x, y, '#ff7a4d');
     game.board[y][x] = null;
   }
@@ -3944,14 +4083,15 @@ function laserAt(p){
   if (cx < 0 || cx >= COLS) return;
   // 整块连同下方那一列一起汽化。
   // 只打一列的话，方块落在别的列上的那几格会悬在半空 —— 看着像 bug 不像特效。
+  const floor = zoneFloor();                   // 死行是地板，激光打不穿
   for (const [dx, dy] of cells){
     const x = p.x + dx, y = p.y + dy;
-    if (x < 0 || x >= COLS || y < 0 || y >= TOTAL_ROWS) continue;
+    if (x < 0 || x >= COLS || y < 0 || y >= floor) continue;
     if (y >= BUFFER && game.board[y][x]) boom(x, y, '#7cf4ff');
     game.board[y][x] = null;
   }
   const top = p.y + Math.min(...cells.map(c => c[1]));
-  for (let y = Math.max(top, 0); y < TOTAL_ROWS; y++){
+  for (let y = Math.max(top, 0); y < floor; y++){
     if (y >= BUFFER && game.board[y][cx]) boom(cx, y, '#7cf4ff');
     game.board[y][cx] = null;
   }
@@ -4237,6 +4377,7 @@ function evStepSchedule(dt){
     if (evLeft > 0){ evLeft -= dt; if (evLeft <= 0) evEnd(); }
     return;
   }
+  if (zoneLeft > 0) return;        // ZONE 期间事件钟也停 —— 十秒里再来个暗幕就太脏了
   evTimer += dt;
   if (evTimer < evPeriod()) return;
   evTimer = 0;
@@ -4282,7 +4423,8 @@ function evEnd(){
 // 换成「撞墙不动」的话它就不是灾难了，而灾难正是它存在的意义。
 function doQuake(){
   const dir = rndFx() < .5 ? -1 : 1;
-  for (let y = 0; y < TOTAL_ROWS; y++){
+  const floor = zoneFloor();
+  for (let y = 0; y < floor; y++){             // 死行不跟着震：推出边界会把它打成半截
     const row = game.board[y], out = new Array(COLS).fill(null);
     for (let x = 0; x < COLS; x++){
       const nx = x + dir;
@@ -4352,7 +4494,9 @@ let rainRow = -1, rainLeft = 0;
 function rainPick(){
   if (!CRAZY || !game.started || game.over){ rainRow = -1; return; }
   const cand = [];
-  for (let y = BUFFER; y < TOTAL_ROWS; y++){
+  // 死行区不参与：那几行是 ZONE 的地板，消不掉，标在上面等于这局彩虹行白费
+  const floor = zoneFloor();
+  for (let y = BUFFER; y < floor; y++){
     const row = game.board[y];
     if (!row.some(Boolean)) continue;
     if (row.every(c => c === FROZEN)) continue;
@@ -4391,6 +4535,13 @@ function rainBoom(){
 function rainShift(rows){
   if (!CRAZY || rainRow < 0) return;
   if (rows.includes(rainRow)){ rainPick(); return; }
+  if (zoneLeft > 0){
+    // ZONE 下的位移和普通塌陷**方向相反**：地板在涨，所以消行**之上**的堆
+    // 原地不动，消行**之下**的堆被抬高。普通塌陷正好反过来（之上的往下落）。
+    rainRow -= rows.filter(y => y < rainRow).length;
+    if (rainRow < BUFFER || rainRow >= zoneFloor()) rainPick();
+    return;
+  }
   rainRow += rows.filter(y => y > rainRow).length;
   if (rainRow >= TOTAL_ROWS) rainPick();
 }
@@ -4599,6 +4750,13 @@ function betPop(label, text, kind){
   popScore(CELL * COLS / 2, CELL * ROWS * .34, text, label, 'bet ' + kind, 1.05);
 }
 
+// 状态框里的按钮现在有三种，统一在这里分发
+function fxAct(act){
+  if (act === 'delay') doDelay();
+  else if (act === 'zone') zoneStart();
+  else betAccept();
+}
+
 function betAccept(){
   if (!CRAZY || betOffer <= 0) return;
   betOffer = 0; betLeft = BET_MS; betLines = 0;
@@ -4668,18 +4826,20 @@ function stepOnce(dt){
     feverLeft -= dt;
     if (feverLeft <= 0) feverEnd();
   }
+  zoneStep(dt);
   if (!clearing && game.piece){
     game.elapsed += dt;
     // FEVER 期间灰线暂停 —— 这比「重力减半」有感知得多（重力本来就不痛）
-    if (feverLeft <= 0 && !evCalm()) garbageTimer += dt;    // FEVER 和缓流都冻结灰线钟
+    if (feverLeft <= 0 && !evCalm() && zoneLeft <= 0) garbageTimer += dt;   // FEVER / 缓流 / ZONE 都冻结灰线钟
     const period = garbagePeriod();
     // 所有事件都有三秒预告，偏偏真正杀你的灰线是无声的。补一道。
     // 看着像削难度，其实是加紧张感 —— 你会盯着它倒数，然后决定这三秒
     // 要不要再赌一块。也只有知道它什么时候来，「压哨」才谈得上抢。
     // 只给疯狂版。这条其实对标准版也是好的（真正杀你的东西本来就该有预告），
     // 但标准版的表现一直承诺不动，要加得单独说。
-    syncGarbageWarn(CRAZY && !game.noGarbage && feverLeft <= 0 && !evCalm() ? period - garbageTimer : -1);
-    if (!game.noGarbage && feverLeft <= 0 && !evCalm() && garbageTimer >= period){
+    syncGarbageWarn(CRAZY && !game.noGarbage && feverLeft <= 0 && !evCalm() && zoneLeft <= 0
+                    ? period - garbageTimer : -1);
+    if (!game.noGarbage && feverLeft <= 0 && !evCalm() && zoneLeft <= 0 && garbageTimer >= period){
       garbageTimer -= period;
       riseGarbage();
     }
@@ -4710,8 +4870,10 @@ function stepOnce(dt){
     }
     const g = gravityFor(game.level);
     const speed = softDropping ? g / SOFT_DROP_FACTOR : g;
-    dropTimer += dt;
-    while (dropTimer >= speed){
+    // ZONE 期间重力停 —— 手动软降/硬降照常，所以限制你的是摆放速度不是重力。
+    // 这是 ZONE 和 FEVER 手感不同的根源：FEVER 是被动吃倍率，ZONE 是主动抢时间。
+    if (zoneLeft > 0) dropTimer = 0; else dropTimer += dt;
+    while (zoneLeft <= 0 && dropTimer >= speed){
       dropTimer -= speed;
       if (!collides(game.piece.type, game.piece.x, game.piece.y + 1, game.piece.rot)){
         game.piece.y++;
@@ -5335,9 +5497,8 @@ function init(){
   $('fxBox').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' '){
       e.preventDefault();
-      if (e.target.closest('.fxgo')){
-        if (e.target.closest('.fxgo').dataset.act === 'delay') doDelay(); else betAccept();
-      } else openHelpSheet();
+      if (e.target.closest('.fxgo')) fxAct(e.target.closest('.fxgo').dataset.act);
+      else openHelpSheet();
     }
   });
   const closeHelp = () => { $('helpSheet').hidden = true; };
@@ -5411,8 +5572,7 @@ function init(){
     const take = (e) => {
       if (!e.target.closest('.fxgo')) return;
       e.preventDefault(); e.stopImmediatePropagation();
-      // 现在有两种出价按钮了，按 data-act 分发
-      if (e.target.closest('.fxgo').dataset.act === 'delay') doDelay(); else betAccept();
+      fxAct(e.target.closest('.fxgo').dataset.act);
     };
     box.addEventListener('touchstart', take, { passive: false });
     box.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
@@ -5485,6 +5645,9 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
+  zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
+  get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
+  get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
   canDelay, doDelay, delayCost, garbagePeriod, riseGarbage,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },

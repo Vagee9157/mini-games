@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""说明书对账 —— 禁止在帮助文案里直接敲阿拉伯数字。
+"""源码对账 —— 两件事：格子标记不能撞字母，帮助文案不能写死数字。
 
 本仓库「说明书说谎」出过四次，全是同一个形状：**数字被写进字符串字面量**，
 常量后来改了，字符串没跟着改。
@@ -52,8 +52,42 @@ def zones(src):
 # 抓字符串字面量（单引号 / 双引号 / 反引号），跳过转义
 STR = re.compile(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\]|\\.)*)`")
 
+MARKERS = ('GARBAGE', 'FROZEN', 'CHEST', 'ZONE')
+
+def markers(src):
+    """格子标记不能和方块类型撞字母。
+
+    这四个标记（灰线/冰冻/宝箱/死行）和方块类型共用同一个格子字段。
+    ZONE 原本写成 'Z'，正好是 Z 型方块 —— 于是 Z 块被当成死行画，
+    而且一整行 Z 块会被判成死行永远消不掉。字母撞车没有任何征兆，
+    只能靠机器盯。
+    """
+    types = re.search(r'const PIECES = \{(.*?)\n\};', src, re.S)
+    if not types:
+        return ['找不到 PIECES，无法核对格子标记']
+    tset = set(re.findall(r"^\s*([A-Z])\s*:", types.group(1), re.M))
+    bad = []
+    seen = {}
+    for name in MARKERS:
+        m = re.search(rf"const {name}\s*=\s*'(.)'", src)
+        if not m:
+            bad.append(f'找不到格子标记 {name}'); continue
+        ch = m.group(1)
+        if ch in tset:
+            bad.append(f"{name} = '{ch}' 和方块类型 {ch} 撞字母")
+        if ch in seen:
+            bad.append(f"{name} 和 {seen[ch]} 都用了 '{ch}'")
+        seen[ch] = name
+    return bad
+
 def main():
     src = open(SRC, encoding='utf-8').read()
+    mb = markers(src)
+    if mb:
+        print('❌ 格子标记有冲突：')
+        for b in mb: print('  ', b)
+        return 1
+    print(f'格子标记 {len(MARKERS)} 个，和方块类型无冲突')
     lines = src.count('\n')
     bad, scanned = [], 0
     for name, a, b in zones(src):
