@@ -3501,6 +3501,11 @@ function modIconOn(c, cells, ox, oy, cell, minX, minY, mod){
 }
 
 function rollMod(){
+  // 自己守一道。两个调用方现在都写了 CRAZY ? rollMod() : null，标准版是干净的，
+  // 但那意味着正确性挂在「每个调用方都记得判」上 —— 新加一处忘了判，
+  // 变异块就会漏进标准版，而标准版的卖点正是「纯 Guideline，什么都不加」。
+  // heatMult / deepMult / crazyScoreMult 都是自己守的，这里保持一致。
+  if (!CRAZY) return null;
   // 狂欢局里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
   const k2 = game.rush ? RUSH_MOD : 1;
   let r = rndFx();
