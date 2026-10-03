@@ -276,6 +276,7 @@ const TOTAL_KEY = nsKey('total.v1');      // 生涯累计分
 const DAILY_KEY = nsKey('daily.v1');      // 今日最佳（按北京时间归日）
 const SAVE_KEY  = nsKey('save.v1');       // 隔离：疯狂版的存档不能被标准版 restore
 const LEGACY_KEY = nsKey('best.legacy');  // 清档时把旧纪录留一份
+const RECENT_KEY = nsKey('recent.v1');    // 最近若干局的分数，给「目标线」用
 function readLegacy(){
   try { return parseInt(localStorage.getItem(LEGACY_KEY) || '0', 10) || 0; }
   catch { return 0; }
@@ -502,6 +503,57 @@ function takeRush(){
 }
 
 
+// ── 目标线 ──
+//
+// 问题：唯一的参照系是历史最高分，而那是个被设计成追不上的数 ——
+// 所以绝大多数局结束时的默认感受都是「又没破纪录」。
+//
+// 做法：线 = 最近 RECENT_N 局里**第 GOAL_RANK 高**的那个分数。
+//
+// 为什么用顺序统计量而不是「中位数 × 系数」：
+//   新一局超过旧 n 局中第 j 高的概率**恒等于 j/(n+1)**，和分数分布长什么样
+//   完全无关（实测重尾和正态都是 45.0% vs 理论 45.5%）。所以过线率由构造
+//   保证，不需要任何要实测才知道对不对的魔数，想调手感就是调一个整数。
+//   最早写的是「最近 5 局中位数 × 1.2，让大约一半过线」—— 中位数本身就
+//   精确是 50%，乘 1.2 反而把它压到 50% 以下；而且 n=5 的中位数在这种
+//   重尾分布上抖 ±39%，比它要表达的 +20% 还大两倍。
+//
+// 狂欢局要归一化：它同行数能高 1.5~2.5 倍，不归一的话连着两局狂欢局就
+// 把线拽到普通局够不着的地方。存进去先除以 RUSH_MULT，取出来按本局是不是
+// 狂欢局再乘回来。
+const RECENT_N = 10;
+const GOAL_RANK = 5;        // 第几高 → 过线率 = GOAL_RANK/(RECENT_N+1) ≈ 45%
+
+function readRecent(){
+  // 存的是数组，坏数据会在 slice/sort 上抛 —— 这个读取点在开局和侧栏渲染里，
+  // 一抛就是白屏。照 readSave 的校验强度来，不是 readDaily 那种。
+  try {
+    const d = JSON.parse(localStorage.getItem(RECENT_KEY) || 'null');
+    if (!d || !Array.isArray(d.v)) return [];
+    // 清档只在分数量纲整体位移时才发生（见 WIPE_TOKENS 的注释）。
+    // 旧标度的分数留着，线要么这辈子过不去、要么开局就过。
+    if (d.tok !== WIPE_TOKEN) return [];
+    return d.v.filter(n => typeof n === 'number' && Number.isFinite(n) && n >= 0).slice(-RECENT_N);
+  } catch { return []; }
+}
+function pushRecent(score){
+  try {
+    const v = readRecent();
+    // 归一化后再存：狂欢局的分数先折回普通局口径
+    v.push(game.rush ? score / RUSH_MULT : score);
+    localStorage.setItem(RECENT_KEY, JSON.stringify({ v: v.slice(-RECENT_N), tok: WIPE_TOKEN }));
+  } catch { /* 忽略 */ }
+}
+// 本局的目标分。样本不够时按比例缩 rank，不足 3 局不给线（太少了没意义）。
+function goalScore(){
+  const v = readRecent();
+  if (v.length < 3) return 0;
+  const sorted = v.slice().sort((a, b) => b - a);
+  const j = Math.max(1, Math.round(GOAL_RANK * sorted.length / RECENT_N));
+  const base = sorted[Math.min(j, sorted.length) - 1];
+  return Math.round(game.rush ? base * RUSH_MULT : base);
+}
+
 // ── 今日最佳 ──
 // 按北京时间归日，而且按「这一局结束的时刻」算 —— 跨零点打完的那局算新的一天，
 // 否则昨天的成绩会挤掉今天的第一局。
@@ -596,6 +648,8 @@ function restoreGame(d){
   // 续玩要把狂欢状态一起接回来。原来这里不碰 game.rush，所以存档一续
   // 狂欢局就静默降成普通局 —— 分数倍率、灰线速度、道具概率全跟着没了。
   game.rush = FORCE_RUSH || (CRAZY && !!d.rush);
+  goalNow = CRAZY ? goalScore() : 0;
+  goalHit = CRAZY && goalNow > 0 && game.score >= goalNow;
   document.body.classList.toggle('rushrun', !!game.rush);
   const sl = $('scoreLabel');
   if (sl) sl.textContent = game.rush ? 'SCORE ×' + RUSH_MULT : 'SCORE';
@@ -1510,12 +1564,21 @@ function endGame(why){
     if (real && !FORCE_RUSH) countRush();   // 测试模式不推进保底计数
     const d = readDaily();          // readDaily 自己会判断是不是还是同一天
     if (real) d.plays++;
+    if (real) pushRecent(game.score);   // 只有走到 endGame 才记，中途重开不算
     if (game.score > d.best) d.best = game.score;
     writeDaily(d);
   }
   // 标题写死是「堆到顶了」，收手局那是字面意义上的说谎
   const h2 = $('overTitle');
   if (h2) h2.textContent = game.why === '收手' ? '收手了' : '堆到顶了';
+  const gl = $('overGoal');
+  if (gl){
+    const on = CRAZY && goalNow > 0;
+    gl.hidden = !on;
+    if (on) gl.textContent = goalHit ? '过线了　目标 ' + fmtScore(goalNow)
+                                     : '差一点　目标 ' + fmtScore(goalNow);
+    gl.classList.toggle('hit', goalHit);
+  }
   $('overScore').textContent = game.score.toLocaleString();
   $('overLines').textContent = game.lines;
   $('overLevel').textContent = game.level;
@@ -2229,7 +2292,28 @@ function drawParticles(){
 
 // ───────────────────────── HUD ─────────────────────────
 
+// 本局的目标分和过没过。goalNow 开局算一次就定住 —— 它依赖 game.rush，
+// 而 rush 整局不变；每帧重算要读 localStorage，没必要。
+let goalNow = 0, goalHit = false;
+
+function goalCheck(){
+  if (!CRAZY || goalHit || goalNow <= 0 || game.over) return;
+  if (game.score < goalNow) return;
+  goalHit = true;
+  if (CELL) popScore(CELL * COLS / 2, CELL * ROWS * .18, '过线', '今天的目标', 'goal', 1.15);
+  sfx('level', 1.45); buzz([30, 20, 30, 20, 60]);
+}
+
+function syncGoal(){
+  const el = $('goalLine');
+  if (!el) return;
+  el.hidden = !(CRAZY && goalNow > 0);
+  const b = $('goalVal');
+  if (b) b.textContent = fmtScore(goalNow);
+}
+
 function syncHud(){
+  goalCheck();
   // 这两个跟分数无关（堆高、连击断掉都不改分），不能挡在下面的缓存早退后面
   syncStreak();
   syncDanger();
@@ -4826,6 +4910,9 @@ function restart(){
   game.elapsed = 0;
   game.why = '';
   bestBeaten = false;
+  // 目标线开局定一次：它依赖 game.rush，而 restart 里 rush 已经定了
+  goalNow = CRAZY ? goalScore() : 0;
+  goalHit = false;
   dangerOn = false;
   shownScore = 0;
   crazyReset();
@@ -4930,6 +5017,7 @@ function applyWipe(){
     if (had > 0 && had > oldLegacy) localStorage.setItem(LEGACY_KEY, String(had));
     localStorage.removeItem(STORE_KEY);
     localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(RECENT_KEY);   // 旧标度的分数留着，线会彻底失真
     localStorage.setItem(WIPE_KEY, WIPE_TOKEN);
     return had > 0;
   } catch { return false; }   // 隐私模式下读写都会抛，那就当没这回事
@@ -5133,7 +5221,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
-  fmtScore, setStat,
+  fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
   feverStart, switchTrack, setPack, setTempo,
