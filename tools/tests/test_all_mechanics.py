@@ -309,6 +309,16 @@ JS = r"""() => {
   ok(!document.getElementById('upSheet').hidden, '梭哈结束后补上，不会漏');
   T.upSkip();
 
+  // ZONE 的十秒也是在抢时间，同样不该被全屏弹窗拦下
+  fresh();
+  T.zoneCharge = T.zoneNeed(); T.step(20);
+  ok(T.zoneLeft > 0, 'ZONE 开着');
+  T.game.lines = T.UP_EVERY + 1; T.upStep();
+  ok(document.getElementById('upSheet').hidden, 'ZONE 期间不弹修行面板');
+  T.zoneEnd(''); T.upStep();
+  ok(!document.getElementById('upSheet').hidden, 'ZONE 结束后补上');
+  T.upSkip();
+
   // 盘面提示的重叠审计搬到了 test_prompts.py —— 它要等 toast 的渐显动画跑完，
   // 而这个大 JS 块是同步执行的，等不了。
 

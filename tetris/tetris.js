@@ -3658,10 +3658,11 @@ function zoneAuto(){
 
 function upStep(){
   if (!CRAZY || upLeft > 0) return;
-  // 梭哈待接或进行中不打断。面板会把整局冻住，虽然梭哈的计时也跟着冻、
-  // 不会判你输，但「正打到一半被一个全屏弹窗拦下」本身就是提示混乱。
+  // 限时窗口进行中不打断。面板会把整局冻住 —— 计时也跟着冻、不会判你输，
+  // 但「正抢着摆方块时被一个全屏弹窗拦下」本身就是打断。
   // 等它结束再发，upNext 已经推过了，不会漏。
-  if (betOffer > 0 || betLeft > 0) return;
+  if (betOffer > 0 || betLeft > 0) return;   // 梭哈待接 / 赌局进行中
+  if (zoneLeft > 0) return;                  // ZONE 的十秒也是在抢时间
   if (game.lines >= upNext){ upNext += UP_EVERY; upOffer(1); }
 }
 
