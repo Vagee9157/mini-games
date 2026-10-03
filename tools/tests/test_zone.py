@@ -107,7 +107,8 @@ with sync_playwright() as p:
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
         if name=='标准版':
-            r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click(); passUp();
+            r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click();
+              // 标准版没有修行面板，不需要 passUp（这里曾经误加过，整个文件直接崩）
               T.zoneCharge = 999; const a = T.zoneReady(); T.zoneStart();
               return ['标准版 zoneReady='+a+' (要 false)','标准版 zoneLeft='+T.zoneLeft+' (要 0)',
                       '标准版 body.zoning='+document.body.classList.contains('zoning')+' (要 false)']; }""")

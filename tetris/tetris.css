@@ -133,7 +133,17 @@ body{
 /* ── 状态格 ── */
 .fxbox{ padding: 5px 6px 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .fxbox:hover, .fxbox:focus-visible{ border-color: rgba(255,255,255,.28); outline: none; }
-.fxbox .fxs{ height: 22px; margin-top: 3px; }
+/* 高度是 min 不是固定值 —— 带「接受 / 启动 / 缓期」按钮的行里那颗按钮
+   自己就 30px，钉死 22px 会让它撑出去压住下一行。
+   原来只给梭哈单独开了 height:auto，后加的 ZONE 和缓期就踩了这个坑。 */
+.fxbox .fxs{ min-height: 22px; margin-top: 3px; }
+/* 空槽平时照样占位（三槽常驻是为了防止事件起落时整列上下跳），
+   但出现按钮那一行时例外：按钮自己就 26px，不让空槽塌陷的话整个框会
+   向上顶出侧栏 20px —— 「状态」标题钻到顶栏按钮后面、底下「段位」被挤出屏幕。
+   梭哈十秒才来一次，这点高度变化远比布局炸掉可接受。 */
+.fxbox.acting .fxs:empty{ min-height: 0; margin-top: 0; }
+/* 还差最后几个像素，从内边距里省 —— 不动按钮尺寸，它是要用手指点的 */
+.fxbox.acting{ padding-top: 2px; padding-bottom: 2px; }
 .fxbox .fxs:first-of-type{ margin-top: 2px; }
 .fxbox .fxl{ display: flex; align-items: baseline; justify-content: space-between; gap: 3px; }
 .fxbox b{ font-family: var(--mono); white-space: nowrap; }
@@ -149,8 +159,6 @@ body{
 .fxbox .fev  b{ color: #7fe3ff } .fxbox .fev  .fxbar i{ background: #7fe3ff }
 .fxbox .burn b{ color: #ffb86b } .fxbox .burn .fxbar i{ background: #ff8a3c }
 .fxbox .betrow b{ color: #ffd166 } .fxbox .betrow .fxbar i{ background: #ffb703 }
-/* 待接受的梭哈：这一行要能被点中，所以不吃 .fxs 那个 22px 的固定高 */
-.fxbox .betoffer{ height: auto; }
 .fxbox .betoffer b{ color: #ffd166 }
 .fxbox .betoffer .fxbar i{ background: #ffb703 }
 .fxbox .fxgo{
@@ -161,7 +169,7 @@ body{
   background: linear-gradient(180deg, #ffd980, #ffb020);
   border: 0; border-radius: 7px;
   /* 侧栏只有 64px 宽，高度就得给够 —— 这个键十秒就没，点不中等于白给 */
-  min-height: 30px;
+  min-height: 26px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1465,3 +1473,14 @@ body.zoning .board-aura{
 }
 @keyframes rainPulse{ from{ opacity: .72 } to{ opacity: 1 } }
 @media (prefers-reduced-motion: reduce){ .rainmark{ animation: none; } }
+
+/* 盘面提示三个动作共用，按 data-act 换色 —— 和右侧状态栏那一行同色，
+   这样「盘面上这块」和「侧栏那行」一眼能对上是同一件事。 */
+.betflash[data-act="zone"]{ border-color: rgba(180,155,255,.62);
+  box-shadow: 0 0 24px rgba(140,110,240,.26), 0 8px 24px rgba(0,0,0,.5); }
+.betflash[data-act="zone"] .betflash-txt b{ color: #c9b6ff; }
+.betflash[data-act="zone"] .betflash-txt i{ color: rgba(201,182,255,.8); }
+.betflash[data-act="delay"]{ border-color: rgba(95,224,200,.62);
+  box-shadow: 0 0 24px rgba(60,200,180,.24), 0 8px 24px rgba(0,0,0,.5); }
+.betflash[data-act="delay"] .betflash-txt b{ color: #8ff0de; }
+.betflash[data-act="delay"] .betflash-txt i{ color: rgba(143,240,222,.8); }

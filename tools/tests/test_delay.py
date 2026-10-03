@@ -62,8 +62,9 @@ JS = r"""() => {
   ok(!T.evActive, '重开后没有残留事件');
   T.heat = 2000; T.garbageTimer = T.garbagePeriod() - 2000;
   T.syncFx();
-  const b = document.querySelector('#fxBox .fxgo[data-act="delay"]');
-  ok(!!b, '状态框出现缓期按钮且带 data-act');
+  // 缓期已经改成自动触发（危险区里自己付），状态框不再给按钮
+  ok(!document.querySelector('#fxBox .fxgo[data-act="delay"]'), '状态框不再有缓期按钮');
+  ok(T.fxRows().some(r => r.k === 'delay' && !r.go), '只剩一行「待命」，没有号召点击');
 
   // 注意位置：这一段必须排在上面那次重开**之后**。
   // 第一版插在 calm 测试和重开之间，于是「ZONE 期间不提供缓期」
@@ -90,19 +91,28 @@ with sync_playwright() as p:
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
         if name=='标准版':
-            r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click(); passUp();
+            r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click();
+              // 标准版没有修行面板，不需要 passUp（它只在疯狂版那个 JS 块里定义）
               T.heat=99999; T.garbageTimer = T.garbagePeriod()-2000;
               const before=T.heat; T.doDelay();
               return ['标准版 canDelay = '+T.canDelay()+' (要 false)', '标准版 doDelay 无副作用 = '+(T.heat===before)]; }""")
         else:
             r=pg.evaluate(JS)
-            # 真实鼠标点击那颗按钮
-            h0=pg.evaluate("() => __tetris.heat")
-            pg.click('#fxBox .fxgo[data-act="delay"]')
-            h1=pg.evaluate("() => __tetris.heat")
-            r.append(('PASS ' if h1 < h0 else 'FAIL ') + f'真实点击扣了热度 {round(h0)}→{round(h1)}')
-            r.append(('PASS ' if pg.evaluate("() => document.getElementById('helpSheet').hidden") else 'FAIL ')
-                     + '点缓期按钮不会顺手打开说明书')
+            # 缓期现在是自动触发的，没有按钮可点 —— 改成验「危险区里会自己付」
+            auto=pg.evaluate('''() => { const T=__tetris;
+              const B=T.game.board, R=B.length, C=B[0].length;
+              for (let y=0;y<R;y++) for (let x=0;x<C;x++) B[y][x]=null;
+              T.heat = 3000; T.delayUsed = false;
+              T.garbageTimer = T.garbagePeriod() - 2000;
+              const h0 = T.heat;
+              T.delayAuto();
+              const safe = T.heat;
+              for (let y=2;y<R;y++) for (let x=0;x<C;x++) if (x!==5) B[y][x]='T';
+              T.syncDanger(); T.delayAuto();
+              return { h0, safe, danger: T.heat }; }''')
+            r.append(('PASS ' if auto['safe']==auto['h0'] else 'FAIL ') + '不危险时自动缓期一分不动')
+            r.append(('PASS ' if auto['danger']<auto['safe'] else 'FAIL ')
+                     + f"进危险区自动付（{round(auto['safe'])}→{round(auto['danger'])}）")
         print(f"== {name} ==  JS错误 {len(errs)}")
         for e in errs[:3]: print("   !",e)
         for l in r: print("  ",l)

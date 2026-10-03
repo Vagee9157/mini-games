@@ -670,7 +670,7 @@ function restoreGame(d){
   document.body.classList.toggle('rushrun', !!game.rush);
   const sl = $('scoreLabel');
   if (sl) sl.textContent = game.rush ? 'SCORE ×' + RUSH_MULT : 'SCORE';
-  heat = CRAZY ? (+d.heat || 0) : 0;
+  heat = CRAZY ? Math.max(HEAT_FLOOR, +d.heat || 0) : 0;
   // 修行接回来。过滤一遍未知 key —— 老存档里可能有已经删掉的卡。
   ups = CRAZY && Array.isArray(d.ups) ? d.ups.filter(k => UP_BY[k]) : [];
   upNext = typeof d.upNext === 'number' ? d.upNext : UP_EVERY;
@@ -1176,7 +1176,7 @@ function helpSections(){
               + EVENTS.filter(e => !e.bad).map(e => e.name).join(' / ') + ' 概率翻倍 —— 但 '
               + EVENTS.filter(e => e.bad && !EV_DEADLY.has(e.key)).map(e => e.name).join(' / ')
               + ' 照旧' }])],
-    ['热度　消行注入，停手 ' + (HEAT_TAU / 1000) + ' 秒掉到三分之一', [
+    ['热度　消行注入，停手 ' + (HEAT_TAU / 1000) + ' 秒掉到三分之一，最低 ' + HEAT_FLOOR, [
       // 这两行原来是手写死的，heatGain 整体 ×1.5、拐点 48→90 之后就全错了
       // （写着「一行 2」实际给 3，写着「热度 100 → ×7」实际 ×9.1）。改成现算。
       { dot: '◈', name: '注入', meta: '',
@@ -1219,7 +1219,7 @@ function helpSections(){
       { dot: '✦', name: 'FEVER', meta: (FEVER_MS / 1000) + ' 秒 ×' + FEVER_MULT,
         text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减' },
       { dot: '⚄', name: '梭哈', meta: BET_MS / 1000 + ' 秒',
-        text: '消 ' + BET_OFFER_NEED + ' 行以上或打出 T-spin，且热度 ≥' + BET_MIN_HEAT + ' 时弹出。'
+        text: '消 ' + BET_OFFER_NEED + ' 行以上或打出 T-spin 就弹出（热度只要不是几乎为零）。'
               + '接了之后这十秒里累计消行，窗口结束按档结算：'
               + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join(' · ')
               + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
@@ -1232,7 +1232,7 @@ function helpSections(){
               + '其中 ' + UPS.filter(u => u.vow).length + ' 张是血契 —— 有明码标价的代价，'
               + '不是更强的卡，是换一种打法。同时最多挂两张血契' },
       { dot: '◉', name: 'ZONE', meta: '攒 ' + ZONE_NEED + ' 行',
-        text: '消够 ' + ZONE_NEED + ' 行后状态框给出启动按钮。开启 ' + (ZONE_MS / 1000)
+        text: '消够 ' + ZONE_NEED + ' 行就**自动开始**，不用你操作。开启 ' + (ZONE_MS / 1000)
               + ' 秒：重力、灰线、事件三个钟全停，你随便摆。但这期间消掉的行不会消失，'
               + '而是沉到盘面底部变成死行 —— 地板一格一格往上涨，最多 ' + ZONE_MAX + ' 行就提前结算。'
               + '结束时死行一次清空，按行数的平方给奖金（' + ZONE_EG.map(k =>
@@ -1240,10 +1240,11 @@ function helpSections(){
               + ' 基数，再乘你当时的倍率）。'
               + '消行本身照常计分，ZONE 给的是额外那一笔 —— 所以问题永远是「还敢不敢再消一行」' },
       { dot: '⏳', name: '缓期', meta: Math.round(DELAY_FRAC * 100) + '% 热度',
-        text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒时状态框给出按钮，点它把灰线钟往回推 '
-              + (DELAY_MS / 1000) + ' 秒。价格是当前热度的 ' + Math.round(DELAY_FRAC * 100)
-              + '%（最低 ' + DELAY_MIN + '）—— 按比例收所以穷富一个价。'
-              + '每行灰线只能缓一次，钟还在走，它是延后不是取消' },
+        text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒、而堆已经进了危险区时**自动**花热度，'
+              + '把灰线钟往回推 ' + (DELAY_MS / 1000) + ' 秒。价格是当前热度的 '
+              + Math.round(DELAY_FRAC * 100) + '%（最低 ' + DELAY_MIN + '）—— 按比例收所以穷富一个价。'
+              + '每行灰线只能缓一次，钟还在走，它是延后不是取消。'
+              + '平时一分不动，只有快被埋的时候才会动用' },
       { dot: '✹', name: '彩虹行', meta: '×' + RAIN_MULT,
         text: '棋盘右框外会有个小三角指着某一行，消到它时那一次得分 ×' + RAIN_MULT
               + '。消掉或 ' + Math.round(RAIN_MS / 1000) + ' 秒没消掉就换一行' },
@@ -2511,11 +2512,21 @@ function flashEvent(e){
 
 function fxRows(){
   const out = [];
+  // 同一时刻**最多一个**可点的行。
+  //
+  // 侧栏只有 64px 宽、三个槽，同时冒出「ZONE 启动」和「缓期」两个按钮之后
+  // 玩家的反应是「不知道展示什么，也不知道要不要点击」—— 两个并排的号召
+  // 等于没有号召。优先级按「不点会亏多少」排：
+  //   梭哈十秒就过期、ZONE 要攒二十行、缓期每行灰线都有机会。
+  let actioned = false;
+  const act = (row) => { if (actioned) return; actioned = true; out.push(row); };
   // 待接受的梭哈排在最前，而且带一个真按钮 —— 它是唯一要你当场动手的东西。
   // v 写固定文案不写倒计时：倒计时交给下面那根条，否则每帧都在重建 innerHTML。
   if (betOffer > 0){
-    out.push({ n: '梭哈', v: '×' + BET_TIERS[0][1] + '~' + BET_TIERS[BET_TIERS.length - 1][1],
-               k: 'betoffer', p: betOffer / BET_MS, go: '接受' });
+    // 只写上限不写区间：侧栏 64px 放不下「梭哈 ×1.6~4」，会被截成「梭… ×1.6…」。
+    // 完整档位表盘面横幅上有，那才是讲规则的地方。
+    act({ n: '梭哈', v: '最高 ×' + BET_TIERS[BET_TIERS.length - 1][1],
+          k: 'betoffer', p: betOffer / BET_MS, go: '接受' });
   }
   // 梭哈排第一：它是唯一有硬时限、且要你当场做事的东西
   if (betLeft > 0){
@@ -2529,7 +2540,9 @@ function fxRows(){
   // 奖金是按行数**平方**给的，k 是唯一要你当场做决定的量。
   if (zoneLeft > 0) out.push({ n: 'ZONE', v: zoneRows + '行',
                                k: 'zone', p: zoneLeft / ZONE_MS });
-  else if (zoneReady()) out.push({ n: 'ZONE', v: '就绪', k: 'zoneon', go: '启动', act: 'zone' });
+  // ZONE 攒条：只报进度，不给按钮（攒满自己开）
+  else if (zoneCharge > 0) out.push({ n: 'ZONE', v: zoneCharge + '/' + zoneNeed(),
+                                      k: 'zoneon', p: zoneCharge / zoneNeed() });
   if (evActive) out.push({ n: evActive.name, v: (evLeft / 1000).toFixed(1) + 's',
                            k: evActive.bad ? 'bad' : 'good', p: evLeft / evActive.ms });
   else if (flashLeft > 0 && flashFx) out.push({ n: flashFx.name, v: '已发生',
@@ -2540,14 +2553,18 @@ function fxRows(){
   if (game.rush) out.push({ n: '狂欢', v: '×' + RUSH_MULT, k: 'rush' });
   // 缓期排在狂欢之后、热度之前：它要你动手，但没有硬时限（最差就是灰线照常上来），
   // 所以优先级低于梭哈和所有限时效果。
-  if (canDelay()) out.push({ n: '缓期', v: '−' + delayCost(), k: 'delay',
-                             go: '缓期', act: 'delay',
+  // 缓期：危险区里自动付，所以这里只是告诉你「它在待命」，不是号召你点
+  if (canDelay()) out.push({ n: '缓期', v: '待命', k: 'delay',
                              p: 1 - (garbagePeriod() - garbageTimer) / DELAY_WIN });
   // 右侧显示热度值本身，左上角徽章显示倍率 —— 两处各管一个，不重复。
   // 原来两处都是倍率，热度这个被反复提到的数字一处都看不见，
   // 结果就是没人（包括我自己）说得清自己打到过多少热度。
   out.push({ n: '热度', v: String(Math.round(heat)), k: 'heat' });
-  return out.slice(0, 3);
+  // 带按钮的那一行实际占两格的高度（按钮自己就 26px），却一直按一格算 ——
+  // 实测梭哈待接时整个框从 93px 涨到 130px，向上顶出侧栏 20px，
+  // 「状态」标题会钻到顶栏按钮后面、底下的「段位」被挤出屏幕。
+  // 所以有按钮时就只给两行。
+  return out.slice(0, out.some(r => r.go) ? 2 : 3);
 }
 
 function syncFx(){
@@ -2556,6 +2573,7 @@ function syncFx(){
   if (!box) return;
   box.hidden = false;
   const rows = fxRows();
+  box.classList.toggle('acting', rows.some(r => r.go));
   const sig = rows.map(r => r.n + r.v + r.k).join('|');
   if (sig !== fxSig){
     fxSig = sig;
@@ -2579,7 +2597,11 @@ function syncFx(){
   }
 }
 
+// 任何改动热度的地方最后都会走到 syncHeat / crazyStep，所以地板只钉这两处。
+function heatClamp(){ if (CRAZY && heat < HEAT_FLOOR) heat = HEAT_FLOOR; }
+
 function syncHeat(){
+  heatClamp();
   if (!CRAZY) return;
   const el = $('badgeHeat');
   if (!el) return;
@@ -3274,6 +3296,11 @@ const DANGER_ROW = 4;            // 堆顶到了这一行（含）算进危险�
 // 真人实测倍率能到 ×42（机器人只有 ×16）。原来的 4/8/14/22 在真人手里
 // 前三档一闪而过、顶档常年满格。按 ×1~×42 这个真实量程重新铺。
 const HEAT_TIERS = [6, 12, 22, 34];
+// 热度地板。理由有两条，都不是手感问题：
+// ① 梭哈赔的是「热度 ×倍数」，热度 0 的时候赢了也还是 0 —— 机制会空转。
+// ② 开局热度从 0 起步，前二三十行基本感觉不到热度这条线存在。
+// 地板之下的热度本来也不影响倍率（拐点在 HEAT_KNEE），所以这是纯送。
+const HEAT_FLOOR = 50;
 const HEAT_TAU = 135000;
 const HEAT_DIV = 12;      // 拐点之前：倍率 = 1 + heat / HEAT_DIV
 // 拐点之后改走平方根。原来是一条直线，一局打长了热度能压到 160 上下，
@@ -3407,6 +3434,17 @@ function canDelay(){
   if (delayUsed || betOffer > 0) return false;
   if (heat < delayCost()) return false;
   return garbagePeriod() - garbageTimer <= DELAY_WIN;
+}
+
+// 自动缓期。规则一句话：**灰线要来了、堆已经到危险区、而且付得起**，就自动付。
+//
+// 为什么不是「一有机会就付」：热度直接乘在每一次得分上，无条件自动付等于
+// 偷偷削你的分数。绑在危险区上之后它的含义很清楚 —— 热度是保命资源，
+// 快被埋的时候自己会顶上去，平时一分不动。
+// 为什么不留给玩家按：见 zoneAuto 上面那段。
+function delayAuto(){
+  if (!canDelay() || !dangerOn) return;
+  doDelay();
 }
 
 function doDelay(){
@@ -3578,6 +3616,15 @@ function upTake(k){
   if (upLeft > 0) upOpen(); else resumeLoop();
 }
 
+// 攒够就自己开，不再等玩家按按钮。
+//
+// 侧栏只有 64px、三个槽，同时冒出两个「要不要点」的按钮之后，实际反馈是
+// 「不知道展示什么，也不知道要不要点击」。而 ZONE 的张力本来就不在
+// 「什么时候开」，在开了之后「还敢不敢再消一行」—— 那一部分完整保留。
+function zoneAuto(){
+  if (zoneReady()) zoneStart();
+}
+
 function upStep(){
   if (!CRAZY || upLeft > 0) return;
   if (game.lines >= upNext){ upNext += UP_EVERY; upOffer(1); }
@@ -3660,7 +3707,7 @@ function crazyStep(dt){
   // 而不只是个 ×4
   if (feverLeft > 0) return;
   heat *= Math.exp(-dt / (HEAT_TAU * upMul('tau')));
-  if (heat < .05) heat = 0;
+  heatClamp();
 }
 
 // ── 燃点 v2（2026-10-03 重做）──
@@ -3777,12 +3824,13 @@ let goldPending = false;         // 这一杆锁下去的块是不是金的
 
 function crazyReset(){
   feverLeft = 0; feverPity = 0; goldPending = false;
-  heat = 0; heatTier = -1; heatQuant = -1;
+  heat = CRAZY ? HEAT_FLOOR : 0; heatTier = -1; heatQuant = -1;
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
   swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false; rainMarkSig = '';
+  actKind = ''; actLast = ''; for (const k of Object.keys(actSeen)) delete actSeen[k];
   zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
   ups = []; upLeft = 0; upNext = UP_EVERY;
   if ($('upSheet')) $('upSheet').hidden = true;
@@ -4155,7 +4203,7 @@ function forkAt(p){
 // 复用彩虹行那套（消到它时那一次得分 ×2），所以它不是第八种新规则，
 // 是「你自己决定把彩虹标在哪一行」—— 彩虹行本来是随机挑的。
 function dyeAt(p){
-  if (rainRow < 0 && !game.started) return;
+  if (!game.started) return;
   const ys = cellsOf(p.type, p.rot).map(([, dy]) => p.y + dy).filter(y => y >= BUFFER && y < zoneFloor());
   if (!ys.length) return;
   rainRow = Math.max(...ys);
@@ -4494,7 +4542,10 @@ const EVENTS = [
   { key:'blackout', name:'暗幕',   tip:'方块要隐形了', bad:true,  ms:5000, w:3 },
   { key:'mirror',   name:'镜像',   tip:'左右要对调了', bad:true,  ms:8000, w:3 },
   { key:'quake',    name:'地震',   tip:'整堆要平移了', bad:true,  ms:0,    w:2 },
-  { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:6 },
+  // 权重 6 → 9：加了顺风/重影/拾穗之后池子从 26 涨到 35，压实被摊薄到 17.1%
+  // （原本 23.1%，少了四分之一）。补回来，顺带比原来还高一点 —— 它是整个
+  // 事件池里唯一能把盘面救回来的。
+  { key:'compact',  name:'压实',   tip:'洞要被填上了', bad:false, ms:0,    w:9 },
   { key:'calm',     name:'缓流',   tip:'灰线要停了',   bad:false, ms:9000, w:4 },
   { key:'freeze',   name:'冰冻',   tip:'有一行要冻住了', bad:true,  ms:0,    w:2 },
   { key:'wind',     name:'狂风',   tip:'方块要被吹偏了', bad:true,  ms:7000, w:2 },
@@ -4570,9 +4621,11 @@ function evPeriod(){
 // 暗幕 / 镜像 / 狂风 只是让操作变难，濒死时正该紧张，放回来。
 const EV_DEADLY = new Set(['freeze', 'wall', 'quake', 'slam', 'blind']);
 
-function pickEvent(){
+function pickEvent(instantOnly){
   const safe = stackTopRow() > DANGER_ROW + 3;
-  const pool = EVENTS.filter(e => safe || !EV_DEADLY.has(e.key));
+  // instantOnly：已经有限时事件在跑，这一次只能抽瞬发的
+  const pool = EVENTS.filter(e => (safe || !EV_DEADLY.has(e.key)) && (!instantOnly || !e.ms));
+  if (!pool.length) return null;
   // 狂欢局里坏事件更密。安全时不给好事件加权 —— 压实是填洞的，
   // 加权等于送，那是把难度往下调；只有濒死时才翻倍，当保命绳。
   const wt = (e) => e.w
@@ -4591,15 +4644,19 @@ function evStepSchedule(dt){
     if (evWarnLeft <= 0) evFire();
     return;
   }
-  if (evActive){
-    if (evLeft > 0){ evLeft -= dt; if (evLeft <= 0) evEnd(); }
-    return;
-  }
-  if (zoneLeft > 0) return;        // ZONE 期间事件钟也停 —— 十秒里再来个暗幕就太脏了
+  // 限时事件在跑的时候，钟**照走** —— 原来这里直接 return，等于只要有一个
+  // 限时事件挂着（暗幕/镜像/狂风…平均 7.5 秒），整个事件钟完全停住，
+  // 连瞬发的压实也进不来。限时事件占池子 22/35，这个堵塞很可观。
+  //
+  // 现在只挡住「限时叠限时」：暗幕 + 镜像 + 狂风 同时上是灾难，而且状态框
+  // 只有三槽也显示不了。瞬发的（压实/地震/冰冻/拾穗）照常进来。
+  if (evActive && evLeft > 0){ evLeft -= dt; if (evLeft <= 0) evEnd(); }
+  if (zoneLeft > 0) return;        // ZONE 期间事件钟还是停 —— 十秒里再来个暗幕就太脏了
   evTimer += dt;
   if (evTimer < evPeriod()) return;
   evTimer = 0;
-  evPending = pickEvent();
+  evPending = pickEvent(!!evActive);
+  if (!evPending) return;              // 过滤之后可能一个都不剩
   evWarnLeft = EV_WARN; evBeep = 0;
   showToast(`${evPending.name}　${evPending.tip}`);
   const b = $('evwarn');
@@ -4921,7 +4978,12 @@ const BET_MS = 10000;
 // 盘面上的提示只停这么久，之后交给右侧状态框。
 // 十秒的横幅等于十秒看不见方块；但完全不在盘面上露面又容易整局都没注意到它弹过。
 // 三秒是「看得见」和「不碍事」的折中。
-const BET_SHOW = 3000;
+// 盘面提示：可点的东西先在盘面上亮这么久，之后只留在右侧状态栏。
+// 原来是梭哈专用的（当时定 3 秒），现在 ZONE 和缓期共用 —— 侧栏只有 64px，
+// 一个按钮冒出来玩家根本不知道那是什么、要不要点，盘面上这几秒是唯一
+// 能把话说完的地方。
+const ACT_SHOW = 5000;
+const BET_SHOW = ACT_SHOW;    // 旧名字留着，betStep / 导出面还在用
 const BET_LOSE = .5;     // 输：热度减半
 // 分档给奖励。为什么高档系数要拉得这么开：奖励挂在热度上，而热度倍率过了
 // 拐点是开方压的，系数的差会被压扁 —— 照「2行×1.8 / 5行×3.0」那组算，
@@ -4943,7 +5005,18 @@ const BET_COOL = 25000;   // 结算之后冷静这么久，别贴脸连弹
 let betLines = 0;         // 接了之后累计消了几行
 // 24 → 72，跟着热度平台一起 ×3。24 在新平台上只占 8%，门槛恒为真等于没有。
 // 72 → 370。同上，72 占真人峰值热度不到 1%，门槛恒为真等于没有。
-const BET_MIN_HEAT = 370;  // 热度太低时赌没意思
+// 原来是 370，注释写的理由是「热度太低时赌没意思」—— 这个推理是反的。
+// 梭哈赔的是**热度 ×1.6~4**，乘法是免标度的：热度 30 翻四倍和热度 3000
+// 翻四倍，比例上一样值钱。把一个「热度倍增器」锁在「先有高热度」后面，
+// 恰好堵死了它最该解决的问题 —— 前期热度起不来。
+//
+// 实测六局：热度跨过 370 的中位行数是 **72 行**（48/65/67/72/76/77）。
+// 也就是说七十行以内的局，梭哈从来不可能出现。
+//
+// 现在只留一个极低的地板，而且理由是纯数学的：热度 0 的时候 ×4 还是 0，
+// 梭哈会变成一次空转 —— 玩家接了、赢了、屏幕上什么都没变。
+// 30 这个值机器人大约 5 行就到了，玩家感知上等于「没有热度条件」。
+const BET_MIN_HEAT = 30;
 let betCool = 0;
 let betOffer = 0, betLeft = 0, betShow = 0;
 
@@ -4957,20 +5030,84 @@ function betMaybeOffer(n, spin){
   if (!CRAZY || betLeft > 0 || betOffer > 0 || betCool > 0) return;
   if (!(n >= BET_OFFER_NEED || spin) || heat < BET_MIN_HEAT) return;
   betOffer = BET_MS;
-  betShow = BET_SHOW;
-  const tx = $('betFlashTxt');
-  // 档位表只在盘面上讲得下，侧栏那 64px 塞不进 —— 所以这三秒也是唯一说清规则的机会
-  if (tx) tx.innerHTML = '<b>梭哈</b>十秒内消 ' + BET_NEED + '~' + BET_CAP + ' 行<br>'
-    + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join('　') + '　不足 ' + BET_NEED + ' 行减半'
-    + '<br><i>点这里或右侧「接受」</i>';
-  const el = $('betFlash');
-  if (el){ el.classList.add('on'); el.setAttribute('aria-hidden', 'false'); }
+  // 梭哈直接亮，不等 actStep 那一帧，也不吃冷却 —— 它十秒就过期，错过就没了
+  actLast = 'bet'; actSeen.bet = game.elapsed;
+  actFlash('bet');
+}
+
+// 盘面提示收掉。接受 / 过期 / 重开都要调，不然它会挂在那儿
+// 此刻最该被点的那个动作。优先级和状态框里 act() 的一致 ——
+// 两处必须同源，否则会出现「盘面提示 A、侧栏按钮 B」。
+// 盘面横幅现在只服务梭哈 —— 它是唯一还要你当场做决定的机制。
+// ZONE 和缓期都改成自动触发了，它们有 toast、有音效、有盘面染色，
+// 不需要再占一块横幅；而横幅一旦服务「每行灰线都会重来一次」的缓期，
+// 五秒的停留会让它几乎一直挂着，从提示变成墙纸。
+function actNow(){
+  if (!CRAZY || game.over || !game.started) return '';
+  if (betOffer > 0) return 'bet';
+  return '';
+}
+
+// 每个动作在盘面上怎么自我介绍。档位表之类只有这里讲得下，侧栏塞不进。
+function actText(kind){
+  if (kind === 'bet')
+    return '<b>梭哈</b>' + (BET_MS / 1000) + ' 秒内消 ' + BET_NEED + '~' + BET_CAP + ' 行<br>'
+         + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join('　') + '　不足 ' + BET_NEED + ' 行减半'
+         + '<br><i>点这里或右侧「接受」</i>';
+  if (kind === 'zone')
+    return '<b>ZONE</b>' + (ZONE_MS / 1000) + ' 秒内重力 / 灰线 / 事件全停<br>'
+         + '消掉的行沉到底部，结束时按行数平方给奖金'
+         + '<br><i>点这里或右侧「启动」</i>';
+  if (kind === 'delay')
+    return '<b>缓期</b>花 ' + delayCost() + ' 热度，把灰线往回推 ' + (DELAY_MS / 1000) + ' 秒<br>'
+         + '每行灰线只能缓一次'
+         + '<br><i>点这里或右侧「缓期」</i>';
+  return '';
+}
+
+// 同一类动作多久之内不重复在盘面上亮。
+// 不限的话后期会出事：灰线每七秒一行、缓期每行都重新可用，而提示要亮五秒 ——
+// 横幅几乎一直挂着，就从「提示」变成「墙纸」了。
+// 梭哈本来就有 25 秒冷却、ZONE 要攒二十行，所以这条实际只约束缓期。
+const ACT_COOL = 30000;
+let actKind = '';     // 盘面提示正在介绍哪个动作
+let actLast = '';     // 上一帧的 actNow()，用来做边沿检测
+const actSeen = {};   // 每类动作上次在盘面上亮的时刻
+
+function actFlash(kind){
+  const tx = $('betFlashTxt'), el = $('betFlash');
+  if (!tx || !el) return;
+  actKind = kind;
+  betShow = ACT_SHOW;
+  tx.innerHTML = actText(kind);
+  el.dataset.act = kind;
+  el.classList.add('on');
+  el.setAttribute('aria-hidden', 'false');
   sfx('hold', 1.3); buzz([25, 40, 25]);
   syncFx();
 }
 
-// 盘面提示收掉。接受 / 过期 / 重开都要调，不然它会挂在那儿
+// 每帧看一眼「该点的动作」变了没有。只在**变成另一个动作**时才亮，
+// 不然缓期每行灰线都会重新弹一次。
+function actStep(dt){
+  if (!CRAZY) return;
+  const now = actNow();
+  if (now !== actLast){
+    actLast = now;
+    if (!now){ betFlashHide(); return; }
+    const last = actSeen[now];
+    if (last == null || game.elapsed - last >= ACT_COOL){
+      actSeen[now] = game.elapsed;
+      actFlash(now);
+    } else {
+      // 冷却里就只留侧栏那行，盘面不打扰
+      syncFx();
+    }
+  }
+}
+
 function betFlashHide(){
+  actKind = '';
   betShow = 0;
   const el = $('betFlash');
   if (el){ el.classList.remove('on'); el.setAttribute('aria-hidden', 'true'); }
@@ -5089,6 +5226,9 @@ function stepOnce(dt){
     if (feverLeft <= 0) feverEnd();
   }
   zoneStep(dt);
+  zoneAuto();
+  delayAuto();
+  actStep(dt);
   upStep();
   if (!clearing && game.piece){
     game.elapsed += dt;
@@ -5857,7 +5997,8 @@ function init(){
   // 盘面上那三秒的提示也能直接点 —— 画布本身不接受点击，所以不抢任何操作
   const bf = $('betFlash');
   if (bf){
-    const take = (e) => { e.preventDefault(); betAccept(); };
+    // 盘面提示现在三个动作共用，按 data-act 分发
+    const take = (e) => { e.preventDefault(); fxAct(actKind || 'bet'); };
     bf.addEventListener('touchstart', take, { passive: false });
     bf.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
   }
@@ -5911,7 +6052,7 @@ function init(){
 window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get heat(){ return heat; }, set heat(v){ heat = v; heatQuant = -1; },
   // 常量全导出：说明书对账脚本靠这个面核对，漏导一个就等于那条审计不到
-  HEAT_DIV, HEAT_KNEE, HEAT_TIERS, HEAT_SOFT, HEAT_TAU, RUSH_MOD, RUSH_BAD, RUSH_FLOOR, FEVER_MULT, FEVER_MS, GOLD_MULT, GOLD_RATE, CHEST_RATE, CHEST_HEAT, PITY_DIV, DANGER_HEAT,
+  HEAT_FLOOR, heatClamp, syncHeat, fxRows, HEAT_DIV, HEAT_KNEE, HEAT_TIERS, HEAT_SOFT, HEAT_TAU, RUSH_MOD, RUSH_BAD, RUSH_FLOOR, FEVER_MULT, FEVER_MS, GOLD_MULT, GOLD_RATE, CHEST_RATE, CHEST_HEAT, PITY_DIV, DANGER_HEAT,
   heatMult, heatMultAt, heatGain, rollMod, burnStep, burnOn, BURN_WIN, BURN_RISE, BURN_RISE_RUSH, BURN_MS, BURN_MS_RUSH, BURN_MULT, BURN_FLOOR,
   get burnLeft(){ return burnLeft; }, collapseCols, FLOW_MULT, FLOW_P,
   BET_TIERS, BET_LOSE, BET_NEED, BET_CAP, betMult, BET_OFFER_NEED, BET_COOL, BET_MIN_HEAT, BET_MS,
@@ -5919,7 +6060,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   bombAt, laserAt, hammerAt, fillAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
-  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
+  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW, ACT_SHOW, ACT_COOL, actNow, actText, actFlash, actStep, get actKind(){ return actKind; },
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
   crazyStep,
@@ -5928,7 +6069,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
-  canDelay, doDelay, delayCost, garbagePeriod, riseGarbage,
+  canDelay, doDelay, delayAuto, syncDanger, get dangerOn(){ return dangerOn; }, zoneAuto, delayCost, garbagePeriod, riseGarbage,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
   syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },

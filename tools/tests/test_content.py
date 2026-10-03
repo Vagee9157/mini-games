@@ -38,8 +38,11 @@ JS = r"""() => {
   // ── 顺风：热度注入翻倍 ──
   // 单次采样不可比：热流有 25% 概率把单行注入 ×4，一次采样的方差比效应本身还大。
   // 取 200 次均值 —— 顺风是稳定的 ×2，热流在两组里期望相同，会被均掉。
+  // 从 0 起测注入已经行不通了 —— 热度有地板（HEAT_FLOOR），每次都会被托回去，
+  // 量到的永远是地板值。改成从地板之上一个固定基线出发，测增量。
+  const BASE = T.HEAT_FLOOR * 4;
   const meanGain = (n) => { let t = 0;
-    for (let i = 0; i < n; i++){ T.heat = 0; T.crazyOnClear(1); t += T.heat; }
+    for (let i = 0; i < n; i++){ T.heat = BASE; T.crazyOnClear(1); t += T.heat - BASE; }
     return t / n; };
   T.evForce('tail');
   ok(T.evTail() === true, '顺风挂上了');
