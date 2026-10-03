@@ -16,6 +16,9 @@ JS = r"""() => {
   const B = () => T.game.board;
   const clean = () => { const b=B(); for (let y=0;y<b.length;y++) for (let x=0;x<b[0].length;x++) b[y][x]=null; };
   document.getElementById('startBtn').click(); passUp();
+  // passUp 选的是**随机**一张卡，而其中「孤注」会禁掉变异块、「熔炉」会改热度 ——
+  // 这个文件测的不是修行，必须把变量清掉，否则断言时好时坏。
+  T.ups.length = 0;
   const ROWS = B().length, COLS = B()[0].length;
 
   // ── 表本身 ──
@@ -33,17 +36,19 @@ JS = r"""() => {
   for (const k of mods) ok(!!T.MOD_TINT[k], `${k} 有配色`);
 
   // ── 顺风：热度注入翻倍 ──
+  // 单次采样不可比：热流有 25% 概率把单行注入 ×4，一次采样的方差比效应本身还大。
+  // 取 200 次均值 —— 顺风是稳定的 ×2，热流在两组里期望相同，会被均掉。
+  const meanGain = (n) => { let t = 0;
+    for (let i = 0; i < n; i++){ T.heat = 0; T.crazyOnClear(1); t += T.heat; }
+    return t / n; };
   T.evForce('tail');
   ok(T.evTail() === true, '顺风挂上了');
-  const h0 = T.heat; T.heat = 0;
-  T.crazyOnClear ? T.crazyOnClear(1) : null;
-  const withTail = T.heat;
-  T.evForce('compact');            // 瞬发顶不掉 tail，直接等它过期
-  T.step(9000); T.heat = 0;
-  T.crazyOnClear ? T.crazyOnClear(1) : null;
-  const without = T.heat;
+  const withTail = meanGain(200);
+  T.step(9000);
   ok(!T.evTail(), '顺风到时结束');
-  ok(withTail > without * 1.5, `顺风期间热度注入明显更高（${withTail.toFixed(1)} vs ${without.toFixed(1)}）`);
+  const without = meanGain(200);
+  ok(withTail > without * 1.7 && withTail < without * 2.3,
+     `顺风期间热度注入约翻倍（${withTail.toFixed(2)} vs ${without.toFixed(2)} = ${(withTail/without).toFixed(2)}×）`);
 
   // ── 重影：不画落点虚影 ──
   ok(T.EV_DEADLY.has('blind'), '重影进了高危名单（堆高时不出）');

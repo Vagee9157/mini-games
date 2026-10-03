@@ -1205,6 +1205,7 @@ function helpSections(){
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
       { dot: '✸', name: '修行', meta: '开局 + 每 ' + UP_EVERY + ' 行',
         text: '开局给 ' + UP_FIRST + ' 次三选一，之后每打够 ' + UP_EVERY + ' 行再给一次。'
+              + '每次都可以「不选」—— 不选就是这次不要，不攒着。'
               + '选中的整局有效、不可更换，一共 ' + UPS.length + ' 张卡。'
               + '其中 ' + UPS.filter(u => u.vow).length + ' 张是血契 —— 有明码标价的代价，'
               + '不是更强的卡，是换一种打法。同时最多挂两张血契' },
@@ -2087,25 +2088,29 @@ function draw(){
     ctx.restore();
   }
   if (CRAZY) drawCracks();
-  // 彩虹行：一条会呼吸的彩色条。画在格子之上、粒子之下，盖不住方块本身
+  // 彩虹行标记。
+  //
+  // 原来是「整行用 lighter 刷一层彩色 + 压一个 75% 白框」。实机上这是灾难：
+  // lighter 把底下方块的颜色洗白、空格也被涂满，整条看着像个 UI 故障而不是
+  // 游戏元素 —— 用户第一反应是「这是什么？不需要」。
+  //
+  // 重画的原则：**不盖任何格子**。标记只落在行的下沿一道细光 +
+  // 向上很浅的一层渐隐，方块和空格都照原样看得见。
   if (CRAZY && rainRow >= BUFFER && CELL && !game.over){
     const y = (rainRow - BUFFER) * CELL;
     const W = CELL * COLS;
-    const puls = .45 + .35 * Math.sin(game.elapsed / 260);
-    const g = ctx.createLinearGradient(0, y, W, y + CELL);
-    g.addColorStop(0,   'rgba(255,107,214,' + puls.toFixed(2) + ')');
-    g.addColorStop(.35, 'rgba(255,209,102,' + puls.toFixed(2) + ')');
-    g.addColorStop(.7,  'rgba(95,224,200,'  + puls.toFixed(2) + ')');
-    g.addColorStop(1,   'rgba(124,180,255,' + puls.toFixed(2) + ')');
+    const puls = .55 + .25 * Math.sin(game.elapsed / 420);   // 比原来慢一倍，余光里不晃眼
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = g;
-    ctx.fillRect(0, y, W, CELL);
-    ctx.restore();
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,.75)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(.75, y + .75, W - 1.5, CELL - 1.5);
+    // 上下各一道细线把那一行夹住。只画一道会有歧义 —— 看不出指的是线上面
+    // 那行还是下面那行。两道就没这个问题，而且格子上一点东西都不画。
+    const line = ctx.createLinearGradient(0, 0, W, 0);
+    line.addColorStop(0,   'rgba(255,107,214,' + puls.toFixed(2) + ')');
+    line.addColorStop(.4,  'rgba(255,209,102,' + puls.toFixed(2) + ')');
+    line.addColorStop(.75, 'rgba(95,224,200,'  + puls.toFixed(2) + ')');
+    line.addColorStop(1,   'rgba(124,180,255,' + puls.toFixed(2) + ')');
+    ctx.fillStyle = line;
+    ctx.fillRect(0, y, W, 2);
+    ctx.fillRect(0, y + CELL - 2, W, 2);
     ctx.restore();
   }
   // 挪列选中的那一列：描边 + 轻微提亮，和危险带、封锁墙都区分得开
@@ -3541,8 +3546,20 @@ function upOpen(){
     '<button class="upcard' + (u.vow ? ' vow' : '') + '" type="button" data-up="' + u.k + '">'
     + '<b>' + u.n + (u.vow ? '<em>血契</em>' : '') + '</b><span>' + u.t + '</span></button>').join('');
   $('upTitle').textContent = ups.length ? '修行　第 ' + (ups.length + 1) + ' 次' : '开局修行';
+  const sk = $('upSkip');
+  if (sk) sk.textContent = ups.length ? '这次不选' : '不选，直接开';
   sheet.hidden = false;
   game.frozen = true;          // 选的时候方块别接着掉
+}
+
+// 不选。开局那次尤其要有这个口子 —— 一上来就被一个必答题拦住，
+// 对「我只想马上开一局」的时候是纯粹的摩擦。跳过就是这次不要，不攒着。
+function upSkip(){
+  if (upLeft <= 0) return;
+  upLeft--;
+  $('upSheet').hidden = true;
+  game.frozen = false;
+  if (upLeft > 0) upOpen(); else resumeLoop();
 }
 
 function upTake(k){
@@ -5716,6 +5733,8 @@ function init(){
     const c = e.target.closest('[data-up]');
     if (c) upTake(c.dataset.up);
   });
+  const usk = $('upSkip');
+  if (usk) usk.addEventListener('click', () => upSkip());
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
   const openHelpSheet = () => openHelp();
@@ -5877,7 +5896,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
   crazyStep,
-  UPS, UP_BY, UP_FIRST, UP_EVERY, UP_PICK, upMul, upNever, upDraw, upOffer, upOpen, upTake, upStep, zoneNeed,
+  UPS, UP_BY, UP_FIRST, UP_EVERY, UP_PICK, upMul, upNever, upDraw, upOffer, upOpen, upTake, upSkip, upStep, zoneNeed,
   get ups(){ return ups; }, get upLeft(){ return upLeft; },
   ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },

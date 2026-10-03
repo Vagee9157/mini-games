@@ -1442,3 +1442,7 @@ body.zoning .board-aura{
 }
 /* 这个面板没有「好了」按钮，底部留白要自己补 */
 .upsheet .sheet-box{ padding-bottom: 16px; }
+
+/* 「不选」。刻意做成安静的那一个 —— 它是出口不是第四张卡，
+   但也不能藏起来，一上来被必答题拦住是纯摩擦。 */
+.upskip{ width: 100%; margin-top: 10px; }

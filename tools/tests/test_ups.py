@@ -91,6 +91,26 @@ JS = r"""() => {
   ok(T.upLeft === 0, '池子抽干把欠账清掉，不会反复弹');
   T.ups.length = 0;
 
+  // ── 不选 ──
+  T.ups.length = 0;
+  T.upOffer(1);
+  ok(!document.getElementById('upSheet').hidden, '再发一次，面板打开');
+  const before = T.ups.length;
+  T.upSkip();
+  ok(document.getElementById('upSheet').hidden, '不选之后面板关掉');
+  ok(T.ups.length === before, '不选不会给卡');
+  ok(T.upLeft === 0, '不选把这次的欠账消掉，不会反复弹');
+  ok(T.game.frozen === false, '不选之后方块恢复');
+  // 欠两次时，不选一次还会接着弹下一次
+  T.upOffer(2);
+  T.upSkip();
+  ok(!document.getElementById('upSheet').hidden, '欠两次时不选一次还会弹第二次');
+  T.upSkip();
+  ok(document.getElementById('upSheet').hidden && T.upLeft === 0, '两次都不选就收干净');
+  // 按钮真的接上了
+  T.upOffer(1);
+  ok(!!document.getElementById('upSkip'), '面板上有「不选」按钮');
+
   // 重开要清空
   document.getElementById('againBtn')?.click();
   ok(T.ups.length <= 1, `重开后 ups 清空（现在 ${T.ups.length} 张，开局那次刚发）`);
