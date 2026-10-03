@@ -1,6 +1,6 @@
 /* Service Worker —— 让这些游戏在没网的时候也能玩（高铁、地铁、飞机）。
    这个文件由 bump.py 生成，别手改：资源清单和版本号都是算出来的。 */
-const CACHE = 'mini-games-9657595049';
+const CACHE = 'mini-games-372d4f866b';
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,7 +10,7 @@ const ASSETS = [
   "./tetris/index.html",
   "./tetris/manifest.json",
   "./tetris/tetris.css?v=adf05390",
-  "./tetris/tetris.js?v=1c8faec7",
+  "./tetris/tetris.js?v=616317a9",
   "./minesweeper/",
   "./minesweeper/index.html",
   "./minesweeper/manifest.json",

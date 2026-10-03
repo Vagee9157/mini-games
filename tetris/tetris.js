@@ -1155,7 +1155,8 @@ function helpSections(){
         text: [24, 48, HEAT_KNEE, 400, 1500]
               .map(h => '热度 ' + h + ' → ×' + trimZeros(heatMultAt(h, false).toFixed(1))).join('　') },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
-      { dot: '◈', name: '压哨', meta: '+8', text: '灰线刚顶上来一秒内消掉，额外补 8 点' },
+      { dot: '◈', name: '压哨', meta: '+' + SNIPE_HEAT,
+        text: '灰线刚顶上来 ' + (SNIPE_MS / 1000) + ' 秒内消掉，额外补 ' + SNIPE_HEAT + ' 点' },
       { dot: '✦', name: '燃点', meta: '×' + BURN_MULT,
         text: Math.round(BURN_WIN / 1000) + ' 秒内热度涨超 ' + Math.round(BURN_RISE * 100) + '%'
               + ' 就点着 ' + Math.round(BURN_MS / 1000) + ' 秒，这期间得分 ×' + BURN_MULT
@@ -1170,16 +1171,19 @@ function helpSections(){
       // DEEP_BASE / DEEP_BASE_RUSH / 两个步长 / RUSH_MULT 五个数的交点，
       // 写死任何一个数字，改一次常量就会过期。
       { dot: '◈', name: '深局加成', meta: DEEP_FROM + ' 行起',
-        text: '普通局过 ' + DEEP_FROM + ' 行后每行 ×' + DEEP_BASE + '，之后每 100 行再 +'
-              + DEEP_STEP + '（200 行 ×' + (DEEP_BASE + 1.6 * DEEP_STEP).toFixed(1)
-              + '，400 行 ×' + (DEEP_BASE + 3.6 * DEEP_STEP).toFixed(1) + '），越打越值。'
+        text: '普通局过 ' + DEEP_FROM + ' 行后每行 ×' + DEEP_BASE + '，之后每 ' + DEEP_PER + ' 行再 +'
+              + DEEP_STEP + '（' + DEEP_EG[0] + ' 行 ×' + deepAt(DEEP_EG[0], false).toFixed(1)
+              + '，' + DEEP_EG[1] + ' 行 ×' + deepAt(DEEP_EG[1], false).toFixed(1) + '），越打越值。'
               + '狂欢局是固定的 ×' + (DEEP_BASE_RUSH * RUSH_MULT).toFixed(2).replace(/\.?0+$/, '')
               + '，不随行数涨，但道具概率翻倍另算 —— 前中段比普通局高，'
               + deepCrossLines() + ' 行之后被普通局反超' },
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
-        text: '每条灰线有这么大概率带宝箱，消掉那一行才算开。34% FEVER / 36% 热度 +' + CHEST_HEAT + ' / 30% 下一块是炸弹' },
+        text: '每条灰线有这么大概率带宝箱，消掉那一行才算开。'
+              + Math.round(CHEST_P[0] * 100) + '% FEVER / '
+              + Math.round((CHEST_P[1] - CHEST_P[0]) * 100) + '% 热度 +' + CHEST_HEAT + ' / '
+              + Math.round((1 - CHEST_P[1]) * 100) + '% 下一块是炸弹' },
       { dot: '✦', name: 'FEVER', meta: (FEVER_MS / 1000) + ' 秒 ×' + FEVER_MULT,
         text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减' },
       { dot: '⚄', name: '梭哈', meta: BET_MS / 1000 + ' 秒',
@@ -1462,7 +1466,8 @@ function scoreFor(n, spin, perfect){
   // 总是和大消除同时发生，等于永远看不见。两者冲突时让里程碑赢，它更少见。
   checkMilestone();
   if (game.score > game.best){
-    if (game.best > 0 && !bestBeaten){ bestBeaten = true; recordFx(); }
+    // 破纪录的检测挪到 syncHud 了 —— 分数有三个增长入口（scoreFor /
+    // clearFullNow / 软降），只在这里判会漏：道具消行把你推过纪录线时不响。
     game.best = game.score; writeBest(game.best);
   }
   syncStreak();
@@ -1523,6 +1528,7 @@ const DEATH_TEXT = {
   '出生撞死':   '新方块出不来了',
   '锁在隐藏区': '方块摞出屏幕了',
   '灰线顶出':   '被灰线顶穿了',
+  '灰线挤死':   '灰线把方块挤死了',   // 这个 key 一直缺，结算页死因显示空白
   '收手':       '见好就收',
 };
 let dieTimer = 0;
@@ -2357,6 +2363,10 @@ function syncGoal(){
 
 function syncHud(){
   goalCheck();
+  // 破纪录：和过线一样放这里，因为分数有三个增长入口
+  if (CRAZY && !bestBeaten && game.best > 0 && game.score > game.best && !game.over){
+    bestBeaten = true; recordFx();
+  }
   // 这两个跟分数无关（堆高、连击断掉都不改分），不能挡在下面的缓存早退后面
   syncStreak();
   syncDanger();
@@ -3282,7 +3292,11 @@ const CHEST_RATE = 1 / 4;
 // 90 → 440，按真人峰值热度的 6% 给，开箱才算一份像样的回报。
 const CHEST_HEAT = 440;
 let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压哨」用
+const SNIPE_MS = 1000;           // 灰线顶上来多久内消行算压哨
+const SNIPE_HEAT = 8;            // 压哨额外补的热度
 
+// 开箱三档的累积概率：FEVER / 热度 / 下一块炸弹。说明书读的是同一个数组。
+const CHEST_P = [.34, .70];
 // 消掉带宝箱的行就开箱。三选一，都是当场能感觉到的东西。
 function claimChests(rows){
   if (!CRAZY) return;
@@ -3292,8 +3306,8 @@ function claimChests(rows){
   if (game.run) game.run.chests += n;
   for (let i = 0; i < n; i++){
     const r = rndFx();
-    if (r < .34 && feverLeft <= 0){ tip('开箱　FEVER！', 0); feverStart(); }
-    else if (r < .70){ heat += CHEST_HEAT; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +' + CHEST_HEAT, 0); }
+    if (r < CHEST_P[0] && feverLeft <= 0){ tip('开箱　FEVER！', 0); feverStart(); }
+    else if (r < CHEST_P[1]){ heat += CHEST_HEAT; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +' + CHEST_HEAT, 0); }
     else { game.mods[0] = 'bomb'; previewDirty = true; tip('开箱　下一块是炸弹', 0); }
   }
   sfx('tetris', 1.34); buzz([30, 20, 30, 20, 60]);
@@ -3348,6 +3362,7 @@ const BURN_EDGE = '#ffd24a';
 let burnLeft = 0;          // 剩余燃烧时间
 let burnHist = [];         // [{t, h}]，只保留窗口内的
 let burnT = 0;             // 采样计时
+let burnClock = 0;         // 燃点自己的时钟（和热度衰减同源，见 burnStep）
 
 function burnOn(){ return CRAZY && burnLeft > 0; }
 
@@ -3361,7 +3376,10 @@ function burnStep(dt){
   burnT += dt;
   if (burnT < BURN_SAMPLE) return;
   burnT = 0;
-  const now = game.elapsed;
+  // 用自己累计的时钟，不用 game.elapsed —— 后者在消行动画那 260ms 里不涨，
+  // 而热度衰减走的是 dt，照跑。两者不同步会让窗口里的相对涨幅算偏。
+  burnClock += BURN_SAMPLE;
+  const now = burnClock;
   // 时间倒流就整段作废。窗口清理是「now - 最老样本 > 窗口」，一旦 elapsed
   // 往回跳（重开、或任何把 elapsed 调小的路径），这个判断恒为假，老样本
   // 永远清不掉 —— 而开局那批样本热度是 0，卡在下面的 BURN_FLOOR 直接 return，
@@ -3424,7 +3442,7 @@ function crazyReset(){
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
   swapSel = -1; rainRow = -1; rainLeft = 0;
-  burnLeft = 0; burnHist.length = 0; burnT = 0;
+  burnLeft = 0; burnHist.length = 0; burnT = 0; burnClock = 0;
   document.body.classList.remove('burning');
   delete document.body.dataset.ev;
   document.body.classList.remove('betting');
@@ -3520,6 +3538,7 @@ const DEEP_BASE_RUSH = 1.87;
 //
 // C 的估计区间是 1.32~1.68（n=3，噪声大），对应交叉点 128~175 行，
 // 括住目标 150。要更准得跑 n≥30。
+const DEEP_PER = 100;          // 深局步长的分母：每这么多行再加一个 DEEP_STEP
 const DEEP_STEP = 3.6;
 const DEEP_STEP_RUSH = 0;
 // 狂欢局在深局加成之外还有的那一份优势，主要来自道具翻倍（RUSH_MOD = 2，
@@ -3541,11 +3560,20 @@ function deepCrossLines(){
   return Math.round(DEEP_FROM + target / (DEEP_STEP - DEEP_STEP_RUSH) * 100);
 }
 
+const DEEP_EG = [200, 400];    // 说明书举的两个行数例子
+// 任意行数的深局倍率。deepMult 读的是 game.lines，而说明书要问的是
+// 「200 行的时候是多少」，所以拆成纯函数给两边共用。
+// 原来说明书自己手算 (DEEP_BASE + 1.6 * DEEP_STEP)，那个 1.6 其实是
+// (200 - DEEP_FROM) / DEEP_PER —— DEEP_FROM 一改，说明书就开始骗人。
+function deepAt(lines, rush){
+  if (lines < DEEP_FROM) return 1;
+  const base = rush ? DEEP_BASE_RUSH : DEEP_BASE;
+  const step = rush ? DEEP_STEP_RUSH : DEEP_STEP;
+  return base + (lines - DEEP_FROM) / DEEP_PER * step;
+}
 function deepMult(){
-  if (!CRAZY || game.lines < DEEP_FROM) return 1;
-  const base = game.rush ? DEEP_BASE_RUSH : DEEP_BASE;
-  const step = game.rush ? DEEP_STEP_RUSH : DEEP_STEP;
-  return base + (game.lines - DEEP_FROM) / 100 * step;
+  if (!CRAZY) return 1;
+  return deepAt(game.lines, game.rush);
 }
 
 function crazyScoreMult(){
@@ -3578,8 +3606,8 @@ function crazyOnClear(lines, spin, perfect){
     tip('险中取栗　热度 ×' + DANGER_HEAT, 4000);
   }
   // 压哨：灰线刚顶上来就立刻消掉一行
-  if (lines > 0 && game.elapsed - lastRiseAt < 1000){
-    gain += 8;
+  if (lines > 0 && game.elapsed - lastRiseAt < SNIPE_MS){
+    gain += SNIPE_HEAT;
     tip('压哨', 3000);
   }
   // 越过深局门槛报一次。1.0 → 1.8 是个台阶，不说一声会像数值跳变
@@ -4565,7 +4593,7 @@ function stepOnce(dt){
     else if (game.run.wasDanger && dangerLeft >= 10){
       game.run.wasDanger = false;
       game.run.saves++;
-      if (CRAZY){ heat += 12; heatQuant = -1; syncHeat(); tip('活过来了', 3000); }
+      if (CRAZY){ heat += 12; heatQuant = -1; syncHeat(); syncEdge(); tip('活过来了', 3000); }
     }
   }
   crazyStep(dt);
@@ -5094,6 +5122,9 @@ function restart(){
   held.left = held.right = false;
   $('overlay').classList.remove('show');
   $('pauseTx').textContent = '暂停';
+  // 图标也要复位。原来只改文字不改 path，暂停→重开之后按钮会一直是播放三角
+  const pi = $('pauseIc');
+  if (pi) pi.setAttribute('d', 'M9.5 6.5v11M14.5 6.5v11');
   fillQueue();
   syncFx();
   if (game.rush) showRushIntro();     // 报幕结束时才 spawnNext
@@ -5397,7 +5428,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
-  deepMult, deepCrossLines, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
+  deepMult, deepAt, deepCrossLines, DEEP_PER, DEEP_EG, SNIPE_MS, SNIPE_HEAT, CHEST_P, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
