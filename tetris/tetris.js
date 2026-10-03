@@ -310,14 +310,19 @@ const rndFx = () => Math.random();
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 function readBest(){
-  try { return parseInt(localStorage.getItem(STORE_KEY) || '0', 10) || 0; }
+  // Number.isFinite 守卫：分数真要算出 Infinity，存进去是字符串 "Infinity"，
+  // parseInt 回来 NaN，|| 0 直接变 0 —— 最高分和生涯累计当场清零，
+  // 没有报错也没有线索。
+  try { const v = parseInt(localStorage.getItem(STORE_KEY) || '0', 10);
+        return Number.isFinite(v) && v >= 0 ? v : 0; }
   catch { return 0; }          // 隐私模式下 localStorage 会抛异常
 }
 function writeBest(v){
   try { localStorage.setItem(STORE_KEY, String(v)); } catch { /* 存不了就算了 */ }
 }
 function readTotal(){
-  try { return parseInt(localStorage.getItem(TOTAL_KEY) || '0', 10) || 0; }
+  try { const v = parseInt(localStorage.getItem(TOTAL_KEY) || '0', 10);
+        return Number.isFinite(v) && v >= 0 ? v : 0; }
   catch { return 0; }
 }
 function addTotal(v){
@@ -454,6 +459,13 @@ const RUSH_MIN_PIECES = 30;
 const RUSH_MIN_MS = 60000;
 function isRealRun(){
   return game.pieces >= RUSH_MIN_PIECES || game.elapsed >= RUSH_MIN_MS;
+}
+
+// 主动收手要达到的门槛，明显高于 isRealRun —— 见 endGame 里的说明。
+const STOP_MIN_LINES = 50;
+const STOP_MIN_MS = 180000;
+function isStopRun(){
+  return game.lines >= STOP_MIN_LINES || game.elapsed >= STOP_MIN_MS;
 }
 
 function readRushCount(){
@@ -1136,10 +1148,16 @@ function helpSections(){
   ];
 }
 
+// ⚠️ MOD_HELP / EV_HELP 是**模块初始化时就求值**的对象字面量。
+// 里面引用到的任何常量，声明都必须排在它们前面，否则踩 TDZ，整个页面起不来
+// （表现是「开始按钮点不到」，不容易一眼联想到常量顺序）。
+// 本仓库已经栽过两次：FILL_MAX 一次、GOLD_MULT 一次。往里加东西前先确认顺序。
+const GOLD_MULT = 3;
+
 const MOD_HELP = {
   name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光', fill: '灌注' },
   mod: {
-    gold:   '用它消行时，那一次得分 ×' + 3,
+    gold:   '用它消行时，那一次得分 ×' + GOLD_MULT,
     hammer: '锁定后，它占到的每一列整列向下塌实，洞被挤掉',
     bomb:   '炸掉自身周围一圈，然后受影响的列塌实',
     laser:  '整块汽化，再从落点往下打穿中心那一列 —— 开出来的井正好是打四行的形状',
@@ -1275,6 +1293,8 @@ function newRun(){
 // 同时满足好几条的时候，「赖皮」比「稳」更值得说。
 function runTitle(r, secs){
   const dangerPct = secs > 0 ? r.dangerMs / (secs * 1000) : 0;
+  // 收手局单独给个称号 —— 它不是「没什么惊险」，是主动停下来
+  if (game.why === '收手')    return ['收手', '主动结算，分数照算'];
   if (dangerPct > .25)        return ['赖皮', '四分之一的时间泡在危险区'];
   if (r.betWins >= 3)         return ['赌徒', `梭哈赢了 ${r.betWins} 次`];
   if (r.tspin >= 3)           return ['花活', `${r.tspin} 次 T-SPIN`];
@@ -1437,16 +1457,32 @@ const DEATH_TEXT = {
   '出生撞死':   '新方块出不来了',
   '锁在隐藏区': '方块摞出屏幕了',
   '灰线顶出':   '被灰线顶穿了',
+  '收手':       '见好就收',
 };
 let dieTimer = 0;
 
 function endGame(why){
+  // 死亡路径天然单次（调用点后面都 return），但「收手」是个用户能连点的按钮 ——
+  // 连点两下就是 addTotal / countRush / plays++ 各跑两遍。
+  if (game.over) return;
   game.over = true;
   // FEVER 的视觉不能留到结算页 —— crazyReset 要等重开才跑，中间这段
   // 背景条纹会一直在动
   if (CRAZY && feverLeft > 0) feverEnd();
   game.why = why || '?';
   game.piece = null;
+  game.paused = false;              // 收手是从暂停页进来的，不复位的话状态会打架
+  // 把限时机制的瞬态收干净 —— 它们原本靠「下一局 crazyReset」清，
+  // 但那是**重开之后**。中间这段结算页上，梭哈面板会一直挂着，
+  // 而 #betFlash 是 role=button 且绑了点击：在结算页上点它还能真的接梭哈。
+  if (CRAZY){
+    betOffer = 0; betLeft = 0; betShow = 0; betHide();
+    evActive = null; evPending = null; evLeft = 0; evWarnLeft = 0;
+    delete document.body.dataset.ev;
+    const ew = $('evwarn'); if (ew) ew.classList.remove('on');
+    syncGarbageWarn(-1);
+    document.body.classList.remove('burning');
+  }
   particles.length = 0;
   sweeps.length = 0;
   rings.length = 0;
@@ -1465,13 +1501,21 @@ function endGame(why){
   if (CRAZY){
     // 有效局才推进狂欢局的计数、才算今日一局 —— 秒死重开刷不出狂欢局，
     // 也压不低门槛。最佳分不设门槛：打出来了就是打出来了。
-    const real = isRealRun();
+    // 收手走的是更高的门槛。isRealRun() 是 30 块 / 60 秒 —— 那个口径对
+    // 「死了」是合理的（你确实打完了），但对「主动收手」就是个后门：
+    // 「开局 → 落 30 块 → 收手」一分钟一轮，既攒狂欢局保底、又把今日局数
+    // 刷上去（今日局数每 10 局把保底门槛降一格）。分数全额计入没问题，
+    // 那块不存在刷分动机；但这两个计数必须挡住。
+    const real = game.why === '收手' ? isStopRun() : isRealRun();
     if (real && !FORCE_RUSH) countRush();   // 测试模式不推进保底计数
     const d = readDaily();          // readDaily 自己会判断是不是还是同一天
     if (real) d.plays++;
     if (game.score > d.best) d.best = game.score;
     writeDaily(d);
   }
+  // 标题写死是「堆到顶了」，收手局那是字面意义上的说谎
+  const h2 = $('overTitle');
+  if (h2) h2.textContent = game.why === '收手' ? '收手了' : '堆到顶了';
   $('overScore').textContent = game.score.toLocaleString();
   $('overLines').textContent = game.lines;
   $('overLevel').textContent = game.level;
@@ -1508,6 +1552,8 @@ function endGame(why){
 
   // 死亡慢镜：结算页晚 700ms 再弹，中间让盘面褪色定住。
   // 以前是瞬间切到结算页，你还没看清自己怎么死的就结束了 —— 输也该有重量。
+  cancelAnimationFrame(rafId);
+  rafId = 0;              // 不清零的话 resumeLoop 的 if (!rafId) 之后拉不起循环
   clearTimeout(dieTimer);
   document.body.classList.add('dying');
   dieTimer = setTimeout(() => {
@@ -2977,7 +3023,7 @@ function toggleMusic(){
 // 那一杆正好消行」时才兑现，打空的比例不低 —— 出现频率本来就该比别的
 // 变异块高一档，它是纯加分、没有盘面效果，不会像炸弹激光那样改变局势。
 const GOLD_RATE = 1 / 24;
-const GOLD_MULT = 3;
+// GOLD_MULT 已上移到 MOD_HELP 之前（那个字面量在模块初始化时就要用它）
 const FEVER_MS = 20000;          // 一次 FEVER 多长（走 game.elapsed，不是墙钟）
 const FEVER_MULT = 4;
 const PITY_DIV = 55;             // 保底斜率：越小触发越勤
@@ -3040,7 +3086,7 @@ const HEAT_B = 2 * Math.sqrt(HEAT_SOFT) / HEAT_DIV;
 const HEAT_A = 1 + HEAT_KNEE / HEAT_DIV - 2 * HEAT_SOFT / HEAT_DIV;
 let heat = 0;
 
-// ── 燃点已删除（2026-10-03）──
+// ── 燃点 v1 已删除（2026-10-03），v2 见下面的 burnStep ──
 //
 // 它曾经给狂欢局一个「热度过线之后倍率额外起飞」的加成，
 // 公式是 m 乘以 (1 + (h - 线) / 线 × 系数)。两个问题都是结构性的：
@@ -3054,6 +3100,10 @@ let heat = 0;
 //
 // 狂欢局已经有 RUSH_MULT 2.5 和道具翻倍，不缺这一块。
 // 以后真要做「高热度爆发」，必须**有封顶**且**两种对局都吃**。
+//
+// ⚠ 这段讲的是 **v1**。燃点本身没有消失 —— 往下看 burnStep：
+// v2 改成挂在「热度涨得够快」上，固定时长 × 固定倍率，两种对局都吃。
+// `crazyScoreMult()` 里乘的 BURN_MULT 是 v2 的，活的。
 
 // 纯函数版：给定热度算倍率，不读当前局的状态。
 // 说明书要拿它举例，而 heatMult 读的是此刻的 heat 和 game.rush ——
@@ -3257,6 +3307,27 @@ function crazyReset(){
 }
 
 
+// ── 试过「无洞连击链」，两条前提都不成立，已撤 ──
+//
+// 想法是：现有加成全在奖励「消行速度」，没有一个奖励「整洁」，而整洁恰恰是
+// 深局能不能活下去的唯一变量。方向对，执行错了两次：
+//
+// 1. **经济上无效。** 打算给定额热度，但热度是按比例衰减的池子。凑 12 块
+//    整洁约 17 秒，这期间热度 1000 的局自己掉 117 点、7400 的局掉 866 点 ——
+//    而奖励只有 26 点。定额加法在按比例衰减的池子里，高位必然失效。
+//    而且倍率过拐点是开方压的，热度 7400 时多给 24 点只值 +0.13%，
+//    恰恰是它声称要救的深局最不值钱。
+//
+// 2. **判定失真。** `made` 算在**消行之前**，所以「用一块封顶一个还没消掉的
+//    满行」必然被算成造洞 —— 实测盖之前 0 个洞、盖之后 2 个、而那行消掉后
+//    实际是 0 个。链会在你打出漂亮消行的那一手上断。对变异块也是瞎的
+//    （`crazyApplyMod` 在它之后才跑），而灌注正是用来修洞的。
+//
+// 还有两个连带问题：给热度会被燃点 v2 的「涨得快」判据点着（一次性注入
+// 天然是个 spike），而「断链才结算」等于逼玩家主动造洞去兑现。
+//
+// 要重做的话正确形态是**乘性**的：整洁期间热度衰减减半。但那会动热度平衡。
+
 // 钩子②：锁定时记下这块是不是金的（scoreFor 里 game.piece 已经是 null 了）
 function crazyOnLock(p){
   if (!CRAZY) return;
@@ -3440,7 +3511,7 @@ const MOD_RATES = [
   // 灌注比重锤稀一点：它能当场凑满好几行，威力比重锤大
   ['fill',   1 / 120],
   ['hammer', 1 / 90],
-  ['gold',   GOLD_RATE],   // 1/38
+  ['gold',   GOLD_RATE],
 ];
 const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff', fill:'#8ef5c0' };
 
@@ -4338,10 +4409,23 @@ function step(dt){
   return r;
 }
 
+// 真实时钟这一侧夹住补算上限。
+//
+// **不能夹在 step() 里** —— 那个 600000 是故意的，注释写着「允许一次喂进来
+// 一大段，harness 靠这个把一局压到毫秒级」。夹在那里会静默丢数据：局变短、
+// 死因分布变形，而所有平衡数字都靠那套 harness 跑。
+//
+// 夹这一下的理由：rAF 停很久再恢复时 dt 会是几十秒到几分钟，step 会按 100ms
+// 切片**全部补算**。实测喂 120 秒：瞬间落 12 块、堆顶到 0、当场判死。
+// 现在有 visibilitychange 自动暂停挡着，但那是单点防护。
+//
+// 250ms = 15 帧，正常卡顿足够补；再长不是卡顿是冻结，宁可丢。
+const MAX_CATCHUP = 250;
+
 function tick(now){
   rafId = requestAnimationFrame(tick);
   dbg.frames++;
-  const dt = now - lastFrame;
+  const dt = Math.min(now - lastFrame, MAX_CATCHUP);
   lastFrame = now;
 
   const r = step(dt);
@@ -4784,6 +4868,9 @@ function togglePause(){
   const ov = $('overlay');
   if (game.paused){
     ov.dataset.mode = 'pause';
+    // 只在够得上有效局之后给「收手」—— 秒开秒收会污染今日局数和狂欢局保底
+    const sb = $('stopBtn');
+    if (sb) sb.hidden = !isRealRun();
     ov.classList.add('show');
     needsDraw = true;
   } else {
@@ -4922,6 +5009,15 @@ function init(){
   $('resumeBtn').addEventListener('click', togglePause);
   $('pauseBtn').addEventListener('click', togglePause);
   $('restartBtn').addEventListener('click', () => restart());
+  // 收手：走正常的 endGame 路径，分数全额计入。它不是 buff ——
+  // 收手拿到的就是当前分数，继续打只会更高，所以没有刷分动机。
+  const sb = $('stopBtn');
+  if (sb) sb.addEventListener('click', () => {
+    if (!game.started || game.over) return;
+    game.paused = false;                 // endGame 之前先解暂停，否则结算页和暂停页会打架
+    $('overlay').classList.remove('show');
+    endGame('收手');
+  });
   $('muteBtn').addEventListener('click', toggleMute);
   $('skinBtn').addEventListener('click', () => toggleStylePanel());
   $('skinDone').addEventListener('click', () => toggleStylePanel(false));
@@ -5035,7 +5131,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
   deepMult, deepCrossLines, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
   saveGame, restoreGame, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
-  readRushCount, countRush, takeRush, isRealRun, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
+  readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   fmtScore, setStat,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,

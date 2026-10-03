@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=5cc84634">
+<link rel="stylesheet" href="tetris.css?v=568356f6">
 </head>
 <body>
 <div class="topline"></div>
@@ -80,10 +80,13 @@
             <h2>已暂停</h2>
             <p>喘口气。回来继续。</p>
             <button class="pbtn" id="resumeBtn">继续</button>
+            <!-- 收手：一局原本只有「死」一种结束方式，打到一半不想打了只能
+                 故意把方块堆上天。只在够得上有效局之后出现。 -->
+            <button class="pbtn ghost" id="stopBtn" hidden>收手 · 结算这一局</button>
           </div>
 
           <div data-when="over">
-            <h2>堆到顶了</h2>
+            <h2 id="overTitle">堆到顶了</h2>
             <p class="died" id="overDied"></p>
             <div class="overrank" id="overRank" hidden></div>
             <div class="final">
@@ -233,7 +236,7 @@
 
 </div>
 
-<script src="tetris.js?v=1ac0fc06"></script>
+<script src="tetris.js?v=67dd1e46"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

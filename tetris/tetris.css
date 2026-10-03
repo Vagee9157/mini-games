@@ -1246,6 +1246,16 @@ body[data-ev="calm"] .gwarn{ box-shadow: 0 0 10px rgba(95,224,200,.5); }
 }
 .betflash-txt i{ font-style: normal; font-size: 9px; color: rgba(255,209,102,.78); }
 
+/* 收手按钮：次要动作，不能和「继续」抢视觉 */
+.pbtn.ghost{
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.22);
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-top: 8px;
+}
+.pbtn.ghost:active{ background: rgba(255,255,255,.06); }
+
 /* 赌约进行中：边框常亮提醒「你还欠一次消行」 */
 body.betting .shaker{ outline: 2px solid rgba(255,193,71,.7); outline-offset: 3px; }
 
