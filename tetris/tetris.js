@@ -1193,6 +1193,11 @@ function helpSections(){
               + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
+      { dot: '⏳', name: '缓期', meta: Math.round(DELAY_FRAC * 100) + '% 热度',
+        text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒时状态框给出按钮，点它把灰线钟往回推 '
+              + (DELAY_MS / 1000) + ' 秒。价格是当前热度的 ' + Math.round(DELAY_FRAC * 100)
+              + '%（最低 ' + DELAY_MIN + '）—— 按比例收所以穷富一个价。'
+              + '每行灰线只能缓一次，钟还在走，它是延后不是取消' },
       { dot: '✹', name: '彩虹行', meta: '×' + RAIN_MULT,
         text: '盘面上随机一行会发光，消到它时那一次得分 ×' + RAIN_MULT
               + '。消掉或 ' + Math.round(RAIN_MS / 1000) + ' 秒没消掉就换一行' },
@@ -1301,6 +1306,7 @@ function fillRunLog(){
   if (game.rush) add(RUSH_NAME, '分数 ×' + RUSH_MULT, true);
   if (r.bets) add('梭哈', `${r.betWins}/${r.bets}`);
   if (r.rerolls) add('换牌', r.rerolls + ' 次');
+  if (r.delays) add('缓期', r.delays + ' 次');
   // 写成 4:47 而不是「4 分 47 秒」—— 后者在 320px 宽的屏上会被截掉尾巴
   add('这局用了', Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0'));
 
@@ -1351,7 +1357,7 @@ function countHoles(){
 function newRun(){
   return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0,
            bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0,
-           mile: 0, wasDanger: false, saves: 0, chests: 0 };
+           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0 };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -1509,6 +1515,7 @@ function riseGarbage(){
   }
   game.board.push(row);
   game.garbage++;
+  delayUsed = false;                                    // 新的一行，缓期额度回来
   lastRiseAt = game.elapsed;
 
   const p = game.piece;
@@ -2469,6 +2476,11 @@ function fxRows(){
                                p: burnLeft / (game.rush ? BURN_MS_RUSH : BURN_MS) });
   if (feverLeft > 0) out.push({ n: 'FEVER', v: '×' + FEVER_MULT, k: 'fev', p: feverLeft / FEVER_MS });
   if (game.rush) out.push({ n: '狂欢', v: '×' + RUSH_MULT, k: 'rush' });
+  // 缓期排在狂欢之后、热度之前：它要你动手，但没有硬时限（最差就是灰线照常上来），
+  // 所以优先级低于梭哈和所有限时效果。
+  if (canDelay()) out.push({ n: '缓期', v: '−' + delayCost(), k: 'delay',
+                             go: '缓期', act: 'delay',
+                             p: 1 - (garbagePeriod() - garbageTimer) / DELAY_WIN });
   // 右侧显示热度值本身，左上角徽章显示倍率 —— 两处各管一个，不重复。
   // 原来两处都是倍率，热度这个被反复提到的数字一处都看不见，
   // 结果就是没人（包括我自己）说得清自己打到过多少热度。
@@ -2491,7 +2503,7 @@ function syncFx(){
       el.className = 'fxs' + (r ? ' ' + r.k : '');
       el.innerHTML = r
         ? `<div class="fxl"><b class="fxn">${r.n}</b><b class="fxv">${r.v}</b></div>`
-          + (r.go ? `<button class="fxgo" type="button">${r.go}</button>` : '')
+          + (r.go ? `<button class="fxgo" type="button" data-act="${r.act || 'bet'}">${r.go}</button>` : '')
           + (r.p == null ? '' : '<span class="fxbar"><i></i></span>')
         : '';
     }
@@ -3292,6 +3304,57 @@ const CHEST_RATE = 1 / 4;
 // 90 → 440，按真人峰值热度的 6% 给，开箱才算一份像样的回报。
 const CHEST_HEAT = 440;
 let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压哨」用
+// ── 缓期（2026-10-03）──
+//
+// 灰线是全局唯一跟手速无关的绝对压力钟，所以它一直只有「挨着」这一种关系。
+// 缓期给它第一个对手：花热度把钟往回推。
+//
+// 两个数值决定值得写下来：
+//
+// ① 推回的是**固定秒数**不是周期比例。按比例推（比如 60%）的话，开局周期
+//    36 秒能推 21 秒、后期周期 7 秒只能推 4 秒 —— 正好跟需求反着来，
+//    你最需要喘气的是后期。固定 9 秒则是「永远值这么多」。
+//
+// ② 价格是**热度的固定比例**不是固定值。固定值在热度 5000 的时候等于白送，
+//    在热度 200 的时候又贵到没人用。按比例扣则穷富一个价：倍率在拐点之后
+//    是 sqrt 压缩的，扣掉 18% 热度大约掉 9% 倍率，和你有多少热度无关。
+//    这和燃点 v2 用「涨幅」而不是「绝对值」是同一条原则 —— 机制要免标度，
+//    不然 HEAT_TAU 一动就得重标一整排常量。
+//
+// 每行灰线只能缓一次（delayUsed），所以它是延后不是取消 —— 钟还在走。
+const DELAY_MS   = 9000;         // 往回推多少毫秒，固定值
+const DELAY_FRAC = .18;          // 价格 = 当前热度的这个比例
+const DELAY_MIN  = 150;          // 价格下限，也是能不能用的门槛
+const DELAY_WIN  = 8000;         // 灰线还剩多久时开始提供缓期（要够手机上点得到）
+let delayUsed = false;           // 这一行灰线是否已经缓过
+
+// 价格现算 —— 说明书和扣费读的是同一个函数，不会对不上
+function delayCost(){ return Math.max(DELAY_MIN, Math.round(heat * DELAY_FRAC)); }
+
+// 能不能缓：疯狂版、灰线钟真的在走、进了窗口、热度够、这行还没缓过。
+// 梭哈待接时不提供 —— 状态框只有三槽，而梭哈是有硬时限的，不能被挤掉。
+function canDelay(){
+  if (!CRAZY || !game.started || game.over || game.noGarbage) return false;
+  if (feverLeft > 0 || evCalm()) return false;        // 钟本来就停着，没得缓
+  if (delayUsed || betOffer > 0) return false;
+  if (heat < delayCost()) return false;
+  return garbagePeriod() - garbageTimer <= DELAY_WIN;
+}
+
+function doDelay(){
+  if (!canDelay()) return;
+  const c = delayCost();
+  heat -= c;
+  garbageTimer = Math.max(0, garbageTimer - DELAY_MS);
+  delayUsed = true;
+  gwarnStep = -1;                                      // 条要立刻回退，别等量化档位变
+  heatQuant = -1; syncHeat(); syncEdge(); syncFx();
+  if (game.run) game.run.delays = (game.run.delays || 0) + 1;
+  showToast(`缓期　−${c} 热度`);
+  popScore('+' + (DELAY_MS / 1000) + 's', 'thaw');
+  sfx('drop', .7); buzz([25, 15, 40]);
+}
+
 const SNIPE_MS = 1000;           // 灰线顶上来多久内消行算压哨
 const SNIPE_HEAT = 8;            // 压哨额外补的热度
 
@@ -3441,7 +3504,7 @@ function crazyReset(){
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
-  swapSel = -1; rainRow = -1; rainLeft = 0;
+  swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false;
   burnLeft = 0; burnHist.length = 0; burnT = 0; burnClock = 0;
   document.body.classList.remove('burning');
   delete document.body.dataset.ev;
@@ -5272,7 +5335,9 @@ function init(){
   $('fxBox').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' '){
       e.preventDefault();
-      if (e.target.closest('.fxgo')) betAccept(); else openHelpSheet();
+      if (e.target.closest('.fxgo')){
+        if (e.target.closest('.fxgo').dataset.act === 'delay') doDelay(); else betAccept();
+      } else openHelpSheet();
     }
   });
   const closeHelp = () => { $('helpSheet').hidden = true; };
@@ -5345,7 +5410,9 @@ function init(){
   if (box){
     const take = (e) => {
       if (!e.target.closest('.fxgo')) return;
-      e.preventDefault(); e.stopImmediatePropagation(); betAccept();
+      e.preventDefault(); e.stopImmediatePropagation();
+      // 现在有两种出价按钮了，按 data-act 分发
+      if (e.target.closest('.fxgo').dataset.act === 'delay') doDelay(); else betAccept();
     };
     box.addEventListener('touchstart', take, { passive: false });
     box.addEventListener('click', (e) => { if (!e.detail) return; take(e); });
@@ -5418,6 +5485,9 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
+  canDelay, doDelay, delayCost, garbagePeriod, riseGarbage,
+  get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
+ DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
   rainPick, rainStep, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，

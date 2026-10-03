@@ -1378,3 +1378,13 @@ body.hotcombo3 .badge.cmb{
   body.hotcombo3 .board-aura{ animation: none; opacity: .7; }
   body.hotcombo3 .badge.cmb{ animation: none; }
 }
+
+/* 缓期：状态框里的那一行。用青色 —— 和「坏事」的红、「好事」的金都分得开，
+   它既不是奖励也不是惩罚，是一笔交易。 */
+.fxs.delay{ --fx: #5fe0c8; }
+.fxs.delay .fxn{ color: #5fe0c8; }
+.fxs.delay .fxgo{
+  background: linear-gradient(180deg, rgba(95,224,200,.22), rgba(95,224,200,.1));
+  border-color: rgba(95,224,200,.55);
+  color: #8ff0de;
+}
