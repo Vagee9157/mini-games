@@ -4738,7 +4738,7 @@ function syncRainMark(){
   rainMarkSig = sig;
   el.hidden = !on;
   if (!on) return;
-  const h = CELL * .4, w = CELL * .42;
+  const h = CELL * .25, w = CELL * .27;   // h 是半高，所以三角实际高 2h
   el.style.setProperty('--rm-h', h.toFixed(1) + 'px');
   el.style.setProperty('--rm-w', w.toFixed(1) + 'px');
   el.style.top = ((rainRow - BUFFER) * CELL + CELL / 2 - h).toFixed(1) + 'px';
