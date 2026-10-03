@@ -1145,7 +1145,7 @@ function helpSections(){
   });
   return [
     ['变异块　约 ' + (Object.values(rate).reduce((a, b) => a + b, 0) * 100).toFixed(1) + '% 的方块',
-      ['gold', 'hammer', 'fill', 'bomb', 'laser'].map(k => ({
+      ['gold', 'hammer', 'fill', 'fork', 'dye', 'bomb', 'laser'].map(k => ({
         mod: k, name: MOD_HELP.name[k], meta: fmtRate(rate[k]), text: MOD_HELP.mod[k] }))],
     ['事件　开局 ' + (EV_FIRST / 1000) + ' 秒第一次，最密 ' + (EV_MIN / 1000) + ' 秒一次，提前 ' + (EV_WARN / 1000) + ' 秒预告',
       evOn.concat(evNow).map(evLine).concat([{ dot: '◈', name: '堆到高处时', meta: '',
@@ -1248,7 +1248,8 @@ function helpSections(){
 const GOLD_MULT = 3;
 
 const MOD_HELP = {
-  name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光', fill: '灌注' },
+  name: { gold: '金块', hammer: '重锤', bomb: '炸弹', laser: '激光', fill: '灌注',
+          fork: '分流', dye: '染色' },
   mod: {
     gold:   '用它消行时，那一次得分 ×' + GOLD_MULT,
     hammer: '锁定后，它占到的每一列整列向下塌实，洞被挤掉',
@@ -1256,6 +1257,12 @@ const MOD_HELP = {
     laser:  '整块汽化，再从落点往下打穿中心那一列 —— 开出来的井正好是打四行的形状',
     fill:   '落点下方那几列，空格全部填成实心 —— 堆高不变但行容易凑满，常当场就消。'
             + '位置你自己挑，是激光和地震留下那些深坑的解药',
+    fork:   '锁定之后这块的格子各自垂直落到底，像沙子一样散开。'
+            + '重锤是整列塌实、连下面原有的洞一起挤掉，堆会变矮；'
+            + '分流只动这块自己的格子，堆高几乎不变，但能顺着起伏铺开 —— '
+            + '治的是「盘面高低不平，哪块放上去都架空」',
+    dye:    '锁定之后，这块占到的最低那一行变成彩虹行。'
+            + '彩虹行本来是随机挑的，有它就轮到你自己指',
   },
   ev: {
     blackout: '方块只画轮廓，看不见填充，音效也变闷',
@@ -1267,6 +1274,9 @@ const MOD_HELP = {
     compact:  '挑洞最多的三列塌实 —— 上面的砖掉下来，堆跟着变矮',
     calm:     '灰线停止上涨。不加分不消洞，就是给你一段时间整理盘面',
     freeze:   '冻住上方某一行。冻住的行凑满时不消，只解冻，要消两次才掉',
+    tail:     '这几秒里消行的热度注入翻倍。不改盘面，纯粹是「趁现在多打几下」',
+    blind:    '落点虚影消失，只能靠自己数。堆到高处时不会出现',
+    glean:    '队列最前面几块直接变成变异块。好处要等你自己把牌打出来才兑现',
   },
 };
 
@@ -1998,7 +2008,7 @@ function draw(){
     const color = colorOf(p.type);
     let gy = p.y;
     while (!collides(p.type, p.x, gy + 1, p.rot)) gy++;
-    if (gy !== p.y){
+    if (gy !== p.y && !evBlind()){                   // 重影：这几秒没有落点虚影
       for (const [cx, cy] of cellsOf(p.type, p.rot)){
         const by = gy + cy;
         if (by < BUFFER) continue;
@@ -3916,6 +3926,7 @@ function crazyOnClear(lines, spin, perfect){
     gain *= FLOW_MULT;
     flowHit = true;
   }
+  if (lines > 0 && evTail()) gain *= 2;              // 顺风
   // 险区加成：危险区原来只有坏处，所以最优解永远是「尽快清下去」，没有选择。
   // 在里面消行热度翻倍之后，才谈得上「敢不敢赖在高处多赚一点」。
   if (lines > 0 && dangerOn){
@@ -3988,9 +3999,14 @@ const MOD_RATES = [
   // 灌注比重锤稀一点：它能当场凑满好几行，威力比重锤大
   ['fill',   1 / 120],
   ['hammer', 1 / 90],
+  // 分流和染色都不改变盘面高度，只改「铺开方式」和「哪一行值钱」，
+  // 所以可以比炸弹激光稠一点
+  ['fork',   1 / 140],
+  ['dye',    1 / 150],
   ['gold',   GOLD_RATE],
 ];
-const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff', fill:'#8ef5c0' };
+const MOD_TINT = { gold:'#ffd23f', bomb:'#ff4d4d', laser:'#7cf4ff', hammer:'#c9a6ff', fill:'#8ef5c0',
+                   fork:'#ffa94d', dye:'#ff7ad9' };
 
 // ── 变异块图标 ──
 // 原来只靠混色区分，但方块本身有七种颜色，混出来必然撞车 ——
@@ -4019,6 +4035,18 @@ function drawModIcon(c, cx, cy, r, mod){
     c.arc(cx, cy + r * .14, r * .74, 0, Math.PI * 2);
     c.closePath();
     c.moveTo(cx + r * .3, cy - r * .5); c.lineTo(cx + r * .72, cy - r * .95);
+  } else if (mod === 'fork'){                // ⋔ 三股下叉：格子各走各的
+    c.moveTo(cx, cy - r * .95); c.lineTo(cx, cy - r * .1);
+    c.moveTo(cx - r * .8, cy + r * .95); c.lineTo(cx - r * .8, cy - r * .1); c.lineTo(cx + r * .8, cy - r * .1);
+    c.lineTo(cx + r * .8, cy + r * .95);
+  } else if (mod === 'dye'){                 // ✶ 六角星：和彩虹行同一个意思
+    for (let i = 0; i < 6; i++){
+      const a = i * Math.PI / 3, b = a + Math.PI / 6;
+      if (!i) c.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      else    c.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      c.lineTo(cx + Math.cos(b) * r * .42, cy + Math.sin(b) * r * .42);
+    }
+    c.closePath();
   } else {                                   // ⚡ 竖向折线（激光）
     c.moveTo(cx + r * .42, cy - r);  c.lineTo(cx - r * .48, cy + r * .12);
     c.lineTo(cx + r * .08, cy + r * .12); c.lineTo(cx - r * .38, cy + r);
@@ -4072,6 +4100,51 @@ function crazyApplyMod(p){
   if (p.mod === 'laser')  laserAt(p);
   if (p.mod === 'hammer') hammerAt(p);
   if (p.mod === 'fill')   fillAt(p);
+  if (p.mod === 'fork')   forkAt(p);
+  if (p.mod === 'dye')    dyeAt(p);
+}
+
+// 分流：锁定之后这块的格子**各自**垂直落到底，像沙子一样散开。
+//
+// 和重锤的区别要说清楚，否则两个看起来都是「往下掉」：
+// 重锤是整列塌实 —— 连带把这块下面原有的洞一起挤掉，堆会明显变矮。
+// 分流只动这块自己的格子 —— 堆高几乎不变，但它能顺着起伏铺开，
+// 正好治「盘面高低不平，哪块放上去都架空」这种局面。
+function forkAt(p){
+  const cells = cellsOf(p.type, p.rot)
+    .map(([dx, dy]) => [p.x + dx, p.y + dy])
+    .filter(([x, y]) => x >= 0 && x < COLS && y >= 0 && y < TOTAL_ROWS)
+    .sort((a, b) => b[1] - a[1]);                    // 从最低的格子开始，免得互相挡路
+  const floor = zoneFloor();
+  let moved = 0;
+  for (const [x, y] of cells){
+    const v = game.board[y][x];
+    if (!v) continue;
+    let ny = y;
+    while (ny + 1 < floor && !game.board[ny + 1][x]) ny++;
+    if (ny === y) continue;
+    game.board[y][x] = null;
+    game.board[ny][x] = v;
+    moved++;
+    if (ny >= BUFFER) boom(x, ny, MOD_TINT.fork);
+  }
+  if (!moved) return;
+  staticDirty = true; needsDraw = true;
+  sfx('drop', .9); buzz([20, 12, 20]);
+}
+
+// 染色：锁定之后，这块占到的最低那一行变成彩虹行。
+// 复用彩虹行那套（消到它时那一次得分 ×2），所以它不是第八种新规则，
+// 是「你自己决定把彩虹标在哪一行」—— 彩虹行本来是随机挑的。
+function dyeAt(p){
+  if (rainRow < 0 && !game.started) return;
+  const ys = cellsOf(p.type, p.rot).map(([, dy]) => p.y + dy).filter(y => y >= BUFFER && y < zoneFloor());
+  if (!ys.length) return;
+  rainRow = Math.max(...ys);
+  rainLeft = RAIN_MS * upMul('rain');
+  staticDirty = true; needsDraw = true;
+  popScore(CELL * COLS / 2, (rainRow - BUFFER) * CELL, '彩虹行', '×' + RAIN_MULT, 'rain');
+  sfx('level', 1.3); buzz([25, 15, 35]);
 }
 
 // 灌注：落点下方那几列，空格全部填成实心。
@@ -4409,6 +4482,10 @@ const EVENTS = [
   { key:'wind',     name:'狂风',   tip:'方块要被吹偏了', bad:true,  ms:7000, w:2 },
   { key:'wall',     name:'封锁',   tip:'有一列要封了',   bad:true,  ms:9000, w:2 },
   { key:'slam',     name:'瞬落',   tip:'方块要直接砸到底', bad:true,  ms:6000, w:2 },
+  // ↓ 2026-10-03 内容扩充。事件是数据驱动的，加一条只要加表项 + 一个钩子。
+  { key:'tail',     name:'顺风',   tip:'热度要翻倍了',     bad:false, ms:8000, w:4 },
+  { key:'blind',    name:'重影',   tip:'落点虚影要没了',   bad:true,  ms:7000, w:2 },
+  { key:'glean',    name:'拾穗',   tip:'手牌要变好了',     bad:false, ms:0,    w:3 },
 ];
 let evTimer = 0, evWarnLeft = 0, evPending = null, evActive = null, evLeft = 0, evBeep = 0;
 let wallCol = -1;        // 列封锁：这一列当墙，collides 里直接判撞
@@ -4473,7 +4550,7 @@ function evPeriod(){
 // 这四个在濒死时是真的没得救：冰冻要你多消一次、封锁堵掉一列、
 // 地震平移整堆、瞬落夺走边落边调整。发它们就是耍赖。
 // 暗幕 / 镜像 / 狂风 只是让操作变难，濒死时正该紧张，放回来。
-const EV_DEADLY = new Set(['freeze', 'wall', 'quake', 'slam']);
+const EV_DEADLY = new Set(['freeze', 'wall', 'quake', 'slam', 'blind']);
 
 function pickEvent(){
   const safe = stackTopRow() > DANGER_ROW + 3;
@@ -4521,6 +4598,7 @@ function evFire(){
   if (e.key === 'freeze' && !doFreeze()) return;    // 空盘冻不了，当没发生
   if (e.key === 'wall'   && !doWall())   return;
   if (e.key === 'calm'){ sfx('hold', .7); sweepRows([TOTAL_ROWS - 1], '#5fe0c8'); }
+  if (e.key === 'glean') doGlean();
   if (e.ms > 0){
     evActive = e; evLeft = e.ms;
     document.body.dataset.ev = e.key; staticDirty = true; needsDraw = true;
@@ -4558,6 +4636,24 @@ function doQuake(){
   staticDirty = true; needsDraw = true; shake(true);
 }
 
+// 拾穗：队列最前面几块直接变成变异块。
+// 它和别的有利事件不一样 —— 不改盘面也不改规则，改的是**接下来几手的手牌**，
+// 所以它的好处要等你自己把牌打出来才兑现，不是白送。
+const GLEAN_N = 3;
+function doGlean(){
+  if (!CRAZY || upNever('mod')) return;              // 孤注这局不出变异块
+  const pool = MOD_RATES.map(r => r[0]);
+  let n = 0;
+  for (let i = 0; i < Math.min(GLEAN_N, game.mods.length); i++){
+    if (game.mods[i]) continue;                      // 本来就是变异块就不浪费
+    game.mods[i] = pool[(rndFx() * pool.length) | 0];
+    n++;
+  }
+  if (!n) return;
+  previewDirty = true; needsDraw = true;
+  sfx('level', 1.2); buzz([30, 20, 30]);
+}
+
 // 只压最漏的几列，不是全盘。全盘压实等于把所有洞一次填平，一大片行同时凑满、
 // 当场全清 —— 实测 18 层的满屏盘面一下压到 9 层、白送 9 行。
 // 那不叫「帮你一把」，那是把局面重置了。
@@ -4583,6 +4679,8 @@ function doCompact(){
 // 缓流：灰线暂停。不加分不消洞，纯粹给你一段喘息去整理盘面 ——
 // 它的价值随你堆得多高而变，堆得越险越值钱，所以不是白送。
 const evCalm = () => CRAZY && evActive && evActive.key === 'calm';
+const evTail  = () => CRAZY && evActive && evActive.key === 'tail';   // 顺风：消行热度翻倍
+const evBlind = () => CRAZY && evActive && evActive.key === 'blind';  // 重影：落点虚影没了
 // 缓流原来只有一圈边框换色，太含蓄 —— 它的价值（灰线停了）恰恰体现在
 // 那根预警条上，所以表现就该做在预警条上：停住 + 变青 + 一声「停」。
 
@@ -5788,6 +5886,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
   rainPick, rainStep, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
+  crazyOnClear, evTail, evBlind, doGlean, GLEAN_N, forkAt, dyeAt, MOD_TINT,
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
