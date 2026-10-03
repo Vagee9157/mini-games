@@ -1497,3 +1497,13 @@ body.zoning .board-aura{
    横幅占盘面 5%~31%，而 toast 默认 14% —— 正好压在横幅中间，
    两条提示叠在一起谁也读不清。 */
 body.flashing .toast{ top: 38%; }
+
+/* 讲解类横幅（ZONE 第一次）：紫色，而且不做成可点的样子 ——
+   它不是号召你点，只是在说明刚才发生了什么。 */
+.betflash.info{
+  border-color: rgba(180,155,255,.62);
+  box-shadow: 0 0 24px rgba(140,110,240,.26), 0 8px 24px rgba(0,0,0,.5);
+  cursor: default;
+}
+.betflash.info .betflash-txt b{ color: #c9b6ff; }
+.betflash.info .betflash-txt i{ color: rgba(201,182,255,.8); }

@@ -104,8 +104,12 @@ JS = r"""() => {
   ok(T.feverCool > 0, '结束后进冷静期');
   T.feverStart();
   ok(T.fever <= 0, `冷静期里开不出 FEVER（还剩 ${Math.round(T.feverCool/1000)}s）`);
+  // 冷却要推进 45 秒模拟时间。不关灰线的话这段时间里对局会被打死，
+  // 而 game.over 之后 stepOnce 直接 return、冷却就不再走 —— 这条会变 flaky
+  T.game.noGarbage = true;
   T.step(T.FEVER_COOL + 200);
-  ok(T.feverCool <= 0, '冷静期会走完');
+  T.game.noGarbage = false;
+  ok(T.feverCool <= 0, `冷静期会走完（over=${T.game.over}）`);
   T.feverStart();
   ok(T.fever > 0, '冷静期过后又能开');
   ok(T.FEVER_MS / (T.FEVER_MS + T.FEVER_COOL) < .35,
@@ -249,6 +253,31 @@ JS = r"""() => {
   T.step(T.ACT_SHOW + 100);
   ok(!on(), '到时自己收掉');
   T.betAccept(); T.step(T.BET_MS + 500);
+
+  // ── ZONE 第一次要讲清楚自己是什么 ──
+  fresh();
+  ok(T.zoneTold === false, '新一局还没讲过');
+  T.zoneCharge = T.zoneNeed(); T.step(20);
+  ok(T.zoneTold === true, '第一次开 ZONE 时讲了');
+  const zf = document.getElementById('betFlash');
+  ok(zf.classList.contains('on') && zf.dataset.act === 'zoneinfo', '盘面横幅在讲 ZONE');
+  ok(zf.classList.contains('info'), '标成讲解类（不是号召点击）');
+  const txt = document.getElementById('betFlashTxt').innerHTML;
+  for (const kw of ['ZONE', '沉到盘底', '平方'])
+    ok(txt.includes(kw), `讲解里说了「${kw}」`);
+  // 讲解要真的停满 ACT_SHOW，不能下一帧就被收掉
+  T.step(ACT_HALF = T.ACT_SHOW / 2);
+  ok(zf.classList.contains('on'), '讲解中途还在');
+  T.step(T.ACT_SHOW);
+  ok(!zf.classList.contains('on'), '到时收掉');
+  // 点它不该有反应
+  const z0 = T.zoneLeft; T.fxAct('zoneinfo');
+  ok(T.zoneLeft === z0, '点讲解横幅没有任何副作用');
+  T.zoneEnd('');
+  // 同一局第二次不再讲
+  T.zoneCharge = T.zoneNeed(); T.step(20);
+  ok(!zf.classList.contains('on') || zf.dataset.act !== 'zoneinfo', '同一局第二次不再讲');
+  T.zoneEnd('');
 
   // ── 自动触发：ZONE 攒满自己开 ──
   fresh();

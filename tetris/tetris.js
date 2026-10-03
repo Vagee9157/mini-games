@@ -3644,7 +3644,9 @@ function upTake(k){
   $('upSheet').hidden = true;
   game.frozen = false;
   if (game.run) game.run.ups = ups.slice();
-  showToast(u.n + '　' + u.t);
+  // 只报名字。把整段描述塞进 toast 会折成三行，而面板刚刚才显示过同样的文字 ——
+  // 这也是 .toast 没有宽度上限那个老毛病最早暴露出来的地方
+  showToast('修行　' + u.n);
   sfx('tetris', 1.1); buzz([35, 20, 35]);
   // 立刻生效的那几张要刷一下 UI
   heatQuant = -1; syncHeat(); syncEdge(); syncFx(); syncHud();
@@ -3674,12 +3676,18 @@ function zoneReady(){
   return CRAZY && game.started && !game.over && zoneLeft <= 0 && zoneCharge >= zoneNeed();
 }
 
+let zoneTold = false;        // 这局讲过 ZONE 是什么了吗
 function zoneStart(){
   if (!zoneReady()) return;
   zoneCharge = 0; zoneLeft = ZONE_MS; zoneRows = 0; zoneFull = false;
+  // ZONE 改成自动触发之后，玩家能看到的只有一句一闪而过的 toast 和盘面变紫 ——
+  // 不够说明它是什么。每局第一次开的时候在盘面上讲 5 秒，之后就不再打扰。
+  // 梭哈待接时让路：那个有十秒硬时限，讲解可以等。
+  let told = false;
+  if (!zoneTold && betOffer <= 0){ zoneTold = true; told = true; actLast = 'zoneinfo'; actFlash('zoneinfo'); }
   document.body.classList.add('zoning');
   if (game.run) game.run.zones = (game.run.zones || 0) + 1;
-  showToast('ZONE　重力停了');
+  if (!told) showToast('ZONE　重力停了');   // 讲解框里已经说了，别再叠一层
   sfx('tetris', .8); buzz([60, 30, 60, 30, 90]);
   syncFx();
 }
@@ -3873,7 +3881,8 @@ function crazyReset(){
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
   swapSel = -1; rainRow = -1; rainLeft = 0; delayUsed = false; rainMarkSig = '';
-  actKind = ''; actLast = ''; for (const k of Object.keys(actSeen)) delete actSeen[k];
+  actKind = ''; actLast = ''; zoneTold = false;
+  for (const k of Object.keys(actSeen)) delete actSeen[k];
   zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
   ups = []; upLeft = 0; upNext = UP_EVERY; upRound = 0;
   if ($('upSheet')) $('upSheet').hidden = true;
@@ -5104,6 +5113,9 @@ function betMaybeOffer(n, spin){
 function actNow(){
   if (!CRAZY || game.over || !game.started) return '';
   if (betOffer > 0) return 'bet';
+  // ZONE 讲解期间保持住 —— 不然 actStep 下一帧就把它当「动作没了」收掉，
+  // 五秒的停留会缩成一帧
+  if (actKind === 'zoneinfo' && betShow > 0) return 'zoneinfo';
   return '';
 }
 
@@ -5117,6 +5129,12 @@ function actText(kind){
     return '<b>ZONE</b>' + (ZONE_MS / 1000) + ' 秒内重力 / 灰线 / 事件全停<br>'
          + '消掉的行沉到底部，结束时按行数平方给奖金'
          + '<br><i>点这里或右侧「启动」</i>';
+  if (kind === 'zoneinfo')
+    // 四行封顶。原来写了六行，最后一句直接撑出框外。
+    return '<b>ZONE</b>' + (ZONE_MS / 1000) + ' 秒　重力 / 灰线 / 事件全停<br>'
+         + '消掉的行沉到盘底，地板跟着涨（最多 ' + ZONE_MAX + ' 行）<br>'
+         + '结束时一次清空，奖金按行数<b>平方</b>算，再乘当时倍率'
+         + '<br><i>' + ZONE_EG.map(k => k + '行+' + Math.round(ZONE_UNIT * k * k / ZONE_CURVE)).join('　') + '</i>';
   if (kind === 'delay')
     return '<b>缓期</b>花 ' + delayCost() + ' 热度，把灰线往回推 ' + (DELAY_MS / 1000) + ' 秒<br>'
          + '每行灰线只能缓一次'
@@ -5136,6 +5154,8 @@ const actSeen = {};   // 每类动作上次在盘面上亮的时刻
 function actFlash(kind){
   const tx = $('betFlashTxt'), el = $('betFlash');
   if (!tx || !el) return;
+  // info 类（ZONE）是纯讲解，不是号召点击 —— 点它不该有任何反应
+  el.classList.toggle('info', kind === 'zoneinfo');
   actKind = kind;
   betShow = ACT_SHOW;
   tx.innerHTML = actText(kind);
@@ -5213,6 +5233,7 @@ function betPop(label, text, kind){
 
 // 状态框里的按钮现在有三种，统一在这里分发
 function fxAct(act){
+  if (act === 'zoneinfo') return;     // 纯讲解，点它不该有任何反应
   if (act === 'delay') doDelay();
   else if (act === 'zone') zoneStart();
   else betAccept();
@@ -6122,7 +6143,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   bombAt, laserAt, hammerAt, fillAt, doQuake, doCompact, betAccept,
   get evActive(){ return evActive && evActive.key; },
   get evPending(){ return evPending && evPending.key; },
-  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW, ACT_SHOW, ACT_COOL, actNow, actText, actFlash, actStep, get actKind(){ return actKind; },
+  get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW, ACT_SHOW, get zoneTold(){ return zoneTold; }, ACT_COOL, actNow, actText, actFlash, actStep, get actKind(){ return actKind; },
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
   crazyStep,
