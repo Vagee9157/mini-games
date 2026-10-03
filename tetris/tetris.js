@@ -1189,6 +1189,10 @@ function helpSections(){
               + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
+      { dot: '⇄', name: '挪列', meta: SWAP_COST + ' 热度',
+        text: '点盘面选一列、再点相邻那列，两列整个对调。'
+              + '它不会减少洞也不会凑出满行 —— 只是把结构挪个位置，'
+              + '但那是唯一能动已经落地的盘面的手段' },
     ]],
     ['狂欢局　每局 ' + Math.round(RUSH_RATE * 100) + '% 概率，最多 ' + RUSH_EVERY + ' 局必出一次', [
       { dot: '★', name: '分数', meta: '×' + RUSH_MULT, text: '整局有效，不计时' },
@@ -2010,6 +2014,16 @@ function draw(){
     ctx.restore();
   }
   if (CRAZY) drawCracks();
+  // 挪列选中的那一列：描边 + 轻微提亮，和危险带、封锁墙都区分得开
+  if (swapSel >= 0 && CELL){
+    ctx.save();
+    ctx.fillStyle = 'rgba(159,180,208,.14)';
+    ctx.fillRect(swapSel * CELL, 0, CELL, ROWS * CELL);
+    ctx.strokeStyle = 'rgba(159,180,208,.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(swapSel * CELL + 1, 1, CELL - 2, ROWS * CELL - 2);
+    ctx.restore();
+  }
   if (particles.length) drawParticles();
 
   // 底边那道线：满了就从下面顶一行灰线上来
@@ -3379,6 +3393,7 @@ function crazyReset(){
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
+  swapSel = -1;
   burnLeft = 0; burnHist.length = 0; burnT = 0;
   document.body.classList.remove('burning');
   delete document.body.dataset.ev;
@@ -4195,6 +4210,61 @@ const evSlam     = () => CRAZY && evActive && evActive.key === 'slam';
 // 那半秒里你既要看清落点又要滑过去，配 500ms 就不是难度是反应力测试。
 // 标准的 20G 玩法都会给更长的锁定窗口，这里给 1.8 倍。
 function lockDelay(){ return evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY; }
+
+// ═══════════ 挪列 ═══════════
+//
+// 补的是一个很硬的缺口：**玩家对已经落地的盘面完全无力**。
+// 炸弹 / 激光 / 重锤 / 灌注全都绑在「某一块落下的那一瞬间」，错过就没了，
+// 而盘面一旦摆坏，你只能眼睁睁看着它一直坏下去。
+//
+// 做法是交换相邻两列的全部格子。这个定义有个关键性质：
+// **它不可能减少洞，也不可能凑出满行**（每一行里只是两个格子互换，
+// 行满不满、每列自己有几个洞，全都不变。2 万次随机盘面验证过）。
+// 所以它纯粹是个「重新摆位」的工具，不白送任何东西 ——
+// 对数值平衡几乎零风险，不用重标梯子。
+//
+// 代价比换牌贵不少：换牌只影响当前这一块，挪列改的是整个盘面的结构。
+const SWAP_COST = 420;
+let swapSel = -1;            // 选中的列，-1 = 没选
+
+function canSwap(){
+  return CRAZY && game.started && !game.over && !game.paused && !clearing;
+}
+
+// 点盘面：第一下选列，第二下点相邻列就交换。点同一列或不相邻的列＝改选。
+function swapTap(col){
+  if (!canSwap()) return;
+  if (col < 0 || col >= COLS) return;
+  if (swapSel < 0){
+    if (heat < SWAP_COST){ showToast(`热度不够　挪列要 ${SWAP_COST}`); sfx('lock', .8); return; }
+    swapSel = col; needsDraw = true;
+    sfx('rotate', .9); buzz(12);
+    return;
+  }
+  if (Math.abs(col - swapSel) !== 1){        // 不相邻：当成改选
+    swapSel = (col === swapSel) ? -1 : col;
+    needsDraw = true; sfx('rotate', .9); buzz(12);
+    return;
+  }
+  if (heat < SWAP_COST){ showToast(`热度不够　挪列要 ${SWAP_COST}`); swapSel = -1; needsDraw = true; return; }
+  doSwap(swapSel, col);
+}
+
+function doSwap(a, bcol){
+  for (let y = 0; y < TOTAL_ROWS; y++){
+    const row = game.board[y];
+    const t = row[a]; row[a] = row[bcol]; row[bcol] = t;
+  }
+  heat -= SWAP_COST;
+  swapSel = -1;
+  staticDirty = true; needsDraw = true;
+  heatQuant = -1; syncHeat(); syncEdge(); syncFx();
+  // 交换不会凑出满行（见上面的性质），所以不用走 clearFullNow。
+  // 但冰冻行可能被挪到别处，静态层重画即可。
+  for (const x of [a, bcol]) boom(x, TOTAL_ROWS - 1, '#9fb4d0');
+  shake(false); sfx('drop', .8); buzz([25, 15, 25]);
+  showToast(`挪列　−${SWAP_COST} 热度`);
+}
 
 // ═══════════ 换牌 ═══════════
 //
@@ -5130,6 +5200,21 @@ function init(){
   }
 
   // 点按走上面的映射表（touch 优先），这里只补键盘可达性
+  // 挪列：点盘面选列。盘面本来没有任何点击处理，所以不抢任何操作 ——
+  // 玩家的手在下面那排键上，点盘面是个明确的意图。
+  const bd = $('board');
+  if (bd){
+    const pick = (e) => {
+      if (!canSwap()) return;
+      const r = bd.getBoundingClientRect();
+      if (!r.width) return;
+      const t = (e.touches && e.touches[0]) || e;
+      swapTap(Math.floor((t.clientX - r.left) / (r.width / COLS)));
+    };
+    bd.addEventListener('touchstart', (e) => { e.preventDefault(); pick(e); }, { passive: false });
+    bd.addEventListener('click', (e) => { if (!e.detail) return; pick(e); });
+  }
+
   // 接受按钮是 syncFx 用 innerHTML 重建出来的，挂不住监听器，所以走事件委托。
   // 必须 stopPropagation：fxBox 自己是 role=button，冒上去会打开说明书。
   const box = $('fxBox');
@@ -5208,6 +5293,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get evPending(){ return evPending && evPending.key; },
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
+  swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
