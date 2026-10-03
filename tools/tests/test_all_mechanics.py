@@ -72,6 +72,42 @@ JS = r"""() => {
   fresh(); T.feverStart();
   ok(T.fever > 0, 'FEVER 能启动');
 
+  // ── 爆发倍率：相加不相乘 ──
+  fresh();
+  T.heat = 600; T.ups.length = 0;
+  const base = T.crazyScoreMult();
+  T.feverStart();
+  const f = T.crazyScoreMult() / base;
+  ok(Math.abs(f - T.FEVER_MULT) < .01, `FEVER 单独还是 ×${T.FEVER_MULT}（实得 ×${f.toFixed(2)}）`);
+  // 再叠一个燃点
+  T.heat = T.BURN_FLOOR * 2;
+  for (let i = 0; i < 40 && !T.burnOn(); i++){ T.heat *= 1.08; T.burnStep(T.BURN_SAMPLE); }
+  if (T.burnOn()){
+    T.heat = 600;
+    const b2 = T.crazyScoreMult();
+    const want = base * (1 + (T.FEVER_MULT - 1) + (T.BURN_MULT - 1));
+    const mul  = base * T.FEVER_MULT * T.BURN_MULT;
+    ok(Math.abs(b2 - want) < want * .02,
+       `FEVER+燃点 = 相加 ×${(want/base).toFixed(2)}（若相乘会是 ×${(mul/base).toFixed(2)}，实得 ×${(b2/base).toFixed(2)}）`);
+    ok(b2 < mul * .8, '叠加确实被压扁了，不是乘出来的');
+  }
+
+  // ── FEVER 冷却 ──
+  fresh();
+  T.feverStart();
+  ok(T.fever > 0, 'FEVER 能开');
+  T.step(T.FEVER_MS + 200);
+  ok(T.fever <= 0, 'FEVER 到时结束');
+  ok(T.feverCool > 0, '结束后进冷静期');
+  T.feverStart();
+  ok(T.fever <= 0, `冷静期里开不出 FEVER（还剩 ${Math.round(T.feverCool/1000)}s）`);
+  T.step(T.FEVER_COOL + 200);
+  ok(T.feverCool <= 0, '冷静期会走完');
+  T.feverStart();
+  ok(T.fever > 0, '冷静期过后又能开');
+  ok(T.FEVER_MS / (T.FEVER_MS + T.FEVER_COOL) < .35,
+     `占空比上限 ${(T.FEVER_MS/(T.FEVER_MS+T.FEVER_COOL)*100).toFixed(0)}%（原来实测 83%）`);
+
   // ── 变异块：七种都要有实现 ──
   fresh();
   const mods = T.MOD_RATES.map(r => r[0]);

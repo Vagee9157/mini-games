@@ -1217,7 +1217,9 @@ function helpSections(){
               + Math.round((CHEST_P[1] - CHEST_P[0]) * 100) + '% 热度 +' + CHEST_HEAT + ' / '
               + Math.round((1 - CHEST_P[1]) * 100) + '% 下一块是炸弹' },
       { dot: '✦', name: 'FEVER', meta: (FEVER_MS / 1000) + ' 秒 ×' + FEVER_MULT,
-        text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减' },
+        text: '消行累加保底，中了这段时间得分 ×' + FEVER_MULT + '，且热度不衰减。'
+              + '结束后冷静 ' + (FEVER_COOL / 1000) + ' 秒，这期间保底和宝箱都开不出它 —— '
+              + '否则它八成时间都在，就不是爆发而是底薪了' },
       { dot: '⚄', name: '梭哈', meta: BET_MS / 1000 + ' 秒',
         text: '消 ' + BET_OFFER_NEED + ' 行以上或打出 T-spin 就弹出（热度只要不是几乎为零）。'
               + '接了之后这十秒里累计消行，窗口结束按档结算：'
@@ -3260,6 +3262,17 @@ const GOLD_RATE = 1 / 24;
 const FEVER_MS = 20000;          // 一次 FEVER 多长（走 game.elapsed，不是墙钟）
 const FEVER_MULT = 4;
 const PITY_DIV = 55;             // 保底斜率：越小触发越勤
+// FEVER 结束之后的冷静期。
+//
+// 实测 342 次消行里 **83% 都挂着 FEVER** —— 一个 ×4 的「爆发」八成时间都在，
+// 那它就不是爆发，是一条藏起来的底薪：真实基线被悄悄抬高四倍，
+// 而没有 FEVER 的那 9% 反而像在受罚。
+//
+// 调 PITY_DIV 治不好：FEVER 有**两个**来源，保底掷骰之外，宝箱还有 34% 开出它，
+// 而宝箱挂在每条灰线上。把 PITY_DIV 提到 6 倍（320）实测也只从 77% 降到 56%。
+// 冷却和来源无关，占空比有确定上限：20 /（20 + 45）≈ 31%。
+const FEVER_COOL = 45000;
+let feverCool = 0;
 // 行雨（濒死豁免）已删：顶到顶就该死。留着复活机会一局怎么都收不住 ——
 // 实测它一局买回三十多秒，而且让人敢往危险区赖。
 // 事件的「濒死只发好事」还要用危险区这个判据，门槛留着。
@@ -3693,7 +3706,9 @@ function claimChests(rows){
   if (game.run) game.run.chests += n;
   for (let i = 0; i < n; i++){
     const r = rndFx();
-    if (r < CHEST_P[0] && feverLeft <= 0){ tip('开箱　FEVER！', 0); feverStart(); }
+    if (r < CHEST_P[0] && feverLeft <= 0 && feverCool <= 0){ tip('开箱　FEVER！', 0); feverStart(); }
+    // FEVER 那一档被「已经在 FEVER 里」或「冷静期」挡住时，会落到这一档 ——
+    // CHEST_P[0] < CHEST_P[1]，所以这个条件天然兜得住，不会白开一个箱
     else if (r < CHEST_P[1]){ heat += CHEST_HEAT; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +' + CHEST_HEAT, 0); }
     else { game.mods[0] = 'bomb'; previewDirty = true; tip('开箱　下一块是炸弹', 0); }
   }
@@ -3702,7 +3717,8 @@ function claimChests(rows){
 
 // 钩子⑥：每帧衰减
 function crazyStep(dt){
-  if (!CRAZY || heat <= 0) return;
+  if (!CRAZY) return;
+  if (feverCool > 0) feverCool -= dt;
   // FEVER 期间不衰减 —— 那二十秒变成「把热度冻住往上堆」的黄金窗口，
   // 而不只是个 ×4
   if (feverLeft > 0) return;
@@ -3823,7 +3839,7 @@ let feverPity = 0;               // 保底计数：每次消行没中就 +1
 let goldPending = false;         // 这一杆锁下去的块是不是金的
 
 function crazyReset(){
-  feverLeft = 0; feverPity = 0; goldPending = false;
+  feverLeft = 0; feverPity = 0; feverCool = 0; goldPending = false;
   heat = CRAZY ? HEAT_FLOOR : 0; heatTier = -1; heatQuant = -1;
   evTimer = 0; evWarnLeft = 0; evPending = null; evActive = null; evLeft = 0;
   flashFx = null; flashLeft = 0; fxSig = '';
@@ -3972,11 +3988,19 @@ function deepMult(){
 function crazyScoreMult(){
   if (!CRAZY) return 1;
   let m = heatMult() * CRAZY_TUNE * deepMult() * upMul('score');
-  if (burnLeft > 0) m *= BURN_MULT;
-  if (game.rush) m *= RUSH_MULT;
-  if (goldPending) m *= GOLD_MULT;
-  if (feverLeft > 0) m *= FEVER_MULT;
-  return m;
+  if (game.rush) m *= RUSH_MULT;     // 整局性质的，和深局/热度一样留在乘法链上
+  // 限时爆发（FEVER / 燃点 / 金块）**相加不相乘**。
+  //
+  // 这三个是同一种东西 —— 都是平倍率，都乘在同一个数上。相乘的话
+  // ×4 × ×1.6 × ×3 = ×19，屏幕上数字暴涨但玩家分不清是谁给的；
+  // 相加则是 1 + 3 + 0.6 + 2 = ×6.6。
+  // 这个换法的好处是**单个 buff 完全不变**（FEVER 自己还是 ×4），
+  // 只把叠加的尾巴压扁，顶端降约三倍。
+  let burst = 1;
+  if (feverLeft > 0)  burst += FEVER_MULT - 1;
+  if (burnLeft > 0)   burst += BURN_MULT - 1;
+  if (goldPending)    burst += GOLD_MULT - 1;
+  return m * burst;
 }
 
 // 钩子④：每"次"消行掷一次骰（不是每行）。没中时按消行数加权 +n%，
@@ -4024,12 +4048,13 @@ function crazyOnClear(lines, spin, perfect){
   syncHeat();
   betMaybeOffer(lines, spin);     // 立刻刷新：消行动画期间 stepOnce 在 syncHud 之前就 return 了
   if (lines <= 0) return;                 // 但不推 FEVER 保底
-  if (feverLeft > 0) return;
+  if (feverLeft > 0 || feverCool > 0) return;
   feverPity += lines;
   if (rndFx() < feverPity / PITY_DIV){ feverPity = 0; feverStart(); }
 }
 
 function feverStart(){
+  if (feverCool > 0) return false;    // 冷静期里不开，两个来源都走这道门
   feverLeft = FEVER_MS;
   activePal = 'classic';
   staticDirty = true; previewDirty = true; needsDraw = true;
@@ -4041,6 +4066,7 @@ function feverStart(){
 }
 function feverEnd(){
   feverLeft = 0;
+  feverCool = FEVER_COOL;        // 冷静期从这里开始走
   syncTempo();
   activePal = null;
   staticDirty = true; previewDirty = true; needsDraw = true;
@@ -6090,7 +6116,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
-  feverStart, switchTrack, setPack, setTempo,
+  feverStart, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
