@@ -1189,6 +1189,9 @@ function helpSections(){
               + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
+      { dot: '✹', name: '彩虹行', meta: '×' + RAIN_MULT,
+        text: '盘面上随机一行会发光，消到它时那一次得分 ×' + RAIN_MULT
+              + '。消掉或 ' + Math.round(RAIN_MS / 1000) + ' 秒没消掉就换一行' },
       { dot: '⇄', name: '挪列', meta: SWAP_COST + ' 热度',
         text: '点盘面选一列、再点相邻那列，两列整个对调。'
               + '它不会减少洞也不会凑出满行 —— 只是把结构挪个位置，'
@@ -1403,7 +1406,9 @@ function scoreFor(n, spin, perfect){
     buzz([40, 50, 60, 50, 90]);
   }
 
-  const gain = Math.round(base * mult * crazyScoreMult());
+  const rainOn = rainHit(lastClearRows);
+  const gain = Math.round(base * mult * crazyScoreMult() * (rainOn ? RAIN_MULT : 1));
+  if (rainOn) rainBoom();
   game.score += gain;
   if (game.run){
     if (gain > game.run.bestHit) game.run.bestHit = gain;
@@ -1471,6 +1476,7 @@ function stackTopRow(){
 
 function applyClear(rows){
   if (CRAZY) claimChests(rows);      // 必须在盘面塌陷之前数，塌完那几行就没了
+  if (CRAZY) rainShift(rows);        // 同理：塌陷会改变行下标，标记要跟着挪
   const set = new Set(rows);
   const kept = [];
   for (let y = 0; y < TOTAL_ROWS; y++) if (!set.has(y)) kept.push(game.board[y]);
@@ -1483,6 +1489,8 @@ function applyClear(rows){
 // 底部塞一行带缺口的灰线，整盘往上顶一格
 function riseGarbage(){
   if (game.board[0].some(Boolean)){ endGame('灰线顶出'); return; }
+  // 整盘上移一格，标记行跟着往上走；走出可见区就重挑
+  if (CRAZY && rainRow >= 0){ rainRow--; if (rainRow < BUFFER) rainRow = -1; }
   game.board.shift();
   const row = new Array(COLS).fill(GARBAGE);
   const gap = (rndGame() * COLS) | 0;
@@ -2014,6 +2022,27 @@ function draw(){
     ctx.restore();
   }
   if (CRAZY) drawCracks();
+  // 彩虹行：一条会呼吸的彩色条。画在格子之上、粒子之下，盖不住方块本身
+  if (CRAZY && rainRow >= BUFFER && CELL && !game.over){
+    const y = (rainRow - BUFFER) * CELL;
+    const W = CELL * COLS;
+    const puls = .45 + .35 * Math.sin(game.elapsed / 260);
+    const g = ctx.createLinearGradient(0, y, W, y + CELL);
+    g.addColorStop(0,   'rgba(255,107,214,' + puls.toFixed(2) + ')');
+    g.addColorStop(.35, 'rgba(255,209,102,' + puls.toFixed(2) + ')');
+    g.addColorStop(.7,  'rgba(95,224,200,'  + puls.toFixed(2) + ')');
+    g.addColorStop(1,   'rgba(124,180,255,' + puls.toFixed(2) + ')');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y, W, CELL);
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.75)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(.75, y + .75, W - 1.5, CELL - 1.5);
+    ctx.restore();
+  }
   // 挪列选中的那一列：描边 + 轻微提亮，和危险带、封锁墙都区分得开
   if (swapSel >= 0 && CELL){
     ctx.save();
@@ -3364,6 +3393,7 @@ function syncBurn(){
 function crazyClocks(dt){
   if (!CRAZY) return;
   burnStep(dt);
+  rainStep(dt);
   // 狂风：每隔一会儿把下落中的方块吹偏一格。撞墙就算了，不硬推。
   if (evActive && evActive.key === 'wind' && game.piece && !clearing){
     windTimer += dt;
@@ -3393,7 +3423,7 @@ function crazyReset(){
   flashFx = null; flashLeft = 0; fxSig = '';
   wallCol = -1; windTimer = 0; setMuffle(false); embers.length = 0;
   betOffer = 0; betLeft = 0; betCool = 0; betLines = 0; betShow = 0; flowHit = false; beams.length = 0;
-  swapSel = -1;
+  swapSel = -1; rainRow = -1; rainLeft = 0;
   burnLeft = 0; burnHist.length = 0; burnT = 0;
   document.body.classList.remove('burning');
   delete document.body.dataset.ev;
@@ -3776,7 +3806,9 @@ function clearFullNow(){
   // 跟 scoreFor 那条路保持一致。
   const n = full.length;
   const base = n <= 4 ? [0, 100, 300, 500, 800][n] : 800 + (n - 4) * 300;
-  const gain = Math.round(base * levelMult(game.level) * crazyScoreMult());
+  const rainOn = rainHit(full);
+  const gain = Math.round(base * levelMult(game.level) * crazyScoreMult() * (rainOn ? RAIN_MULT : 1));
+  if (rainOn) rainBoom();
   const py = (full.reduce((a, b) => a + b, 0) / n - BUFFER + .5) * CELL;
   applyClear(full);
   game.score += gain;
@@ -4210,6 +4242,67 @@ const evSlam     = () => CRAZY && evActive && evActive.key === 'slam';
 // 那半秒里你既要看清落点又要滑过去，配 500ms 就不是难度是反应力测试。
 // 标准的 20G 玩法都会给更长的锁定窗口，这里给 1.8 倍。
 function lockDelay(){ return evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY; }
+
+// ═══════════ 彩虹行 ═══════════
+//
+// 填的是「目标感」这个缺口：除了活下去刷分，盘面上没有任何别的目标。
+// 标记一行，消到它时那一次消行得分翻倍，消掉或超时就换一行。
+//
+// **平均贡献先算过再定倍率**（燃点 v1 和无洞连击链两次翻车都是栽在没算）：
+// 按深局堆高 10~15 行、一次消行平均 1.5 行、每 4 秒一次消行模拟，
+// ×2 让整局分数平均涨 13%，×3 涨 33%。取 ×2 —— 梯子档间距是 1.5~2 倍，
+// 13% 不到五分之一档，不用重标。机制的价值本来也是「有个目标」，
+// 不是倍率本身。
+const RAIN_MS = 30000;      // 多久没消掉就换一行
+const RAIN_MULT = 2;        // 消到它时那一次的得分倍率
+let rainRow = -1, rainLeft = 0;
+
+// 挑一行来标。要求：在可见区内、有格子、不是整行冰冻（那行消不掉）。
+function rainPick(){
+  if (!CRAZY || !game.started || game.over){ rainRow = -1; return; }
+  const cand = [];
+  for (let y = BUFFER; y < TOTAL_ROWS; y++){
+    const row = game.board[y];
+    if (!row.some(Boolean)) continue;
+    if (row.every(c => c === FROZEN)) continue;
+    cand.push(y);
+  }
+  rainRow = cand.length ? cand[(rndFx() * cand.length) | 0] : -1;
+  rainLeft = RAIN_MS;
+  needsDraw = true;
+}
+
+function rainStep(dt){
+  if (!CRAZY) return;
+  if (rainRow < 0){ rainPick(); return; }
+  // 标记的那行可能被灰线顶出去、或被道具炸没了
+  if (rainRow < BUFFER || !game.board[rainRow] || !game.board[rainRow].some(Boolean)){ rainPick(); return; }
+  if ((rainLeft -= dt) <= 0) rainPick();
+}
+
+// 这一次消行有没有消到彩虹行。rows 是即将被清掉的行号。
+function rainHit(rows){
+  return CRAZY && rainRow >= 0 && rows.includes(rainRow);
+}
+
+// 盘面塌陷之后要跟着挪：被清掉的行在标记行**下方**时，标记行的下标会 +1
+// （0 是顶、TOTAL_ROWS-1 是底，清掉一行会让它上方的行整体下移一格）。
+function rainBoom(){
+  if (!CELL) return;
+  // 走 pop 不走 toast —— 彩虹行命中几乎必然和消行同时发生，
+  // toast 那一下正好会被消行的 toast 顶掉
+  const y = (rainRow - BUFFER + .5) * CELL;
+  popScore(CELL * COLS / 2, y, '×' + RAIN_MULT, '彩虹行', 'rain', 1.2);
+  for (let x = 0; x < COLS; x++) boom(x, rainRow, '#ff6bd6');
+  sfx('tetris', 1.42); buzz([35, 20, 35, 20, 60]);
+}
+
+function rainShift(rows){
+  if (!CRAZY || rainRow < 0) return;
+  if (rows.includes(rainRow)){ rainPick(); return; }
+  rainRow += rows.filter(y => y > rainRow).length;
+  if (rainRow >= TOTAL_ROWS) rainPick();
+}
 
 // ═══════════ 挪列 ═══════════
 //
@@ -5294,6 +5387,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get betOffer(){ return betOffer; }, get betLeft(){ return betLeft; }, get betShow(){ return betShow; }, BET_SHOW,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
+  rainPick, rainStep, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
   evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
