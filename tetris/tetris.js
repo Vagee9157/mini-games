@@ -1208,7 +1208,7 @@ function helpSections(){
               + '，' + DEEP_EG[1] + ' 行 ×' + deepAt(DEEP_EG[1], false).toFixed(1) + '），越打越值。'
               + '狂欢局是固定的 ×' + (DEEP_BASE_RUSH * RUSH_MULT).toFixed(2).replace(/\.?0+$/, '')
               + '，不随行数涨，但道具概率翻倍另算 —— 前中段比普通局高，'
-              + deepCrossLines() + ' 行之后被普通局反超' },
+              + deepCrossLines() + ' 行之后，普通局每行的价值就追上来了' },
     ]],
     ['宝箱与梭哈', [
       { dot: '▣', name: '宝箱', meta: Math.round(CHEST_RATE * 100) + '%',
@@ -1224,7 +1224,9 @@ function helpSections(){
         text: '消 ' + BET_OFFER_NEED + ' 行以上或打出 T-spin 就弹出（热度只要不是几乎为零）。'
               + '接了之后这十秒里累计消行，窗口结束按档结算：'
               + BET_TIERS.map(([n, m]) => n + '行 ×' + m).join(' · ')
-              + '；不足 ' + BET_NEED + ' 行热度减半。消满 ' + BET_CAP + ' 行直接封顶。'
+              + '。赢了按「行数 × 档位 × 你当时的倍率」直接给分数，'
+              + '不足 ' + BET_NEED + ' 行则热度减半 —— 押的是热度，赢的是分数。'
+              + '消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
       { dot: '✸', name: '修行', meta: '开局 + 每 ' + UP_EVERY + ' 行',
@@ -1249,7 +1251,7 @@ function helpSections(){
               + '平时一分不动，只有堆高了才会动用。'
               + 'FEVER / ZONE / 缓流 期间不动用 —— 那时灰线钟本来就停着，推它没意义' },
       { dot: '✹', name: '彩虹行', meta: '×' + RAIN_MULT,
-        text: '棋盘右框外会有个小三角指着某一行，消到它时那一次得分 ×' + RAIN_MULT
+        text: '棋盘右框外会有个小三角指着某一行，消到它时那一次得分 ×' + rainMult()
               + '。消掉或 ' + Math.round(RAIN_MS / 1000) + ' 秒没消掉就换一行' },
       { dot: '⇄', name: '挪列', meta: SWAP_COST + ' 热度',
         text: '点盘面选一列、再点相邻那列，两列整个对调。'
@@ -1483,7 +1485,7 @@ function scoreFor(n, spin, perfect){
   }
 
   const rainOn = rainHit(lastClearRows);
-  const gain = Math.round(base * mult * crazyScoreMult() * (rainOn ? RAIN_MULT : 1));
+  const gain = Math.round(base * mult * crazyScoreMult() * (rainOn ? rainMult() : 1));
   if (rainOn) rainBoom();
   game.score += gain;
   if (game.run){
@@ -1591,7 +1593,7 @@ function riseGarbage(){
   row[gap] = null;                                      // 留个缺口，不然没法消
   // 宝箱：灰线现在只有坏处，这给了它第二个身份 —— 一个看得见、够得到的目标。
   // 状态存在盘面格子里（和冰冻行同一套），塌陷、上顶、地震都会跟着走。
-  if (CRAZY && rndFx() < CHEST_RATE * upMul('chest')){
+  if (CRAZY && rndFx() < chestRate()){
     let x = (rndFx() * COLS) | 0;
     if (x === gap) x = (x + 1) % COLS;
     row[x] = CHEST;
@@ -3418,6 +3420,8 @@ const DANGER_HEAT = 2;           // 危险区里消行的热度倍数
 // 实测开出来的数（机器人，一局六七分钟）：普通局中位 3 个，
 // 狂欢局灰线快 82%、所以中位 8 个。
 const CHEST_RATE = 1 / 4;
+// 抽成函数：灰线那头和说明书读同一个数，顺带让「富矿这张卡有没有接上」可测
+function chestRate(){ return CHEST_RATE * upMul('chest'); }
 // 90 → 440，按真人峰值热度的 6% 给，开箱才算一份像样的回报。
 const CHEST_HEAT = 440;
 let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压哨」用
@@ -3562,20 +3566,41 @@ const UP_EVERY = 50;             // 之后每多少行再给一次
 const UP_PICK  = 3;              // 每次给几张候选
 
 // mul 里的字段名就是 upMul() 的参数。never 列出的是「这局禁用什么」。
+// 数值标定的依据（2026-10-08 重标）
+//
+// 两批各 30 局的 A/B 测下来，12 张卡实际是 3 + 1 + 8 的三层：只有孤注(1.43/1.28)、
+// 薄冰(1.34/1.26)、深井(1.24/1.24) 跑得出噪声，其余八张和不选牌没有可区分的差别。
+//
+// 根因是 **heat 系和 score 系写着同样的单位，却活在两条不同的曲线上**：
+// heatMult 过了 HEAT_KNEE 走开方，所以注入 ×k 换来的分数远不止打个折 ——
+//   注入 ×1.25 → 分数 +7~9%      ×1.8 → +20~27%
+//   注入 ×1.45 → 分数 +12~16%    ×2.4 → +32~43%
+// 而 score 字段是恒定的线性倍率，一分不打折。于是「断舍 +45% 注入」卡面看着
+// 和「孤注 +45% 得分」同量级，实际只值它的三分之一。
+//
+// 这一轮按上面那张兑换表把所有卡拉到「每张大约 +20%」—— 选牌该是选**打法**，
+// 不是选谁的数字大。两张纯 no-op 换了效果（理由见各自那行）。
 const UPS = [
-  { k:'forge',  n:'熔炉', t:'消行的热度注入 +25%',          mul:{ heat: 1.25 } },
-  { k:'ember',  n:'余烬', t:'热度衰减慢 40%，攒得住',       mul:{ tau: 1.4 } },
-  { k:'scav',   n:'拾荒', t:'变异块出现概率 +50%',          mul:{ mod: 1.5 } },
+  { k:'forge',  n:'熔炉', t:'消行的热度注入 +80%',          mul:{ heat: 1.8 } },
+  // 原来是 tau ×1.4「热度衰减慢 40%」，实测两批都只有 1.00~1.02× —— 因为一局之内
+  // 注入速率本身一直在涨（变异块变多、险区翻倍、连击变长），热度是在追一个移动的
+  // 目标而不是停在平台上；拉长时间常数让你前期追得更慢、后期留得更多，净值相抵。
+  // 换成「灰线慢」——  薄冰的镜像：那张拿命换分，这张拿分换命。
+  { k:'ember',  n:'缓坡', t:'灰线涨得慢 25%，活得更久',     mul:{ garb: 1.25 } },
+  { k:'scav',   n:'拾荒', t:'变异块出现概率 +50%（含金块）', mul:{ mod: 1.5 } },
   { k:'well',   n:'深井', t:'深局每段的加成 +50%',          mul:{ deep: 1.5 } },
-  { k:'vein',   n:'富矿', t:'灰线带宝箱的概率 +80%',        mul:{ chest: 1.8 } },
-  { k:'lamp',   n:'长明', t:'ZONE 少攒 30% 行就能开',       mul:{ zone: .7 } },
+  { k:'vein',   n:'富矿', t:'灰线带宝箱的概率 +140%',       mul:{ chest: 2.4 } },
+  { k:'lamp',   n:'长明', t:'ZONE 少攒 40% 行就能开',       mul:{ zone: .6 } },
   { k:'buf',    n:'缓冲', t:'缓期只要一半热度',             mul:{ delay: .5 } },
   { k:'steady', n:'稳手', t:'落地后的锁定延迟 +50%',        mul:{ lock: 1.5 } },
-  { k:'ribbon', n:'彩练', t:'彩虹行停留时间 +60%',          mul:{ rain: 1.6 } },
+  // 原来是 rain ×1.6「彩虹行停留时间 +60%」，是纯 no-op：rainStep 在标记行消失的
+  // 当帧就会重挑，彩虹行的在场率本来就接近 100%，延长停留时间填的是一个不存在的口子。
+  // 改成直接加厚那一次的倍率。
+  { k:'ribbon', n:'彩练', t:'消到彩虹行时那一次得分再翻倍',  mul:{ rainmult: 2 } },
   // 血契：有明码标价的代价。它们不是「更强的卡」，是**换一种打法**。
-  { k:'ice',    n:'薄冰', t:'灰线快 28%，但全局得分 ×1.3',  mul:{ garb: .78, score: 1.3 }, vow: true },
-  { k:'vow',    n:'断舍', t:'不能用 HOLD，但热度注入 +45%',  mul:{ heat: 1.45 }, never: 'hold', vow: true },
-  { k:'bare',   n:'孤注', t:'不再出变异块，但全局得分 ×1.45', mul:{ score: 1.45 }, never: 'mod', vow: true },
+  { k:'ice',    n:'薄冰', t:'灰线快 28%，但全局得分 ×1.25', mul:{ garb: .78, score: 1.25 }, vow: true },
+  { k:'vow',    n:'断舍', t:'不能用 HOLD，但热度注入 ×2.4',  mul:{ heat: 2.4 }, never: 'hold', vow: true },
+  { k:'bare',   n:'孤注', t:'不再出变异块，但全局得分 ×1.3', mul:{ score: 1.3 }, never: 'mod', vow: true },
 ];
 const UP_BY = Object.fromEntries(UPS.map(u => [u.k, u]));
 
@@ -4012,7 +4037,18 @@ const DEEP_BASE_RUSH = 1.87;
 // 括住目标 150。要更准得跑 n≥30。
 const DEEP_PER = 100;          // 深局步长的分母：每这么多行再加一个 DEEP_STEP
 const DEEP_STEP = 3.6;
-const DEEP_STEP_RUSH = 0;
+// 狂欢局也要有成长性，只是比普通局缓得多。
+//
+// 原来是 0 —— 深局倍率在 100 / 200 / 400 / 600 行全是 1.87，一条水平线。
+// 而普通局涨到 23.16，再叠上狂欢局灰线快 43%、更难活长，两个惩罚同向。
+// 结果是**狂欢局在数值上不可能刷出纪录**（累计总分比在 600 行只有 0.58），
+// 和「两种对局都要能打出高分」这条设计意图直接矛盾 —— 它的身份从
+// 「更容易高分」退化成了「更快拿一个中等分」。
+//
+// 0.6（普通局的六分之一）算出来的累计总分比：
+//   100 行 2.12 → 150 行 1.78 → 230 行 1.49 → 400 行 1.20 → 600 行 1.05
+// 早期明显更容易高分，长局被普通局追平 —— 这才是「只是更容易」。
+const DEEP_STEP_RUSH = 0.6;
 // 狂欢局在深局加成之外还有的那一份优势，主要来自道具翻倍（RUSH_MOD = 2，
 // 金块 ×3、炸弹/激光/重锤直接产分）。它不随行数变，所以是个恒定系数。
 // 1.49 是实测值：8 局机器人，同 50 行处总比 2.55× / 深局比 1.52× = 1.68，
@@ -4026,10 +4062,16 @@ let deepSaid = false;
 // 道具翻倍带来的 RUSH_EXTRA。只按深局算会得出 87 行，实际要到 ~150 行，
 // 说明书照着写就是在骗人。要解的是**总比值**等于 1：
 //   DEEP_BASE_RUSH * RUSH_MULT * RUSH_EXTRA = DEEP_BASE + (L-DEEP_FROM)/100 * DEEP_STEP
+// 几行之后「每行的价值」被普通局追上。
+//
+// 原来是解析解，前提是两条都线性。现在深局过了 DEEP_SOFT 要转开方、
+// 狂欢局的步长也不再是 0，那个公式失效了 —— 改成直接扫。
+// 扫比解析解更耐改：以后再动曲线形状，这里不用跟着重推。
 function deepCrossLines(){
-  if (DEEP_STEP <= DEEP_STEP_RUSH) return 0;
-  const target = DEEP_BASE_RUSH * RUSH_MULT * RUSH_EXTRA - DEEP_BASE;
-  return Math.round(DEEP_FROM + target / (DEEP_STEP - DEEP_STEP_RUSH) * 100);
+  for (let L = DEEP_FROM; L <= 4000; L += 10){
+    if (deepAt(L, true) * RUSH_MULT * RUSH_EXTRA <= deepAt(L, false)) return L;
+  }
+  return 0;        // 一直没被追上
 }
 
 const DEEP_EG = [200, 400];    // 说明书举的两个行数例子
@@ -4037,11 +4079,35 @@ const DEEP_EG = [200, 400];    // 说明书举的两个行数例子
 // 「200 行的时候是多少」，所以拆成纯函数给两边共用。
 // 原来说明书自己手算 (DEEP_BASE + 1.6 * DEEP_STEP)，那个 1.6 其实是
 // (200 - DEEP_FROM) / DEEP_PER —— DEEP_FROM 一改，说明书就开始骗人。
+// 深局倍率。过了 DEEP_SOFT 个台阶之后从线性转开方 —— 和热度过 HEAT_KNEE
+// 之后那套是同一个做法，连推导都一样。
+//
+// 为什么要封：deepMult、levelMult（疯狂版不 clamp）、heatMult 三条都随行数
+// 单调涨，而它们是**相乘**的，于是总分大约按行数的三次方走 —— 实测行数 ×10、
+// 每行价值 ×86。后果有两个：① 技巧差异的量级是 ×1.5~3，而「多活 100 行」是
+// ×4~8，排行榜本质上变成耐力榜；② 单局梯子在 400 行左右就打穿（机器人一局
+// 404 行打出 12.8 亿，而顶格「无极」是 1.2 亿）。
+//
+// 三条里挑一条改形状就够。levelMult 的 L^0.75 本来就温和，heatMult 已经是
+// 开方压的，所以动深局这条线性无界的。
+//
+// 接法（x = 已走的台阶数）：
+//   x ≤ K:  base + x·step
+//   x > K:  A + B·√x，  要求在 x=K 处值和斜率都连续
+//   斜率连续 → B/(2√K) = step → B = 2·step·√K
+//   值连续   → A = base + K·step − B·√K = base − K·step
+// K = 2 即 240 行开始转弯：400 行只压 5%、600 行压 14%、1000 行压 27% ——
+// 常见局长几乎不受影响，被削的是本来就没有反馈的长尾。
+const DEEP_SOFT = 2;
 function deepAt(lines, rush){
   if (lines < DEEP_FROM) return 1;
   const base = rush ? DEEP_BASE_RUSH : DEEP_BASE;
   const step = (rush ? DEEP_STEP_RUSH : DEEP_STEP) * upMul('deep');
-  return base + (lines - DEEP_FROM) / DEEP_PER * step;
+  const x = (lines - DEEP_FROM) / DEEP_PER;
+  if (x <= DEEP_SOFT || step <= 0) return base + x * step;
+  const B = 2 * step * Math.sqrt(DEEP_SOFT);
+  const A = base - DEEP_SOFT * step;
+  return A + B * Math.sqrt(x);
 }
 function deepMult(){
   if (!CRAZY) return 1;
@@ -4231,6 +4297,14 @@ function modIconOn(c, cells, ox, oy, cell, minX, minY, mod){
   drawModIcon(c, cx, cy, Math.max(5, cell * .26), mod);
 }
 
+// 这一手出变异块的总概率。给说明书和测试用 —— 之前「拾荒接没接上」没有任何
+// 纯函数可探，那条断言因此是静默跳过的。
+function modRate(rush){
+  const k2 = rush ? RUSH_MOD : 1;
+  const kMod = upMul('mod');
+  return MOD_RATES.reduce((a, [k, rate]) => a + (k === 'gold' ? rate : rate * k2) * kMod, 0);
+}
+
 function rollMod(){
   // 自己守一道。两个调用方现在都写了 CRAZY ? rollMod() : null，标准版是干净的，
   // 但那意味着正确性挂在「每个调用方都记得判」上 —— 新加一处忘了判，
@@ -4238,10 +4312,13 @@ function rollMod(){
   // heatMult / deepMult / crazyScoreMult 都是自己守的，这里保持一致。
   if (!CRAZY || upNever('mod')) return null;        // 孤注：这局不出变异块
   // 狂欢局里三种「干活的」变异翻倍，金块不翻 —— 它只是纯加分，翻了加分不加戏
-  const k2 = (game.rush ? RUSH_MOD : 1) * upMul('mod');
+  // 狂欢局的 RUSH_MOD 刻意不翻金块（翻了加分不加戏），但拾荒原来搭了同一班车，
+  // 于是卡面写「+50%」实际只有 +27%。给拾荒单独一条线，它要能吃到金块。
+  const k2 = game.rush ? RUSH_MOD : 1;
+  const kMod = upMul('mod');
   let r = rndFx();
   for (const [k, rate] of MOD_RATES){
-    const p = k === 'gold' ? rate : rate * k2;
+    const p = (k === 'gold' ? rate : rate * k2) * kMod;
     if (r < p) return k;
     r -= p;
   }
@@ -4298,7 +4375,7 @@ function dyeAt(p){
   rainRow = Math.max(...ys);
   rainLeft = RAIN_MS * upMul('rain');
   staticDirty = true; needsDraw = true;
-  popScore(CELL * COLS / 2, (rainRow - BUFFER) * CELL, '彩虹行', '×' + RAIN_MULT, 'rain');
+  popScore(CELL * COLS / 2, (rainRow - BUFFER) * CELL, '彩虹行', '×' + rainMult(), 'rain');
   sfx('level', 1.3); buzz([25, 15, 35]);
 }
 
@@ -4386,7 +4463,7 @@ function clearFullNow(){
   const n = full.length;
   const base = n <= 4 ? [0, 100, 300, 500, 800][n] : 800 + (n - 4) * 300;
   const rainOn = rainHit(full);
-  const gain = Math.round(base * levelMult(game.level) * crazyScoreMult() * (rainOn ? RAIN_MULT : 1));
+  const gain = Math.round(base * levelMult(game.level) * crazyScoreMult() * (rainOn ? rainMult() : 1));
   if (rainOn) rainBoom();
   const py = (full.reduce((a, b) => a + b, 0) / n - BUFFER + .5) * CELL;
   applyClear(full);
@@ -4898,6 +4975,8 @@ function lockDelay(){ return (evSlam() ? LOCK_DELAY * 1.8 : LOCK_DELAY) * upMul(
 // 不是倍率本身。
 const RAIN_MS = 30000;      // 多久没消掉就换一行
 const RAIN_MULT = 2;        // 消到它时那一次的得分倍率
+// 彩练那张卡加厚的就是这个数。说明书和飘字都读这里，不会和实际脱节。
+function rainMult(){ return RAIN_MULT * upMul('rainmult'); }
 let rainRow = -1, rainLeft = 0;
 
 // 挑一行来标。要求：在可见区内、有格子、不是整行冰冻（那行消不掉）。
@@ -4960,7 +5039,7 @@ function rainBoom(){
   // 走 pop 不走 toast —— 彩虹行命中几乎必然和消行同时发生，
   // toast 那一下正好会被消行的 toast 顶掉
   const y = (rainRow - BUFFER + .5) * CELL;
-  popScore(CELL * COLS / 2, y, '×' + RAIN_MULT, '彩虹行', 'rain', 1.2);
+  popScore(CELL * COLS / 2, y, '×' + rainMult(), '彩虹行', 'rain', 1.2);
   for (let x = 0; x < COLS; x++) boom(x, rainRow, '#ff6bd6');
   sfx('tetris', 1.42); buzz([35, 20, 35, 20, 60]);
 }
@@ -5251,16 +5330,42 @@ function betResolve(lines){
   if (betLines >= BET_CAP) betSettle();
 }
 
+// 赢了给**分数**，不给热度。
+//
+// 原来是 heat *= m —— 乘在热度**存量**上，而热度的衰减时间常数是 135 秒、
+// 梭哈一个周期只有 35 秒（10 秒窗口 + 25 秒冷却）。一轮的净增益是
+// m × exp(-35/135)，四个档位分别是 1.23 / 1.54 / 2.16 / 3.09 —— **全部大于 1**，
+// 也就是说只要胜率够高，热度是几何发散的，没有任何上界兜住。
+//
+// 而胜率可以做到接近 1：ZONE 期间重力、灰线、事件全停，十秒摆满 5 行几乎必成，
+// 且 ZONE 里的消行照算 betLines（实测 1014 → 4152，×4.09）。ZONE 每 20 行自动开、
+// 梭哈冷却 35 秒，两者频率天然咬合。于是最优解只剩「ZONE 一开就接梭哈消满」一条。
+//
+// 整套机制里别的加成都是有界的（FEVER/燃点/金块已改成相加、ZONE 有封顶、
+// 深局线性、levelMult 是 L^0.75），唯独这一个乘在存量上。
+//
+// 调参数救不了：要让顶档净增益 ≤ 1，冷却得拉到 187 秒（机制就废了），
+// 或者把顶档压到 ×1.3（赌的意义没了）。只能改结构。
+//
+// 现在的形状：**押的是热度，赢的是分数**。分数不会反过来喂自己，闭环断掉；
+// 「大起大落」的手感保留（输了照样热度减半）；而且奖金乘的是你当时的总倍率，
+// 所以热度攒得高、赌赢了拿得多 —— 热度仍然是它的燃料，只是不再自我复制。
+const BET_UNIT = 120;        // 每行的奖金基数，和消行 base(100~800) 同量级
 function betSettle(){
   const m = betMult(betLines);
   betLeft = 0; betCool = BET_COOL; betHide();
   if (m > 0){
-    heat *= m;
-    if (game.run) game.run.betWins++;
+    const gain = Math.round(BET_UNIT * betLines * m * levelMult(game.level) * crazyScoreMult());
+    game.score += gain;
+    if (game.run){
+      game.run.betWins++;
+      if (gain > game.run.bestHit) game.run.bestHit = gain;
+    }
+    syncHud();
     // 不能只靠 toast —— 它是共享通道，赢完紧接着可能触发 FEVER，
     // 后来的 toast 会把「梭哈成功」顶掉，看起来就像没结算。
-    betPop(betLines + ' 行　热度 ×' + m, '梭哈成功', 'win');
-    showToast(`梭哈成功　${betLines} 行　热度 ×${m}`);
+    betPop(betLines + ' 行　×' + m, '梭哈成功 +' + fmtScore(gain), 'win');
+    showToast(`梭哈成功　${betLines} 行　+${fmtScore(gain)}`);
     sfx('tetris', 1.3); buzz([30, 20, 30, 20, 80]);
   } else {
     heat *= BET_LOSE;
@@ -6198,10 +6303,10 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
-  canDelay, doDelay, delayAuto, delayRisk, DELAY_RISK, syncDanger, get dangerOn(){ return dangerOn; }, zoneAuto, delayCost, garbagePeriod, riseGarbage,
+  chestRate, modRate, lockDelay, canDelay, doDelay, delayAuto, delayRisk, DELAY_RISK, syncDanger, get dangerOn(){ return dangerOn; }, zoneAuto, delayCost, garbagePeriod, riseGarbage,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
-  syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
+  syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, rainMult, get rainRow(){ return rainRow; },
   crazyOnClear, evTail, evBlind, doGlean, GLEAN_N, forkAt, dyeAt, MOD_TINT,
   EV_WARN, EV_MIN, EV_FIRST, evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
@@ -6212,7 +6317,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   redraw: () => { staticDirty = true; previewDirty = true; needsDraw = true; },
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
-  deepMult, deepAt, deepCrossLines, DEEP_PER, DEEP_EG, SNIPE_MS, SNIPE_HEAT, CHEST_P, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
+  deepMult, deepAt, DEEP_SOFT, deepCrossLines, DEEP_PER, DEEP_EG, SNIPE_MS, SNIPE_HEAT, CHEST_P, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
   get clearing(){ return clearing; }, doFreeze, saveGame, restoreGame, upNever, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,

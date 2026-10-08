@@ -38,36 +38,38 @@ JS = r"""() => {
   const base = T.heatGain(1), bm = T.upMul('heat');
   ok(Math.abs(base / bm - 3) < .01, `heatGain 走的是 upMul（${base} / ${bm.toFixed(2)} = 3）`);
 
-  // 逐张验：每张卡的 mul 字段都要被某个计算点读到
+  // 逐张验：每张卡的 mul 字段都要被某个计算点读到。
+  //
+  // 这条以前是假的：没有探针的字段被**静默跳过**（chest / mod / rain / lock 四个），
+  // 断言却说「每个」。现在改成反过来 —— 字段没有探针就直接判失败，
+  // 这样以后加新字段（比如这次的 rainmult）忘了接计算点，这里会红。
   const probes = {
-    heat:  () => T.heatGain(1),
-    score: () => T.crazyScoreMult(),
-    deep:  () => T.deepAt(200, false),
-    tau:   () => { const h0 = 1000; T.heat = h0; T.crazyStep ? T.crazyStep(1000) : null; return T.heat; },
-    zone:  () => T.zoneNeed(),
-    delay: () => { T.heat = 5000; return T.delayCost(); },
-    lock:  () => T.lockDelay ? T.lockDelay() : null,
-    garb:  () => T.garbagePeriod(),
-    chest: () => null, mod: () => null, rain: () => null,
+    heat:     () => T.heatGain(1),
+    score:    () => T.crazyScoreMult(),
+    deep:     () => T.deepAt(300, false),
+    garb:     () => T.garbagePeriod(),
+    zone:     () => T.zoneNeed(),
+    delay:    () => { T.heat = 5000; return T.delayCost(); },
+    lock:     () => T.lockDelay(),
+    chest:    () => T.chestRate(),
+    mod:      () => T.modRate(false),
+    rainmult: () => T.rainMult(),
   };
   const fields = new Set();
   for (const u of T.UPS) for (const f of Object.keys(u.mul || {})) fields.add(f);
-  const unread = [];
+  const noProbe = [], unread = [];
   for (const f of fields){
-    const probe = probes[f];
-    if (!probe || probe() === null) continue;     // 这几个没有纯函数探针，靠下面的字段表核对
-    const before = probe();
+    if (!probes[f]){ noProbe.push(f); continue; }
     const saved = T.ups.slice();
     T.ups.length = 0;
-    const clean = probe();
-    T.ups.length = 0; T.ups.push(...saved);
-    // 只要「有卡 / 没卡」能让探针读数不同，就说明这个字段被接上了
+    const clean = probes[f]();
     const card = T.UPS.find(u => u.mul && u.mul[f]);
     T.ups.length = 0; T.ups.push(card.k);
-    const withCard = probe();
+    const withCard = probes[f]();
     T.ups.length = 0; T.ups.push(...saved);
-    if (Math.abs(withCard - clean) < 1e-9) unread.push(f + '(' + card.k + ')');
+    if (!(Math.abs(withCard - clean) > 1e-9)) unread.push(f + '(' + card.k + ')');
   }
+  ok(noProbe.length === 0, '每个 mul 字段都有探针' + (noProbe.length ? '，缺的：' + noProbe.join(' ') : ''));
   ok(unread.length === 0, '每个 mul 字段都被计算点读到' + (unread.length ? '，漏的：' + unread.join(' ') : ''));
 
   // 血契的禁用真的生效
