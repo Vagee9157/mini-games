@@ -104,11 +104,10 @@ JS = r"""() => {
   ok(T.feverCool > 0, '结束后进冷静期');
   T.feverStart();
   ok(T.fever <= 0, `冷静期里开不出 FEVER（还剩 ${Math.round(T.feverCool/1000)}s）`);
-  // 冷却要推进 45 秒模拟时间。不关灰线的话这段时间里对局会被打死，
-  // 而 game.over 之后 stepOnce 直接 return、冷却就不再走 —— 这条会变 flaky
-  T.game.noGarbage = true;
-  T.step(T.FEVER_COOL + 200);
-  T.game.noGarbage = false;
+  // 冷却要推进 45 秒。不能走 T.step —— 45 秒里方块会自己堆死（关灰线也没用，
+  // noGarbage 挡不住方块堆高），而 game.over 之后 stepOnce 直接 return、
+  // 冷却就不再走。直接推 crazyStep，它才是冷却真正挂的地方。
+  for (let i = 0; i < 50; i++) T.crazyStep(1000);
   ok(T.feverCool <= 0, `冷静期会走完（over=${T.game.over}）`);
   T.feverStart();
   ok(T.fever > 0, '冷静期过后又能开');
@@ -148,6 +147,37 @@ JS = r"""() => {
   T.dyeAt({ type:'O', x:4, y:R-3, rot:0 });
   ok(T.rainRow >= 0, 'dye(染色) 标出了彩虹行');
   ok(T.GOLD_MULT > 1, `gold(金块) 得分 ×${T.GOLD_MULT}`);
+
+  // ── 七种变异块都要有 run 计数器（不能是 NaN）──
+  fresh();
+  const rk = Object.keys(T.newRun());
+  for (const k of mods) ok(rk.includes(k), `run 里有 ${k} 的计数器`);
+  for (const k of ['fork','dye','fill']){
+    fresh();
+    T.game.mods[0] = k; T.spawnNext();
+    ok(Number.isFinite(T.game.run[k]) && T.game.run[k] > 0,
+       `落一块 ${k} 之后 run.${k} = ${T.game.run[k]}（NaN 的话结算页永远看不到它）`);
+  }
+
+  // ── 血契「孤注」要把变异块这条线断干净 ──
+  fresh();
+  T.ups.length = 0; T.ups.push('bare');
+  ok(T.rollMod() === null, '孤注下 rollMod 不出牌');
+  for (let i = 0; i < T.game.mods.length; i++) T.game.mods[i] = null;
+  T.doGlean();
+  ok(T.game.mods.every(m => !m), '孤注下拾穗不发牌');
+  // 开箱是唯一绕过守卫的口子
+  let bombed = 0;
+  for (let i = 0; i < 200; i++){
+    T.game.mods[0] = null;
+    clean();
+    for (let x = 0; x < C; x++) B()[R-1][x] = 'T';
+    B()[R-1][3] = 'C';
+    T.applyClear([R-1]);                  // applyClear 内部会调 claimChests
+    if (T.game.mods[0] === 'bomb') bombed++;
+  }
+  ok(bombed === 0, `孤注下开 200 次宝箱塞炸弹 ${bombed} 次（原来 31%）`);
+  T.ups.length = 0;
 
   // ── 事件：每一条都要能点着并自己结束 ──
   fresh();

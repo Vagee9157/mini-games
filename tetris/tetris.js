@@ -1356,7 +1356,8 @@ function fillRunLog(){
   if (r.peak > 1.05) add('峰值倍率', '×' + r.peak.toFixed(1));
   if (r.bestHit > 0) add('最大一击', fmtScore(r.bestHit));
   if (r.dangerMs > 500) add('危险区', (r.dangerMs / 1000).toFixed(0) + ' 秒');
-  const mods = [['金', r.gold], ['锤', r.hammer], ['弹', r.bomb], ['激', r.laser]]
+  const mods = [['金', r.gold], ['锤', r.hammer], ['弹', r.bomb], ['激', r.laser],
+                ['灌', r.fill], ['流', r.fork], ['染', r.dye]]
     .filter(v => v[1] > 0).map(v => v[0] + v[1]).join(' ');
   if (mods) add('变异块', mods, true);
   if (r.chests) add('宝箱', r.chests + ' 个');
@@ -1417,7 +1418,10 @@ function countHoles(){
 }
 
 function newRun(){
-  return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0,
+  // 七种变异块都要有计数器。fill / fork / dye 是后加的，原来没跟上 ——
+  // lockPiece 里的 `game.run[p.mod]++` 就变成 undefined++ = NaN，
+  // 结算页因此永远看不到这三种（它们占非金块变异的四成多）。
+  return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0, fill: 0, fork: 0, dye: 0,
            bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0,
            mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0, zones: 0, zoneRows: 0, ups: [] };
 }
@@ -3760,6 +3764,12 @@ function claimChests(rows){
     // FEVER 那一档被「已经在 FEVER 里」或「冷静期」挡住时，会落到这一档 ——
     // CHEST_P[0] < CHEST_P[1]，所以这个条件天然兜得住，不会白开一个箱
     else if (r < CHEST_P[1]){ heat += CHEST_HEAT; heatQuant = -1; syncHeat(); syncEdge(); tip('开箱　热度 +' + CHEST_HEAT, 0); }
+    // 孤注（血契）承诺「不再出变异块」换全局得分 ×1.45。rollMod 和 doGlean 都守了
+    // upNever('mod')，唯独这里直接写 game.mods[0] 绕过去 —— 实测挂着孤注开 300 次
+    // 宝箱，92 次照样塞了炸弹（31%）。玩家付了价钱，线没断干净。
+    // 挡住之后退成热度那一档，别白开一个箱。
+    else if (upNever('mod')){ heat += CHEST_HEAT; heatQuant = -1; syncHeat(); syncEdge();
+                              tip('开箱　热度 +' + CHEST_HEAT, 0); }
     else { game.mods[0] = 'bomb'; previewDirty = true; tip('开箱　下一块是炸弹', 0); }
   }
   sfx('tetris', 1.34); buzz([30, 20, 30, 20, 60]);
@@ -6207,7 +6217,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   showToast, syncStreak, fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
   get wallCol(){ return wallCol; }, FROZEN, GARBAGE,
   get fever(){ return feverLeft; }, get feverPity(){ return feverPity; },
-  feverStart, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,
+  feverStart, feverEnd, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
