@@ -80,6 +80,43 @@ with sync_playwright() as p:
             print("   FAIL 溢出棋盘：", '、'.join(over)); fails += 1
         else:
             print("   PASS 没有横着溢出棋盘")
+        # 侧栏不许溢出，也不许压住按键区。
+        # 矮屏（12/13 mini，视口高 629）曾经上下各溢出 10px：内容本身放得下
+        # （482 vs 493），溢出全来自缝隙 —— 3 道 8px + stats 内部 5 道 6px。
+        side=pg.evaluate("""() => { const s=document.querySelector('.side');
+          const sr=s.getBoundingClientRect();
+          let t=Infinity,b=-Infinity;
+          for (const c of s.children){ const cr=c.getBoundingClientRect();
+            if (cr.height<1) continue; t=Math.min(t,cr.top); b=Math.max(b,cr.bottom); }
+          const pads=document.querySelector('.pads');
+          const pt=pads?pads.getBoundingClientRect().top:1e9;
+          return { up:+(sr.top-t).toFixed(1), down:+(b-sr.bottom).toFixed(1),
+                   overPads:+(b-pt).toFixed(1) }; }""")
+        if side['up'] > 2 or side['down'] > 2:
+            print(f"   FAIL 侧栏溢出（上 {side['up']} 下 {side['down']}）"); fails += 1
+        else:
+            print(f"   PASS 侧栏不溢出（上 {side['up']} 下 {side['down']}）")
+        if side['overPads'] > 0:
+            print(f"   FAIL 侧栏压住按键区 {side['overPads']}px"); fails += 1
+        else:
+            print(f"   PASS 侧栏没压住按键区（富余 {-side['overPads']}px）")
+
+        # 梭哈进行中那一行不许被截断 —— 它是窗口后半程唯一的信息源
+        # （盘面横幅只亮 5 秒，窗口有 10 秒）
+        bet=pg.evaluate("""() => { const T=__tetris;
+          T.betAccept(); T.crazyOnClear(2, null, false); T.syncFx();
+          const row=document.querySelector('#fxBox .fxs.betrow');
+          if (!row) return null;
+          const n=row.querySelector('.fxn'), v=row.querySelector('.fxv');
+          return { n:[n.textContent, n.scrollWidth>n.clientWidth+1],
+                   v:[v.textContent, v.scrollWidth>v.clientWidth+1] }; }""")
+        if not bet:
+            print("   FAIL 梭哈进行中那行没出现"); fails += 1
+        elif bet['n'][1] or bet['v'][1]:
+            print(f"   FAIL 梭哈那行被截断（名「{bet['n'][0]}」{bet['n'][1]} 值「{bet['v'][0]}」{bet['v'][1]}）"); fails += 1
+        else:
+            print(f"   PASS 梭哈进行中那行完整（「{bet['n'][0]}」「{bet['v'][0]}」）")
+
         if r['重叠']:
             print("   FAIL 重叠：", '、'.join(r['重叠'])); fails += 1
         else:

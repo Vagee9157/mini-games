@@ -1507,3 +1507,14 @@ body.flashing .toast{ top: 38%; }
 }
 .betflash.info .betflash-txt b{ color: #c9b6ff; }
 .betflash.info .betflash-txt i{ color: rgba(201,182,255,.8); }
+
+/* 矮屏（12 mini / 13 mini 这一档，视口高 629）：侧栏内容本身放得下
+   （482 vs 493），溢出全来自缝隙 —— 四个块之间 3 道 8px + stats 内部 5 道 6px，
+   把 482 顶到 506，于是上下各溢出 6~10px，「段位」压住按键区、「状态」钻进顶栏。
+   13 Pro（664 高）是 517 vs 520 刚好塞得下，所以只收紧矮屏这一档。 */
+/* 断点取 700：13 Pro（664 高）在最重的状态下 —— 连击徽章 + 梭哈的「接受」按钮
+   把状态框撑高 —— 同样会溢出 4.4px，所以它也要收。14 Pro Max 那一档富余 40px，不动。 */
+@media (max-height: 700px){
+  .side{ gap: 5px; }
+  .side .stats{ gap: 3px; }
+}

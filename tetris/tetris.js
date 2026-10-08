@@ -2542,8 +2542,10 @@ function fxRows(){
   }
   // 梭哈排第一：它是唯一有硬时限、且要你当场做事的东西
   if (betLeft > 0){
-    const m = betMult(betLines);
-    out.push({ n: '梭哈 ' + betLines + '行', v: (betLeft / 1000).toFixed(1) + 's ' + (m ? '×' + m : '—'),
+    // 名字 + 行数 + 秒数 + 倍率四样塞不进 64px —— 实测被截成「梭… 10.0s…」，
+    // 把「消了几行」和「在哪一档」这两个决定要不要拼命的量全吃了。
+    // 秒数让给下面那根进度条（它本来就在计时），数字位只留「几行 / 上限」。
+    out.push({ n: '梭哈', v: betLines + '/' + BET_CAP,
                k: 'betrow', p: betLeft / BET_MS });
   }
   // ZONE 进行中排在事件之前：它有硬时限，而且你正靠它做决定
