@@ -342,7 +342,9 @@ function addTotal(v){
 //   最强   = 你单局最高打到过多少 —— 「你有多强」
 //   段位   = 你一共打出过多少分   —— 「你玩了多久」
 // 都从存档里现算，不另存状态：最高分和累计分只增不减，算出来的结果天然单调。
-// 最强 · 看单局最高分。门槛按真实分数定：普通局 10 万、最好 100 万，
+// 最强 · 看单局最高分。⚠ 下面这句「10 万摆第三档、100 万摆第七档」是
+// 整体 ×10、×2 两次重标**之前**的描述，现在第三档是 2400 万、第七档 1.9 亿。
+// 原文：门槛按真实分数定：普通局 10 万、最好 100 万，
 // 所以 10 万摆在第三档（常驻位），100 万落在第七档，上面还留三格看得见。
 // 火焰这条隐喻和游戏的核心机制是同一件事 —— 一局就是一次燃烧：
 // 热度起来、烧到顶、然后熄灭。
@@ -418,7 +420,8 @@ const RUSH_EVERY = 10;         // 基础门槛，今天打得多会往下降，�
 // 同时长 1.46~1.74 倍，太压普通局。收到 2.5，落在 1.15~1.45：中段略高，
 // 越深领先越多，形状保留。
 const RUSH_MULT  = 2.5;        // 分数倍率（底薪，爆发交给燃点）
-const RUSH_MOD   = 2;          // 重锤/炸弹/激光概率翻倍（金块不翻，它只是纯加分）
+const RUSH_MOD   = 2;          // 金块之外的变异块全部翻倍（金块不翻，它只是纯加分）
+                               // —— 不只是重锤/炸弹/激光，灌注/分流/染色同样吃这个数
 const RUSH_BAD   = 1.5;        // 坏事件权重
 const RUSH_RATE  = .30;        // 每局 30% 概率直接中
 const RUSH_KEY   = nsKey('rush.v1');
@@ -1185,7 +1188,7 @@ function helpSections(){
               + ' · 全消 ' + heatGain(0, null, true) },
       { dot: '◈', name: '倍率', meta: '不封顶',
         text: [24, 48, HEAT_KNEE, 400, 1500]
-              .map(h => '热度 ' + h + ' → ×' + trimZeros(heatMultAt(h, false).toFixed(1))).join('　') },
+              .map(h => '热度 ' + h + ' → ×' + trimZeros(heatMultAt(h).toFixed(1))).join('　') },
       { dot: '◈', name: '险区', meta: '×' + DANGER_HEAT, text: '堆顶进危险区时消行，热度注入翻倍' },
       { dot: '◈', name: '压哨', meta: '+' + SNIPE_HEAT,
         text: '灰线刚顶上来 ' + (SNIPE_MS / 1000) + ' 秒内消掉，额外补 ' + SNIPE_HEAT + ' 点' },
@@ -1246,7 +1249,8 @@ function helpSections(){
       { dot: '⏳', name: '缓期', meta: Math.round(DELAY_FRAC * 100) + '% 热度',
         text: '灰线还剩 ' + (DELAY_WIN / 1000) + ' 秒、而堆已经占到盘面一半以上时**自动**花热度，'
               + '把灰线钟往回推 ' + (DELAY_MS / 1000) + ' 秒。价格是当前热度的 '
-              + Math.round(DELAY_FRAC * 100) + '%（最低 ' + DELAY_MIN + '）—— 按比例收所以穷富一个价。'
+              + Math.round(DELAY_FRAC * 100) + '% —— 按比例收，所以穷富一个价；'
+              + '热度不到 ' + DELAY_GATE + ' 时不提供。'
               + '每行灰线只能缓一次，钟还在走，它是延后不是取消。'
               + '平时一分不动，只有堆高了才会动用。'
               + 'FEVER / ZONE / 缓流 期间不动用 —— 那时灰线钟本来就停着，推它没意义' },
@@ -1260,7 +1264,8 @@ function helpSections(){
     ]],
     ['狂欢局　每局 ' + Math.round(RUSH_RATE * 100) + '% 概率，最多 ' + RUSH_EVERY + ' 局必出一次', [
       { dot: '★', name: '分数', meta: '×' + RUSH_MULT, text: '整局有效，不计时' },
-      { dot: '★', name: '道具', meta: '×' + RUSH_MOD, text: '重锤 / 炸弹 / 激光概率翻倍，金块不翻' },
+      { dot: '★', name: '道具', meta: '×' + RUSH_MOD,
+        text: '金块之外的变异块概率全部翻倍 —— 金块不翻，它只是纯加分' },
       { dot: '▲', name: '灰线', meta: '快 ' + Math.round((1 / RUSH_GARBAGE - 1) * 100) + '%', text: '这是它的代价' },
       { dot: '▲', name: '坏事件', meta: '×' + RUSH_BAD, text: '权重提高，好事件相对更少' },
       { dot: '◈', name: '有效局', meta: RUSH_MIN_PIECES + ' 块 / ' + (RUSH_MIN_MS / 1000) + ' 秒',
@@ -1518,7 +1523,7 @@ function scoreFor(n, spin, perfect){
     if (spin && n > 0) burstRing(lastClearRows, spin === 'tspin' ? '#ff6bd6' : '#c9a6ff');
     // 全消单独一套。它原来和四行共用金色扫光 + 同一档震屏，等于没区别 ——
     // 而全消是整局可能一次都打不出来的东西，稀有度差着量级。
-    if (perfect) perfectFx(py);
+    if (perfect) perfectFx();
 
     const big = n === 4 || spin || perfect;
     if (big) shake(n === 4 || perfect);
@@ -2300,7 +2305,7 @@ const SWEEP_MS = 340, RING_MS = 420;
 // 原来它和四行共用金色扫光 + 同一档震屏，玩家根本分不出来。
 // 四层叠加：整屏白闪 → 全盘自下而上双色扫光 → 中心爆环 → 飘字（走 pop
 // 通道不走 toast，toast 是共享的，紧接着一个 FEVER 就把它顶没了）。
-function perfectFx(py){
+function perfectFx(){        // 不吃落点 y —— 飘字位置是写死的 CELL*ROWS*.42
   const el = $('board');
   if (el){ el.classList.remove('flash-big'); void el.offsetWidth; el.classList.add('flash-big'); }
   const all = [];
@@ -3371,9 +3376,11 @@ let heat = 0;
 // `crazyScoreMult()` 里乘的 BURN_MULT 是 v2 的，活的。
 
 // 纯函数版：给定热度算倍率，不读当前局的状态。
-// 说明书要拿它举例，而 heatMult 读的是此刻的 heat 和 game.rush ——
+// 说明书要拿它举例，而 heatMult 读的是此刻的 heat ——
+// （原来还带一个 rush 参数，函数体里从没用过 —— 燃点 v1 删掉之后热度倍率
+//   就和狂欢局无关了，留着会让人以为狂欢局有另一条热度曲线。已去掉。）
 // 用后者渲染说明书，等于把「这一局现在的倍率」当成通用规则写上去。
-function heatMultAt(h, rush){
+function heatMultAt(h){
   if (!CRAZY) return 1;
   // 夹一下负数。现在没有能让 heat 变负的路径（衰减是乘 exp 且低于 .05 归零、
   // 换牌有余额判、赌输是减半），但公式本身没护栏 —— 真漏进来会算出负倍率，
@@ -3385,7 +3392,7 @@ function heatMultAt(h, rush){
   return m;
 }
 
-function heatMult(){ return heatMultAt(heat, game.rush); }
+function heatMult(){ return heatMultAt(heat); }
 
 // 注入量按含金量给，不按行数摊：一次 TETRIS 给 16，拆成四次单行只给 8。
 // 想把倍率烧上去就得打大的。
@@ -3404,9 +3411,19 @@ function heatGainBase(n, spin, perfect){
 
 // ── 热流 ──
 // 每次消行有概率把该次热度注入翻倍，行数越少概率越高。
-// 为什么要偏向小消除：热度是「每秒注入 × 45 秒衰减」的平衡点，单行注入只有 2，
-// 平衡在 ×3.1 —— 只会打单行的人永远养不起热度，而热度是乘在每一次得分上的。
-// 偏向之后单行平衡抬到 ×4.75（+51%），四行只抬到 ×9.78（+6%），梯度保住了。
+// ⚠ 这段论证的前提在 HEAT_TAU 45s → 135s 之后全部失效，**结论也反了**，
+//    下次调 FLOW_P 不要再引用它。按现在的常量重算（单行注入 3、四行 24）：
+//      单行平衡  宣称 ×3.1  → 实际 ×9.71
+//      有热流后  宣称 ×4.75 → 实际 ×11.87（提升 +51% → +22%）
+//      四行平衡  宣称 ×9.78 → 实际 ×20.32
+//      四行/单行梯度  宣称 2.06× → 实际 1.27×（开方压缩把它压扁了）
+//    也就是说两条支柱都塌了：「只打单行养不起热度」不成立（现在稳在 ×9.7~11.9，
+//    是四行玩家的 60~79%），「梯度保住了」也不成立。热流现在是在给一个本来
+//    不需要补贴的打法继续补贴，而且在抹平它本来要保住的梯度。
+//    要不要继续偏向小消除，得按现在的曲线重新问一遍。
+//
+// 原文（已作废，保留做沿革）：热度是「每秒注入 × 45 秒衰减」的平衡点，
+// 单行注入只有 2，平衡在 ×3.1；偏向之后单行抬到 ×4.75（+51%），四行只抬到 ×9.78。
 //
 // 用概率不用直接调高单行注入，是因为后者会让单行逼近双行（×5.25 对 ×5.93），
 // 而且没有「中了」的瞬间 —— 整套机制里对玩家有利的东西太少，八个事件只有压实一个。
@@ -3418,7 +3435,7 @@ const DANGER_HEAT = 2;           // 危险区里消行的热度倍数
 // 每条灰线带宝箱的概率。注意这是「生成」的概率，不是「开出来」的 ——
 // 宝箱只有在你把那一行消掉时才算开，大量灰线是被顶出去的。
 // 实测开出来的数（机器人，一局六七分钟）：普通局中位 3 个，
-// 狂欢局灰线快 82%、所以中位 8 个。
+// 狂欢局灰线快 43%（RUSH_GARBAGE 0.70）。⚠ 原文写的「快 82%」是 .55 时代的遗留。
 const CHEST_RATE = 1 / 4;
 // 抽成函数：灰线那头和说明书读同一个数，顺带让「富矿这张卡有没有接上」可测
 function chestRate(){ return CHEST_RATE * upMul('chest'); }
@@ -3445,12 +3462,21 @@ let lastRiseAt = -1e9;           // 上一次灰线上顶的时刻，给「压�
 // 每行灰线只能缓一次（delayUsed），所以它是延后不是取消 —— 钟还在走。
 const DELAY_MS   = 9000;         // 往回推多少毫秒，固定值
 const DELAY_FRAC = .18;          // 价格 = 当前热度的这个比例
-const DELAY_MIN  = 150;          // 价格下限，也是能不能用的门槛
+// 参与门槛：热度低于这个数就不提供缓期。
+//
+// 原来这个常量同时当「价格下限」用，而它正好推翻了上面那段论证 ——
+// 那段花了一整段说「价格必须是热度的固定比例，否则量程一动就得重标」，
+// 下一行就写了个固定值 150，而实测前中期热度区间（峰值中位数几百）里
+// **生效的几乎永远是这个固定值**：heat=300 时扣 150 是扣掉一半，
+// 倍率从 ×13.5 掉到 ×10.8，是 −20%，不是注释承诺的 −9%。
+//
+// 拆成两件事：价格纯按比例（真正免标度），门槛单独一个数。
+const DELAY_GATE = HEAT_FLOOR * 3;   // 150，但语义是「够不够资格用」不是「最少付多少」
 const DELAY_WIN  = 8000;         // 灰线还剩多久时开始提供缓期（要够手机上点得到）
 let delayUsed = false;           // 这一行灰线是否已经缓过
 
 // 价格现算 —— 说明书和扣费读的是同一个函数，不会对不上
-function delayCost(){ return Math.round(Math.max(DELAY_MIN, heat * DELAY_FRAC) * upMul('delay')); }
+function delayCost(){ return Math.round(heat * DELAY_FRAC * upMul('delay')); }
 
 // 能不能缓：疯狂版、灰线钟真的在走、进了窗口、热度够、这行还没缓过。
 // 梭哈待接时不提供 —— 状态框只有三槽，而梭哈是有硬时限的，不能被挤掉。
@@ -3461,7 +3487,7 @@ function canDelay(){
   // 而那时灰线预警条是藏着的，按钮等于凭空冒出来。
   if (feverLeft > 0 || evCalm() || zoneLeft > 0) return false;
   if (delayUsed || betOffer > 0) return false;
-  if (heat < delayCost()) return false;
+  if (heat < DELAY_GATE) return false;      // 门槛看绝对值，价格看比例
   return garbagePeriod() - garbageTimer <= DELAY_WIN;
 }
 
@@ -3978,7 +4004,10 @@ function crazyOnLock(p){
   goldPending = p.mod === 'gold';
 }
 
-// 钩子③：算分时的倍数。金块 ×2、FEVER ×3，两者相乘。
+// 钩子③：算分时的倍数。热度 × 深局 × 狂欢 × 爆发，其中「爆发」那一组
+// （FEVER / 燃点 / 金块）是**相加**的，见函数体里的 burst。
+// 这行原来写的是「金块 ×2、FEVER ×3，两者相乘」—— 数值和运算全错，
+// 而反例就在八行之下。
 // 整体手感微调。想让全局分数涨/跌就只动这一个数 —— 其余旋钮（HEAT_DIV、
 // GOLD_MULT、FEVER_MULT、levelMult）都不均匀：有的只在热度高时生效，有的只
 // 覆盖一小撮消行，调它们等于顺手改了平衡。
@@ -3990,7 +4019,10 @@ const CRAZY_TUNE = 1.9;
 
 // ── 深局加成（只给普通局）──
 // 狂欢局比普通局值多少，是三个常数乘出来的：热度 1.97 倍（梭哈连赢 + 道具
-// 翻倍带来的额外注入）× 分数 2.4 倍 × 行数 0.69 倍（灰线快 82%，活不长）。
+// 翻倍带来的额外注入）× 分数 2.4 倍 × 行数 0.69 倍。
+// ⚠ 那个 0.69 是按「灰线快 82%」算的，而现在是 43% —— 狂欢局活得比当初久，
+//    这个因子应该更接近 1。也就是说下面推出来的 2.1 倍、以及据此标定的
+//    DEEP_BASE_RUSH / RUSH_EXTRA，依据都是一个已经作废的数。下次重标要重算。
 // 乘起来约 2.1，而且跟行数无关 —— 所以补偿也得是个接近常数的量，
 // 拿「行数越多越值」那种缓坡补不动：实测 100 行就差 2.16 倍、550 行还差 2.08 倍。
 //
@@ -4184,6 +4216,7 @@ function crazyOnClear(lines, spin, perfect){
 
 function feverStart(){
   if (feverCool > 0) return false;    // 冷静期里不开，两个来源都走这道门
+  // 下面成功路径最后 return true，别留一个「失败 false / 成功 undefined」的半吊子
   feverLeft = FEVER_MS;
   activePal = 'classic';
   staticDirty = true; previewDirty = true; needsDraw = true;
@@ -4192,6 +4225,7 @@ function feverStart(){
   buzz([40, 30, 40, 30, 90]);
   sfx('tetris', 1.26);
   syncTempo();
+  return true;
 }
 function feverEnd(){
   feverLeft = 0;
@@ -4212,7 +4246,11 @@ function feverEnd(){
 // 这几个概率原先是照着机器人「一局一百多块就死」调的，人类一局能落六百块，
 // 于是实测变成每 6.7 块就有一个变异块 —— 15%，变异成了常态。而且比例是反的：
 // 最没戏的金块 60 个，最有戏的激光 3 个。
-// 重调到总量 5.4%（一局六百块 ≈ 33 个），顺带把四种拉平：
+// ⚠ 下面这段「总量 5.4% / 一局六百块 ≈ 33 个 / 金 16」是**四种变异块时代**的数字，
+//    加了灌注 / 分流 / 染色（合计 2.2%）、金块又从 1/38 调到 1/24 之后已经作废。
+//    现在总量 9.2%（六百块 ≈ 55 个、金块 25 个），每 10.9 块一个。
+//    说明书那条是现算的所以没错，错的只有这段注释 —— 按它反推平衡会偏七成。
+//    原文保留做沿革：重调到总量 5.4%（一局六百块 ≈ 33 个），顺带把四种拉平：
 //   一局六百块下 ≈ 金 16 / 锤 6.7 / 弹 5.5 / 激 4.6
 const MOD_RATES = [
   ['laser',  1 / 130],
@@ -4325,7 +4363,9 @@ function rollMod(){
   return null;
 }
 
-// 四种效果刻意分成「减堆 / 挖井 / 修洞 / 填实」，各解决一类困境，不互相重复
+// 六种干活的变异块各解决一类困境，不互相重复：
+//   重锤=减堆 / 激光=挖井 / 炸弹=炸开 / 灌注=填实 / 分流=铺平 / 染色=指定彩虹行
+// （原来写的是「四种」，分流和染色是后加的）
 function crazyApplyMod(p){
   if (!CRAZY || !p.mod || p.mod === 'gold') return;
   if (p.mod === 'bomb')   bombAt(p);
@@ -4660,9 +4700,11 @@ const CRACKS = (() => {
 
 // 只给疯狂版。标准版这一版之后的表现要保持不变，纯视觉也不例外。
 function drawCracks(){
-  const top = topFilledRow();
-  if (top < 0) return;
-  const left = top - BUFFER;              // 离顶还有几行
+  // 蹭 syncDanger 已经算好的 dangerLeft，不另外扫一遍盘面 ——
+  // topFilledRow 是 220 格的扫描，stepOnce 里那段注释专门写过「不该每帧多跑一次」，
+  // 而这里原来做的正是那段注释禁止的事（syncHud 每帧一次 + draw 每帧一次）。
+  const left = dangerLeft;                // 离顶还有几行，syncDanger 存的
+  if (left >= 99) return;                 // 空盘
   if (left > 6) return;
   const k = Math.min(1, (6 - left) / 6);  // 0 → 1，越危险越开
   const W = COLS * CELL, H = ROWS * CELL;
@@ -5383,11 +5425,13 @@ function betPop(label, text, kind){
 }
 
 // 状态框里的按钮现在有三种，统一在这里分发
+// 状态框和盘面横幅上的按钮点下去走这里。
+// ZONE 和缓期改成自动触发之后就不再有按钮了（actNow 只会返回 'bet' / 'zoneinfo' / ''，
+// fxRows 里唯一带 go 的是 betoffer），所以那两个分支已经到不了，删掉。
+// 留着 zoneinfo 这条：横幅在讲解 ZONE 时是可点的，点下去应当什么都不做。
 function fxAct(act){
   if (act === 'zoneinfo') return;     // 纯讲解，点它不该有任何反应
-  if (act === 'delay') doDelay();
-  else if (act === 'zone') zoneStart();
-  else betAccept();
+  betAccept();
 }
 
 function betAccept(){
@@ -5407,7 +5451,8 @@ function betHide(){
 
 function betStep(dt){
   if (betCool > 0) betCool -= dt;
-  // 三秒一到就把盘面让出来，右侧那行照旧走完十秒
+  // ACT_SHOW 一到就把盘面让出来，右侧那行照旧走完十秒
+  // （原来写死「三秒」，而这个值 10-03 已经改成 5 秒）
   if (betShow > 0 && (betShow -= dt) <= 0) betFlashHide();
   if (betOffer > 0){
     betOffer -= dt;
@@ -6305,7 +6350,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
   chestRate, modRate, lockDelay, canDelay, doDelay, delayAuto, delayRisk, DELAY_RISK, syncDanger, get dangerOn(){ return dangerOn; }, zoneAuto, delayCost, garbagePeriod, riseGarbage,
   get garbageTimer(){ return garbageTimer; }, set garbageTimer(v){ garbageTimer = v; },
- DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
+ DELAY_MS, DELAY_FRAC, DELAY_GATE, DELAY_WIN, get delayUsed(){ return delayUsed; },
   syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, rainMult, get rainRow(){ return rainRow; },
   crazyOnClear, evTail, evBlind, doGlean, GLEAN_N, forkAt, dyeAt, MOD_TINT,
   EV_WARN, EV_MIN, EV_FIRST, evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
@@ -6318,7 +6363,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
   deepMult, deepAt, DEEP_SOFT, deepCrossLines, DEEP_PER, DEEP_EG, SNIPE_MS, SNIPE_HEAT, CHEST_P, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
-  get clearing(){ return clearing; }, doFreeze, saveGame, restoreGame, upNever, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  get clearing(){ return clearing; }, doFreeze, saveGame, restoreGame,  readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   showToast, syncStreak, fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,

@@ -59,6 +59,9 @@ with sync_playwright() as p:
     b=p.webkit.launch()
     for name,url in (('疯狂版','crazy/index.html'),('标准版','tetris/index.html')):
         ctx=b.new_context(**p.devices['iPhone 13 Pro']); pg=ctx.new_page(); errs=[]
+        # 拦掉外网字体。index.html 的 Google Fonts 样式表是**渲染阻塞**的，而 pg.goto
+        # 默认等 load —— 网一慢整个文件就 Timeout，红绿和代码无关（实测撞过两次）。
+        pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
         pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)

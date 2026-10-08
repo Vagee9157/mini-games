@@ -85,6 +85,10 @@ JS = r"""() => {
   // 再叠一个燃点
   T.heat = T.BURN_FLOOR * 2;
   for (let i = 0; i < 40 && !T.burnOn(); i++){ T.heat *= 1.08; T.burnStep(T.BURN_SAMPLE); }
+  // 这两条是「爆发倍率相加不相乘」这次改动的主命题，原来被 if 包着 ——
+  // 点燃失败就整段不执行，而 run_all.py 只数 PASS 行数、不校验期望条数，
+  // 结果还是 [ ok ]。改成点不着就直接判失败。
+  ok(T.burnOn(), '燃点点着了（点不着的话下面两条主断言会被跳过）');
   if (T.burnOn()){
     T.heat = 600;
     const b2 = T.crazyScoreMult();
@@ -186,8 +190,18 @@ JS = r"""() => {
     // 中间对局会被灰线打死，而 game.over 之后 stepOnce 直接 return，
     // 事件钟不再走 —— 后面几条就会得到「不会自己结束」的假阳性
     fresh();
+    // 瞬发事件靠「盘面变没变」来判，所以要先铺点东西再拍快照
+    clean();
+    for (let y = R - 6; y < R; y++) fillRow(y, (y % 7));
+    const snapBefore = B().map(r => r.join('|')).join('/');
     T.evForce(e.key);
-    const fired = e.ms > 0 ? (T.evActive === e.key) : true;
+    // 瞬发事件（ms:0）不设 evActive，原来这里直接写死 true —— 四条断言恒成立。
+    // 它们的效果是可观测的：压实/地震改盘面、冰冻把某行变成 FROZEN、拾穗改队列。
+    let fired;
+    if (e.ms > 0) fired = (T.evActive === e.key);
+    else if (e.key === 'glean') fired = T.game.mods.slice(0, T.GLEAN_N).some(Boolean);
+    else if (e.key === 'freeze') fired = B().some(r => r.some(c => c === 'F'));
+    else fired = snapBefore !== B().map(r => r.join('|')).join('/');   // 压实 / 地震
     ok(fired, `事件「${e.name}」能触发`);
     if (e.ms > 0){ T.step(e.ms + 500); ok(T.evActive !== e.key, `事件「${e.name}」会自己结束`); }
   }
@@ -199,7 +213,12 @@ JS = r"""() => {
   ok(B()[R-1].some(c => c === 'X'), '灰线是灰色格子');
   ok(T.CHEST_RATE > 0 && T.CHEST_P.length === 2, '宝箱有概率和三档结果');
   clean(); for (let y=R-4;y<R;y++) fillRow(y, 5);
-  ok(T.doFreeze() !== false || true, '冰冻能调用');
+  // 原来是 `X || true`，恒真。真的验一行被冻住。
+  clean();
+  for (let y = R - 4; y < R; y++) fillRow(y, 5);
+  const froze = T.doFreeze();
+  ok(froze === true, '有候选行时冰冻能成功');
+  ok(B().some(r => r.some(c => c === 'F')), '盘面上真的出现了冰冻格');
 
   // ── 彩虹行 ──
   fresh();
@@ -245,8 +264,12 @@ JS = r"""() => {
   for (const u of T.UPS){
     T.ups.length = 0; T.ups.push(u.k);
     const f = Object.keys(u.mul || {})[0];
+    // 原来只看 upMul(f) !== 1 —— 那只是在问「表里那个数是不是 1」，
+    // 等于验数据表自洽。把 upMul('rain') 从计算点整条删掉它照样全绿。
+    // 真正的覆盖在 test_ups 的「每个 mul 字段都被计算点读到」那条（带探针、
+    // 没探针直接判失败）。这里只验「卡声明了点什么」，说清楚免得再被当成行为验证。
     const changed = u.never ? T.upNever(u.never) : (f ? T.upMul(f) !== 1 : false);
-    ok(changed, `修行「${u.n}」真的生效`);
+    ok(changed, `修行「${u.n}」声明的字段是活的（行为验证在 test_ups）`);
   }
   T.ups.length = 0;
 
@@ -401,6 +424,9 @@ JS = r"""() => {
 fails = 0
 with sync_playwright() as p:
     b=p.chromium.launch(); pg=b.new_page(); errs=[]
+    # 拦掉外网字体。index.html 的 Google Fonts 样式表是**渲染阻塞**的，而 pg.goto
+    # 默认等 load —— 网一慢整个文件就 Timeout，红绿和代码无关（实测撞过两次）。
+    pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
     pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.goto(f"http://127.0.0.1:{port}/crazy/index.html")
     pg.wait_for_function("window.__tetris !== undefined", timeout=15000)

@@ -72,6 +72,10 @@ with sync_playwright() as p:
         br = getattr(p, engine).launch()
         ctx = br.new_context(**(p.devices[device] if device else {}))
         pg = ctx.new_page(); errs=[]
+        # 拦掉外网字体。index.html 的 Google Fonts 样式表是**渲染阻塞**的，
+        # 而 pg.goto 默认等 load —— 网一慢整个文件就 Timeout，红绿和代码无关。
+        # 实测撞到过两次：test_content / test_delay 整个挂掉，单独重跑又全绿。
+        pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
         pg.on("pageerror", lambda e: errs.append(str(e)))
         if throttle:
             cdp = ctx.new_cdp_session(pg)

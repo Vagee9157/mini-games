@@ -35,8 +35,17 @@ JS = r"""() => {
   T.upTake(c2[0]);
 
   // 乘数真的生效
-  const base = T.heatGain(1), bm = T.upMul('heat');
-  ok(Math.abs(base / bm - 3) < .01, `heatGain 走的是 upMul（${base} / ${bm.toFixed(2)} = 3）`);
+  // 原来写的是 heatGain(1) / upMul('heat') === 3，那是个恒等式（heatGain 的定义
+  // 就是 base × upMul）。而且当时 ups 里是随机抽的卡，多数情况 upMul 本来就是 1，
+  // 连「有没有卡」都没区分。改成挂上明确的卡前后对比。
+  T.ups.length = 0;
+  const g0 = T.heatGain(1);
+  T.ups.push('forge');
+  const g1 = T.heatGain(1);
+  const forgeK = T.UP_BY.forge.mul.heat;
+  ok(Math.abs(g1 / g0 - forgeK) < .01,
+     `熔炉让热度注入变成 ×${forgeK}（${g0} → ${g1}）`);
+  T.ups.length = 0;
 
   // 逐张验：每张卡的 mul 字段都要被某个计算点读到。
   //
@@ -155,6 +164,10 @@ with sync_playwright() as p:
     b=p.chromium.launch()
     for name,url in (('疯狂版','crazy/index.html'),('标准版','tetris/index.html')):
         pg=b.new_page(); errs=[]
+        # 拦掉外网字体。index.html 的 Google Fonts 样式表是**渲染阻塞**的，
+        # 而 pg.goto 默认等 load —— 网一慢整个文件就 Timeout，红绿和代码无关。
+        # 实测撞到过两次：test_content / test_delay 整个挂掉，单独重跑又全绿。
+        pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
         pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)

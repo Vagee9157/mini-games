@@ -50,10 +50,13 @@ JS = r"""() => {
   ok(B()[ROWS-3][0] === 'T', '消行之上的堆原地不动（地板涨了，净位移为零）');
 
   // ── 死行不会被当成满行消掉 ──
+  // 原来这里两次 zrows() 之间什么都没做，断言恒真；而且 clearFullNow 当时
+  // 根本没导出（三目两边都是 0），连「能不能调到」都没验。
+  // 改成真的走一遍工具清行那条路 —— 它是 ZONE 之外第二条会调 applyClear 的路径。
   const lockedBefore = zrows();
-  // 走一次真实的锁定路径：盘面上只有死行，不该触发任何消除
-  const n = T.clearFullNow ? 0 : 0;
-  ok(zrows() === lockedBefore, '死行本身不会被当满行');
+  T.collapseCols([0,1,2,3,4,5,6,7,8,9]);     // 内部会调 clearFullNow → applyClear
+  ok(zrows() === lockedBefore,
+     `死行不会被工具清行当成满行消掉（${lockedBefore} → ${zrows()}）`);
 
   // ── 封顶提前结算 ──
   for (let i = 0; i < T.ZONE_MAX + 2; i++){
@@ -174,6 +177,10 @@ with sync_playwright() as p:
     b=p.chromium.launch()
     for name,url in (('疯狂版','crazy/index.html'),('标准版','tetris/index.html')):
         pg=b.new_page(); errs=[]
+        # 拦掉外网字体。index.html 的 Google Fonts 样式表是**渲染阻塞**的，
+        # 而 pg.goto 默认等 load —— 网一慢整个文件就 Timeout，红绿和代码无关。
+        # 实测撞到过两次：test_content / test_delay 整个挂掉，单独重跑又全绿。
+        pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
         pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
@@ -181,8 +188,12 @@ with sync_playwright() as p:
             r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click();
               // 标准版没有修行面板，不需要 passUp（这里曾经误加过，整个文件直接崩）
               T.zoneCharge = 999; const a = T.zoneReady(); T.zoneStart();
-              return ['标准版 zoneReady='+a+' (要 false)','标准版 zoneLeft='+T.zoneLeft+' (要 0)',
-                      '标准版 body.zoning='+document.body.classList.contains('zoning')+' (要 false)']; }""")
+              // 同上：裸字符串不会被 run_all.py 统计，也不会报错
+              const L=[]; const ok=(c,m)=>L.push((c?'PASS ':'FAIL ')+m);
+              ok(a===false, '标准版 zoneReady 恒为 false');
+              ok(T.zoneLeft===0, '标准版 zoneStart 不起作用');
+              ok(!document.body.classList.contains('zoning'), '标准版不会挂 zoning');
+              return L; }""")
         else:
             r=pg.evaluate(JS)
         print(f"== {name} ==  JS错误 {len(errs)}")

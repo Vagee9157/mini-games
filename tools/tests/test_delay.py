@@ -24,7 +24,7 @@ JS = r"""() => {
   ok(T.canDelay(), '窗口内提供缓期');
 
   // 价格 = 热度 × DELAY_FRAC
-  const want = Math.max(T.DELAY_MIN, Math.round(2000 * T.DELAY_FRAC));
+  const want = Math.round(2000 * T.DELAY_FRAC);
   ok(T.delayCost() === want, `价格现算 ${T.delayCost()} == ${want}`);
 
   // 执行
@@ -43,12 +43,17 @@ JS = r"""() => {
   ok(T.canDelay(), '新一行又能缓了');
 
   // 热度不够不给
-  T.heat = T.DELAY_MIN - 1;
-  ok(!T.canDelay(), '热度不够不提供');
+  T.heat = T.DELAY_GATE - 1;
+  ok(!T.canDelay(), `热度低于门槛 ${T.DELAY_GATE} 时不提供`);
 
-  // 价格有下限
-  T.heat = 10;
-  ok(T.delayCost() === T.DELAY_MIN, '价格有下限 ' + T.DELAY_MIN);
+  // 价格是纯比例 —— 原来还有个固定下限 150，而那正好推翻了「按比例收所以
+  // 穷富一个价」那段论证：heat=300 时扣 150 是扣掉一半，不是 18%。
+  T.heat = 400;
+  ok(Math.abs(T.delayCost() - 400 * T.DELAY_FRAC) < 1,
+     `价格恒为热度的 ${Math.round(T.DELAY_FRAC*100)}%（heat 400 → ${T.delayCost()}）`);
+  T.heat = 4000;
+  ok(Math.abs(T.delayCost() - 4000 * T.DELAY_FRAC) < 1,
+     `热度十倍价格也十倍（heat 4000 → ${T.delayCost()}）—— 这才叫免标度`);
 
   // 钟停着的时候不给（缓流事件）
   T.heat = 2000;
@@ -87,6 +92,10 @@ with sync_playwright() as p:
     b=p.chromium.launch()
     for name,url in (('疯狂版','crazy/index.html'),('标准版','tetris/index.html')):
         pg=b.new_page(); errs=[]
+        # 拦掉外网字体。index.html 的 Google Fonts 样式表是**渲染阻塞**的，
+        # 而 pg.goto 默认等 load —— 网一慢整个文件就 Timeout，红绿和代码无关。
+        # 实测撞到过两次：test_content / test_delay 整个挂掉，单独重跑又全绿。
+        pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
         pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
@@ -95,14 +104,22 @@ with sync_playwright() as p:
               // 标准版没有修行面板，不需要 passUp（它只在疯狂版那个 JS 块里定义）
               T.heat=99999; T.garbageTimer = T.garbagePeriod()-2000;
               const before=T.heat; T.doDelay();
-              return ['标准版 canDelay = '+T.canDelay()+' (要 false)', '标准版 doDelay 无副作用 = '+(T.heat===before)]; }""")
+              // 必须带 PASS / FAIL 前缀 —— run_all.py 是按 ^\s+PASS / ^\s+FAIL 统计的，
+              // 裸字符串既不计数也不报错，这个分支以前**永远不会红**，
+              // 而它是「标准版纯 Guideline」承诺仅有的守门人之一
+              const L=[]; const ok=(c,m)=>L.push((c?'PASS ':'FAIL ')+m);
+              ok(T.canDelay()===false, '标准版 canDelay 恒为 false');
+              ok(T.heat===before, '标准版 doDelay 无副作用');
+              return L; }""")
         else:
             r=pg.evaluate(JS)
             # 缓期现在是自动触发的，没有按钮可点 —— 改成验「危险区里会自己付」
             auto=pg.evaluate('''() => { const T=__tetris;
               const B=T.game.board, R=B.length, C=B[0].length;
               for (let y=0;y<R;y++) for (let x=0;x<C;x++) B[y][x]=null;
-              T.heat = 3000; T.delayUsed = false;
+              // delayUsed 在导出面上只有 getter，`T.delayUsed = false` 是静默失效的
+              // （evaluate 不是 strict mode）。靠 riseGarbage 把额度正经还回来。
+              T.heat = 3000; T.riseGarbage();
               T.garbageTimer = T.garbagePeriod() - 2000;
               const h0 = T.heat;
               T.delayAuto();
