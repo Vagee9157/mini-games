@@ -18,6 +18,10 @@ JS = r"""() => {
   const solid = () => B().reduce((a,r)=>a + r.filter(Boolean).length, 0);
   const zrows = () => B().filter(r => r.every(c => c === Z)).length;
   const fill = (y, except) => { for (let x=0;x<COLS;x++) B()[y][x] = (x===except? null : 'T'); };
+  const fillRow = fill;
+  const clean = () => { for (let y=0;y<ROWS;y++) for (let x=0;x<COLS;x++) B()[y][x]=null; };
+  const fresh = () => { document.getElementById('againBtn')?.click();
+                        document.getElementById('startBtn')?.click(); passUp(); };
 
   document.getElementById('startBtn').click(); passUp();
 
@@ -96,6 +100,73 @@ JS = r"""() => {
   T.endGame('测试');
   ok(T.game.score > s1, '在 ZONE 里结束对局，奖金照样结算');
   ok(!document.body.classList.contains('zoning'), '结束后 zoning 不残留');
+
+
+  // ── 封顶要边沉边截，不能事后判 ──
+  fresh();
+  T.zoneCharge = T.zoneNeed(); T.zoneStart();
+  clean();
+  while (T.zoneRows < T.ZONE_MAX - 1){
+    const y = ROWS - 1 - T.zoneRows; if (y < 4) break; fillRow(y); T.applyClear([y]);
+  }
+  ok(T.zoneRows === T.ZONE_MAX - 1, `先垫到 ${T.ZONE_MAX - 1} 行`);
+  const ys = [];
+  for (let i = 0; i < 4; i++){ const y = ROWS - 1 - T.zoneRows - i; if (y > 3){ fillRow(y); ys.push(y); } }
+  T.applyClear(ys);
+  const peak = T.game.run.zoneRows;
+  ok(peak <= T.ZONE_MAX,
+     `一次消 4 行也不会冲破封顶（峰值 ${peak} ≤ ${T.ZONE_MAX}）—— 原来会冲到 15，奖金按 k² 超发 56%`);
+
+  // ── 冰冻不能吃死行，但正常行照样冻得动 ──
+  fresh();
+  T.zoneCharge = T.zoneNeed(); T.zoneStart();
+  clean();
+  for (let i = 0; i < 2; i++){ const y = ROWS - 1 - T.zoneRows; fillRow(y); T.applyClear([y]); }
+  const floor0 = T.zoneFloor(), dead0 = zrows();
+  // 死行之上什么都没有 → 没有合法候选
+  ok(T.doFreeze() === false, '死行之上没东西时冻不了（死行不是候选）');
+  ok(zrows() === dead0 && T.zoneFloor() === floor0,
+     `死行和地板都没动（死行 ${dead0}，地板 ${floor0}）`);
+  // 放一行普通行上去，必须还能冻
+  fillRow(ROWS - 1 - T.zoneRows - 1, 4);
+  ok(T.doFreeze() === true, '死行之上有普通行时照常能冻');
+  ok(zrows() === dead0 && T.zoneFloor() === floor0, '冻完死行和地板仍然没动');
+  T.zoneEnd('');
+  ok(zrows() === 0, '结算能把死行清干净（冻坏过的话这里会留残行）');
+
+  // ── ZONE 到时要等消行动画落地再结算 ──
+  fresh();
+  T.zoneCharge = T.zoneNeed(); T.zoneStart();
+  clean();
+  fillRow(ROWS - 1); T.applyClear([ROWS - 1]);          // 沉 1 行死行
+  T.step(T.ZONE_MS - 60);                               // 烧到快到期
+  const tgt = 14;
+  fillRow(tgt);
+  if (!T.game.piece) T.spawnNext();
+  const pc = T.game.piece; pc.x = 0; pc.y = 2;
+  T.lockPiece();
+  ok(T.clearing && T.clearing.rows.includes(tgt), `消行动画挂着（rows=${JSON.stringify(T.clearing && T.clearing.rows)}）`);
+  T.step(300);
+  const stillFull = [];
+  for (let y = 0; y < ROWS; y++)
+    if (B()[y].every(c => c) && !B()[y].every(c => c === Z)) stillFull.push(y);
+  ok(stillFull.length === 0,
+     `动画落地后那一行真的被消掉了（还剩 ${JSON.stringify(stillFull)}）—— ` +
+     'ZONE 在动画中途结算会让 applyClear 拿过期行号删错行，分已经给了行却还在');
+
+
+  // ── ZONE 期间事件钟整个停住（盘面讲解框承诺的「事件全停」）──
+  fresh();
+  // 先排出一个待发事件
+  let guard = 0;
+  while (!T.evPending && guard++ < 400) T.step(500);
+  ok(!!T.evPending, `排出了待发事件（${T.evPending}）`);
+  const pend = T.evPending;
+  T.zoneCharge = T.zoneNeed(); T.zoneStart();
+  T.step(T.EV_WARN ? T.EV_WARN + 1000 : 4000);
+  ok(T.evPending === pend && !T.evActive,
+     `ZONE 期间预警冻住、没有点火（evPending=${T.evPending} evActive=${T.evActive}）`);
+  T.zoneEnd('');
 
   return L;
 }"""

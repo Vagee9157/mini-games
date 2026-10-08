@@ -41,12 +41,17 @@ JS = r"""() => {
   // 从 0 起测注入已经行不通了 —— 热度有地板（HEAT_FLOOR），每次都会被托回去，
   // 量到的永远是地板值。改成从地板之上一个固定基线出发，测增量。
   const BASE = T.HEAT_FLOOR * 4;
+  // 每次循环都把 ZONE 摁住：crazyOnClear 会给 ZONE 攒条，连调 200 次必然灌满，
+  // ZONE 一自动开就冻住事件钟（设计如此），顺风就永远不会到期 —— 这不是代码错，
+  // 是这个测试在用非真实节奏灌数据的副作用
+  const noZone = () => { if (T.zoneLeft > 0) T.zoneEnd(''); T.zoneCharge = 0; };
   const meanGain = (n) => { let t = 0;
-    for (let i = 0; i < n; i++){ T.heat = BASE; T.crazyOnClear(1); t += T.heat - BASE; }
-    return t / n; };
+    for (let i = 0; i < n; i++){ noZone(); T.heat = BASE; T.crazyOnClear(1); t += T.heat - BASE; }
+    noZone(); return t / n; };
   T.evForce('tail');
   ok(T.evTail() === true, '顺风挂上了');
   const withTail = meanGain(200);
+  noZone();
   T.step(9000);
   ok(!T.evTail(), '顺风到时结束');
   const without = meanGain(200);
@@ -57,6 +62,7 @@ JS = r"""() => {
   ok(T.EV_DEADLY.has('blind'), '重影进了高危名单（堆高时不出）');
   T.evForce('blind');
   ok(T.evBlind() === true, '重影挂上了');
+  noZone();
   T.step(8000);
   ok(!T.evBlind(), '重影到时结束');
 

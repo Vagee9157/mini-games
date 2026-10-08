@@ -1557,7 +1557,12 @@ function applyClear(rows){
     // ZONE 期间消掉的行不会消失，而是沉到底部变成死行 —— 盘面从下往上缩。
     // 行数守恒：拿掉 n 行、底部补 n 行，所以消行之上的堆**原地不动**，
     // 而消行之下的堆被抬高 n 格。地板在涨，这就是 ZONE 的代价。
-    for (let i = 0; i < rows.length; i++){
+    // 边沉边截。原来是把这一次的行全 push 完再回头判封顶 ——
+    // 沉到 11 行时再消 4 行会一次冲到 15，而说明书和盘面讲解都写着「最多 12 行」，
+    // 奖金又是按 k² 给的，越界那几行恰恰最值钱（实测超发 56%）。
+    // 装不下的行就按普通消行处理（它们已经从 kept 里拿掉了，下面补空行时堆会落下来）。
+    const room = Math.max(0, ZONE_MAX - zoneRows);
+    for (let i = 0; i < Math.min(rows.length, room); i++){
       kept.push(new Array(COLS).fill(ZONE));
       zoneRows++;
     }
@@ -3724,7 +3729,17 @@ function zoneEnd(why){
 function zoneStep(dt){
   if (!CRAZY || zoneLeft <= 0) return;
   zoneLeft -= dt;
-  if (zoneLeft <= 0) zoneEnd('');
+  // 到时了也要等消行动画落地再结算。
+  //
+  // clearing.rows 是一组**行下标**，要在盘面上存活 260ms；而 zoneEnd 会把
+  // 整个盘面重排（底部拿掉 k 行死行、顶部补 k 行空的，幸存行下标全 +k）。
+  // 在这中间结算的话，等动画落地时 applyClear(clearing.rows) 删的是错的行 ——
+  // 玩家消掉的那行分数/lines/combo 已经给了，行却留在盘上，下次锁定会**再记一次**，
+  // 同时上方一条无关的行被删掉。实测这个窗口占 ZONE 结束的 18%。
+  //
+  // 灰线早就是这么躲的（stepOnce 里那句 `if (!clearing && game.piece)`），
+  // 这里沿用同一条规矩：重排盘面的东西一律让过动画。最多晚 260ms。
+  if (zoneLeft <= 0 && !clearing) zoneEnd('');
 }
 
 const SNIPE_MS = 1000;           // 灰线顶上来多久内消行算压哨
@@ -4646,7 +4661,13 @@ function doWall(){
 // 所以塌陷、灰线上顶、地震平移它都会跟着走，不用另维护一张表。
 function doFreeze(){
   const rows = [];
-  for (let y = BUFFER; y < TOTAL_ROWS; y++)
+  // 死行不能冻。它「有格子」且「不含冰」，两条筛选条件都满足，所以原来会被选中 ——
+  // 而冻掉一行死行的后果是连锁的：那行不再是 every(c === ZONE)，zoneFloor() 当场
+  // 从死行上沿跳回盘底，**剩下所有死行同时失去保护**（炸弹/激光/地震从此能啃）；
+  // zoneEnd 的 filter 也认不出它，行留在盘底而奖金照 zoneRows 全额发。
+  // 另外七个动盘面的工具都守了 zoneFloor()，就这个漏了。
+  const floor = zoneFloor();
+  for (let y = BUFFER; y < floor; y++)
     if (game.board[y].some(Boolean) && !game.board[y].some(c => c === FROZEN)) rows.push(y);
   if (!rows.length) return false;
   const y = rows[(rndFx() * Math.min(rows.length, 6)) | 0];   // 从最上面几行里挑，别冻在深处看不见
@@ -4705,11 +4726,17 @@ function pickEvent(instantOnly){
 }
 
 function evStepSchedule(dt){
+  // ZONE 期间事件钟**整个**停住，包括已经在倒数的预警和正在跑的限时事件。
+  // 原来这道门禁写在函数中段，上面两段先跑掉了 —— 于是待发事件的三秒预警
+  // 照常倒数并点火，而盘面讲解框明写着「重力 / 灰线 / 事件全停」。
+  if (zoneLeft > 0) return;
   if (evPending){
     evWarnLeft -= dt;
     evBeep -= dt;
     if (evBeep <= 0){ evBeep = 1000; sfx('rotate', 1.6); }
-    if (evWarnLeft <= 0) evFire();
+    // 同理：压实走 collapseCols → clearFullNow → applyClear，也会重排行号。
+    // 预警已经走完就等动画落地，别在 260ms 里动盘面。
+    if (evWarnLeft <= 0 && !clearing) evFire();
     return;
   }
   // 限时事件在跑的时候，钟**照走** —— 原来这里直接 return，等于只要有一个
@@ -4717,9 +4744,16 @@ function evStepSchedule(dt){
   // 连瞬发的压实也进不来。限时事件占池子 22/35，这个堵塞很可观。
   //
   // 现在只挡住「限时叠限时」：暗幕 + 镜像 + 狂风 同时上是灾难，而且状态框
-  // 只有三槽也显示不了。瞬发的（压实/地震/冰冻/拾穗）照常进来。
+  // 只有三槽也显示不了。
+  //
+  // ⚠ 更正：pickEvent 的 instantOnly 这条路**当前常量下走不到**。
+  // evTimer 在排出预告那一刻清零，而预警期间本函数整段早退，所以它是从
+  // 「事件点着那一刻」才开始走的；下一次排期最早要 EV_MIN = 20 秒之后，
+  // 而最长的限时事件（缓流 / 封锁）只有 9 秒 —— 两者永远不重叠。
+  // 压实从 0.233 涨到 0.400 次/分钟，功劳全在「钟不再被限时事件堵住」这一半，
+  // 不是「瞬发事件能插进来」。instantOnly 留着是防御性的：
+  // 谁把 EV_MIN 调小或把某个事件的 ms 调大过 20 秒，它就会当场生效。
   if (evActive && evLeft > 0){ evLeft -= dt; if (evLeft <= 0) evEnd(); }
-  if (zoneLeft > 0) return;        // ZONE 期间事件钟还是停 —— 十秒里再来个暗幕就太脏了
   evTimer += dt;
   if (evTimer < evPeriod()) return;
   evTimer = 0;
@@ -6157,7 +6191,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
  DELAY_MS, DELAY_FRAC, DELAY_MIN, DELAY_WIN, get delayUsed(){ return delayUsed; },
   syncRainMark, rainPick, rainStep, BUFFER, get CELL(){ return CELL; }, rainHit, rainShift, RAIN_MS, RAIN_MULT, get rainRow(){ return rainRow; },
   crazyOnClear, evTail, evBlind, doGlean, GLEAN_N, forkAt, dyeAt, MOD_TINT,
-  evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
+  EV_WARN, EV_MIN, EV_FIRST, evFire, pickEvent, MOD_RATES, EVENTS, EV_DEADLY, stackTopRow, DANGER_ROW,
   // 调试用：直接点燃指定事件。evFire 读的是 evPending，从外面没法塞，
   // 只能靠真实调度随机等 —— 排查和截图时不可用。
   evForce: (key) => { const e = EVENTS.find(x => x.key === key); if (!e) return false;
@@ -6167,7 +6201,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   runTitle, newRun, rankOf, careerOf, RANKS, CAREER, MILESTONES, readTotal, readDaily, bjDay, crazyScoreMult,
   syncRank, openRankSheet, syncFx, fxRows, openHelp, helpSections, FORCE_RUSH,
   deepMult, deepAt, deepCrossLines, DEEP_PER, DEEP_EG, SNIPE_MS, SNIPE_HEAT, CHEST_P, RUSH_EXTRA, DEEP_FROM, DEEP_STEP, DEEP_STEP_RUSH, DEEP_BASE, DEEP_BASE_RUSH,
-  saveGame, restoreGame, upNever, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
+  get clearing(){ return clearing; }, doFreeze, saveGame, restoreGame, upNever, readSave, SAVE_KEY, RUSH_EVERY, RUSH_MULT, RUSH_NAME, RUSH_INTRO, rushEvery,
   readRushCount, countRush, takeRush, isRealRun, isStopRun, STOP_MIN_LINES, STOP_MIN_MS, RUSH_RATE, readRushNext, writeRushNext, RUSH_NEXT_KEY, endRushIntro, RUSH_MIN_PIECES, RUSH_MIN_MS, RUSH_GARBAGE,
   RUSH_KEY, DAILY_KEY, writeDaily, get introLeft(){ return introLeft; }, endGame, readBest, STORE_KEY, TOTAL_KEY,
   showToast, syncStreak, fmtScore, setStat, syncGoal, goalCheck, get goalNow(){ return goalNow; }, get goalHit(){ return goalHit; }, readRecent, pushRecent, goalScore, RECENT_N, GOAL_RANK, RECENT_KEY,
