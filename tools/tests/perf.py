@@ -24,7 +24,7 @@ from playwright.sync_api import sync_playwright
 STRESS = """() => {
   const T = __tetris;
   document.getElementById('startBtn').click();
-  document.querySelector('#upList [data-up]')?.click();
+  T.ups.length = 0;          // 清掉开局自动命中的随机修行
   window.__fr = []; let last = performance.now();
   const tick = () => { const n = performance.now(); window.__fr.push(n - last); last = n;
                        requestAnimationFrame(tick); };

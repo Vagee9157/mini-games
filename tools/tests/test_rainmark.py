@@ -11,8 +11,10 @@ from playwright.sync_api import sync_playwright
 JS = r"""() => {
   const T = __tetris, L = [];
   const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
-  const passUp = () => { const c = document.querySelector('#upList [data-up]');
-                         if (c && !document.getElementById('upSheet').hidden) T.upTake(c.dataset.up); };
+  // 开局会自动命中一张**随机**修行，必须清掉再量：不清的话长明把 zoneNeed
+  // 20→12、缓冲把 delayCost 砍半、缓坡改灰线周期，断言就跟着骰子走 ——
+  // 绿是那一掷没抽到相关的卡，不是对。
+  const passUp = () => { T.ups.length = 0; };
   document.getElementById('startBtn').click(); passUp();
   T.ups.length = 0;
   const B = T.game.board, ROWS = B.length, COLS = B[0].length;

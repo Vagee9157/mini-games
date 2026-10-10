@@ -14,8 +14,10 @@ port=srv.server_address[1]; threading.Thread(target=srv.serve_forever,daemon=Tru
 from playwright.sync_api import sync_playwright
 BOT = r"""() => new Promise((done) => {
   const T = __tetris;
-  const passUp = () => { const s=document.getElementById('upSheet');
-    if (s && !s.hidden){ const c=document.querySelector('#upList [data-up]'); if(c) T.upTake(c.dataset.up); } };
+  // 开局会自动命中一张**随机**修行，必须清掉再量：不清的话长明把 zoneNeed
+  // 20→12、缓冲把 delayCost 砍半、缓坡改灰线周期，断言就跟着骰子走 ——
+  // 绿是那一掷没抽到相关的卡，不是对。
+  const passUp = () => { T.ups.length = 0; };
   document.getElementById('startBtn').click(); passUp();
   const COLS = T.game.board[0].length;
   const st = { cp:{}, lines:0, score:0, heatMax:0, bets:0, zones:0 };

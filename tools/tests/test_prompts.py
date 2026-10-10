@@ -48,7 +48,7 @@ with sync_playwright() as p:
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
         pg.evaluate("""() => { const T=__tetris;
           document.getElementById('startBtn').click();
-          document.querySelector('#upList [data-up]')?.click();
+          T.ups.length = 0;          // 清掉开局自动命中的随机修行
           T.ups.length = 0;
           // 把能同时出现的提示全逼出来：左上角三个徽章 + 梭哈横幅 + toast
           T.heat = 3000; T.game.combo = 12; T.game.b2b = true; T.syncStreak();

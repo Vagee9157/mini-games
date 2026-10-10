@@ -11,8 +11,10 @@ from playwright.sync_api import sync_playwright
 JS = r"""() => {
   const T = __tetris, L = [];
   const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
-  const passUp = () => { const c = document.querySelector('#upList [data-up]');
-                         if (c && !document.getElementById('upSheet').hidden) T.upTake(c.dataset.up); };
+  // 开局会自动命中一张**随机**修行，必须清掉再量：不清的话长明把 zoneNeed
+  // 20→12、缓冲把 delayCost 砍半、缓坡改灰线周期，断言就跟着骰子走 ——
+  // 绿是那一掷没抽到相关的卡，不是对。
+  const passUp = () => { T.ups.length = 0; };
   const B = () => T.game.board;
   const clean = () => { const b=B(); for (let y=0;y<b.length;y++) for (let x=0;x<b[0].length;x++) b[y][x]=null; };
   document.getElementById('startBtn').click(); passUp();
@@ -37,7 +39,14 @@ JS = r"""() => {
 
   // ── 顺风：热度注入翻倍 ──
   // 单次采样不可比：热流有 25% 概率把单行注入 ×4，一次采样的方差比效应本身还大。
-  // 取 200 次均值 —— 顺风是稳定的 ×2，热流在两组里期望相同，会被均掉。
+  // 取均值 —— 顺风是稳定的 ×2，热流在两组里期望相同，会被均掉。
+  //
+  // n 从 200 提到 1000：热流让单次取值在 b 和 4b 之间跳，相对标准差 74%，
+  // n=200 时两组均值之比的标准误约 7.5%，而验收窗口 [1.7, 2.3] 只有 ±2σ
+  // —— 二十轮就该红一次，实测连跑六轮真的红了一次（1.63×）。
+  // 曾经怀疑是中间那 9 秒让堆进了危险区（危险区消行热度 ×2）造成系统偏差，
+  // 实测否掉了：dangerOn 全程 false、堆顶一格没动、洗干净盘面结果不变。
+  // 就是采样不够。n=1000 把标准误压到 3.3%，窗口变成 ±4.5σ。
   // 从 0 起测注入已经行不通了 —— 热度有地板（HEAT_FLOOR），每次都会被托回去，
   // 量到的永远是地板值。改成从地板之上一个固定基线出发，测增量。
   const BASE = T.HEAT_FLOOR * 4;
@@ -50,11 +59,11 @@ JS = r"""() => {
     noZone(); return t / n; };
   T.evForce('tail');
   ok(T.evTail() === true, '顺风挂上了');
-  const withTail = meanGain(200);
+  const withTail = meanGain(1000);
   noZone();
   T.step(9000);
   ok(!T.evTail(), '顺风到时结束');
-  const without = meanGain(200);
+  const without = meanGain(1000);
   ok(withTail > without * 1.7 && withTail < without * 2.3,
      `顺风期间热度注入约翻倍（${withTail.toFixed(2)} vs ${without.toFixed(2)} = ${(withTail/without).toFixed(2)}×）`);
 
