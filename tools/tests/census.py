@@ -28,10 +28,14 @@ BOT = r"""() => new Promise((done) => {
   const T = __tetris;
   const C = {};                       // 机制计数
   const bump = (k, n) => { C[k] = (C[k]||0) + (n||1); };
-  const passUp = () => { const s=document.getElementById('upSheet');
-    if (s && !s.hidden){ const c=document.querySelector('#upList [data-up]');
-      if (c){ bump('修行发牌'); T.upTake(c.dataset.up); } } };
-  document.getElementById('startBtn').click(); passUp();
+  // 修行是自动命中的，没有面板可点 —— 观察 ups 长出来几张就行。
+  // 原来这里会主动点面板上的卡（那是「代玩家操作」，不是被动观察），
+  // 面板删掉之后那段代码数到的永远是 0。
+  let prevUps = 0;
+  const watchUp = () => { if (T.ups.length > prevUps){ bump('修行命中', T.ups.length - prevUps);
+                                                       prevUps = T.ups.length; }
+                          if (T.ups.length < prevUps) prevUps = T.ups.length; };
+  document.getElementById('startBtn').click(); watchUp();
   const COLS = T.game.board[0].length;
 
   // 只做被动观察，不直接调任何机制函数
@@ -68,8 +72,8 @@ BOT = r"""() => new Promise((done) => {
       const r=T.game.run; if(r){ for(const k of ['gold','bomb','laser','hammer','tspin','tetris','perfect','chests','saves','rerolls','bets','betWins','delays','zones'])
         if(r[k]) bump('局末统计:'+k, r[k]); }
       document.getElementById('againBtn')?.click();
-      document.getElementById('startBtn')?.click(); passUp(); return; }
-    passUp();
+      document.getElementById('startBtn')?.click(); prevUps = 0; watchUp(); return; }
+    watchUp();
     // 边沿检测各机制
     if (T.fever>0 && prev.fever<=0) bump('FEVER');
     if (T.burnLeft>0 && prev.burn<=0) bump('燃点');
@@ -119,7 +123,7 @@ want = ['FEVER','燃点','ZONE 开启','梭哈弹出','梭哈接受','彩虹行�
         '变异块:fork','变异块:dye',
         '事件:blackout','事件:mirror','事件:wind','事件:wall','事件:slam',
         '事件:tail','事件:blind','事件:calm',
-        '消行:1行','消行:2行','消行:3行','消行:4行','修行发牌',
+        '消行:1行','消行:2行','消行:3行','消行:4行','修行命中',
         '局末统计:chests','局末统计:delays','局末统计:zones','局末统计:bets']
 print(f"--- 真实对局普查（{C.get('__games',0)+3} 局）---")
 miss=[]

@@ -14,25 +14,35 @@ JS = r"""() => {
 
   document.getElementById('startBtn').click();
 
-  // 开局就该弹，而且方块停住
-  ok(!document.getElementById('upSheet').hidden, '开局弹出修行面板');
-  ok(T.game.frozen === true, '选的时候方块停住');
-  const cards = [...document.querySelectorAll('#upList [data-up]')];
-  ok(cards.length === T.UP_PICK, `给 ${T.UP_PICK} 张候选，实得 ${cards.length}`);
-  ok(new Set(cards.map(c=>c.dataset.up)).size === cards.length, '候选不重复');
+  // 开局：直接命中一张，不弹任何面板、不停方块
+  ok(T.ups.length === T.UP_FIRST, `开局自动命中 ${T.UP_FIRST} 张（实得 ${T.ups.length}）`);
+  ok(T.game.frozen !== true, '不冻住方块 —— 没有要人决策的面板了');
+  ok(document.querySelector('.sheet:not([hidden])') === null, '没有任何面板被打开');
+  ok(T.upRound === 1, '算发过一次');
+  const k = T.ups[0];
+  ok(!!T.UP_BY[k], `命中的是表里的卡（${k} / ${T.UP_BY[k].n}）`);
 
-  // 选一张
-  const k = cards[0].dataset.up;
-  T.upTake(k);
-  ok(T.ups.includes(k), '选中的进了 ups');
-  ok(document.getElementById('upSheet').hidden, '选完面板关掉');
-  ok(T.game.frozen === false, '选完方块恢复');
+  // 提示要把名字和效果一起报出来 —— 没面板了，这是唯一一次看到描述
+  const toast = document.getElementById('toast');
+  ok(toast.classList.contains('show'), '屏幕上报了一条提示');
+  ok(toast.textContent.includes(T.UP_BY[k].n), `提示里有卡名（「${toast.textContent}」）`);
+  ok(toast.textContent.includes(T.UP_BY[k].t), '提示里有效果描述');
+  // 只断言常数比 1100 大是假阳性：真正决定能看多久的是 CSS 动画时长，
+  // 它 forwards 到 opacity:0，class 还挂着人也看不见了。实测写死 1.1s 时
+  // 传 3200 没有任何效果（1.5 秒 opacity 已经是 0）。量算出来的那个值。
+  const anim = parseFloat(getComputedStyle(toast).animationDuration) * 1000;
+  ok(Math.abs(anim - T.UP_SAY_MS) < 50,
+     `提示动画真的跟着时长走（CSS ${anim}ms vs UP_SAY_MS ${T.UP_SAY_MS}ms）`);
+  ok(T.UP_SAY_MS > 1100, `而且比默认的 toast 长 —— 带数字的描述读得完`);
+  // 折行也要验：绝对定位 + left:50% 时 shrink-to-fit 的可用宽度只有一半，
+  // 没有 width:max-content 的话这句会被挤成四行窄条
+  ok(toast.getBoundingClientRect().width > toast.parentElement.getBoundingClientRect().width * .6,
+     `提示没被挤窄（宽 ${Math.round(toast.getBoundingClientRect().width)}px）`);
 
-  // 已选过的不再出现
+  // 命中过的不再出现在池子里
+  ok(T.upPool().every(u => u.k !== k), '命中过的不再进池子');
   T.upOffer(1);
-  const c2 = [...document.querySelectorAll('#upList [data-up]')].map(c=>c.dataset.up);
-  ok(!c2.includes(k), '已选过的不再出现在候选里');
-  T.upTake(c2[0]);
+  ok(T.ups.length === 2 && T.ups[1] !== k, '再触发一次，命中的是另一张');
 
   // 乘数真的生效
   // 原来写的是 heatGain(1) / upMul('heat') === 3，那是个恒等式（heatGain 的定义
@@ -90,72 +100,112 @@ JS = r"""() => {
 
   // 血契最多两张
   T.ups.push(...T.UPS.filter(u => u.vow).slice(0, 2).map(u => u.k));
-  const d = T.upDraw();
-  ok(d.every(u => !u.vow), '已挂两张血契时不再抽到血契');
+  ok(T.upPool().every(u => !u.vow), '已挂两张血契时池子里不再有血契');
   T.ups.length = 0;
 
-  // 池子抽干不会卡死
+  // 池子抽干不会卡死，也不会凭空多出一张
   T.ups.push(...T.UPS.map(u => u.k));
-  ok(T.upDraw().length === 0, '池子抽干返回空');
+  ok(T.upPool().length === 0, '池子抽干返回空');
+  const full = T.ups.length;
   T.upOffer(1);
-  ok(document.getElementById('upSheet').hidden, '池子抽干不弹空面板');
-  ok(T.upLeft === 0, '池子抽干把欠账清掉，不会反复弹');
+  ok(T.ups.length === full, '池子抽干时再触发不会多给一张，也不报错');
   T.ups.length = 0;
 
-  // ── 不选 ──
+  // 整局最多命中 UPS.length 张 —— 连触发到死也不会重复
   T.ups.length = 0;
-  T.upOffer(1);
-  ok(!document.getElementById('upSheet').hidden, '再发一次，面板打开');
-  const before = T.ups.length;
-  T.upSkip();
-  ok(document.getElementById('upSheet').hidden, '不选之后面板关掉');
-  ok(T.ups.length === before, '不选不会给卡');
-  ok(T.upLeft === 0, '不选把这次的欠账消掉，不会反复弹');
-  ok(T.game.frozen === false, '不选之后方块恢复');
-  // 欠两次时，不选一次还会接着弹下一次
-  T.upOffer(2);
-  T.upSkip();
-  ok(!document.getElementById('upSheet').hidden, '欠两次时不选一次还会弹第二次');
-  T.upSkip();
-  ok(document.getElementById('upSheet').hidden && T.upLeft === 0, '两次都不选就收干净');
-  // 按钮真的接上了
-  T.upOffer(1);
-  ok(!!document.getElementById('upSkip'), '面板上有「不选」按钮');
+  for (let i = 0; i < 60; i++) T.upOffer(1);
+  // 上限不是全表 —— 三张血契最多挂两张，所以整局天花板是 UPS.length - 1。
+  // 写成算出来的而不是写死，以后加卡/加血契它自己跟着动。
+  const cap = T.UPS.length - Math.max(0, T.UPS.filter(u => u.vow).length - 2);
+  ok(T.ups.length === cap,
+     `连触发 60 次拿到 ${T.ups.length} 张 = 天花板 ${cap}（全表 ${T.UPS.length}，血契上限扣掉 ${T.UPS.length - cap}）`);
+  ok(new Set(T.ups).size === T.ups.length, '没有一张重复命中');
+  ok(T.ups.filter(k => T.UP_BY[k].vow).length <= 2,
+     `血契上限在连触发下也守得住（实得 ${T.ups.filter(k => T.UP_BY[k].vow).length} 张）`);
 
   // ── 存档往返 ──
-  // 上一段结尾留了一次没消的 offer，不清掉的话 upStep 会因为 upLeft > 0 早退，
-  // upNext 不前进，后面两条断言就成了假阳性
-  while (T.upLeft > 0) T.upSkip();
   T.ups.length = 0; T.ups.push('forge', 'ember');
-  T.game.lines = T.UP_EVERY + 5; T.upStep(); 
-  const owed = T.upLeft;
-  const c3 = document.querySelector('#upList [data-up]'); if (c3) T.upTake(c3.dataset.up);
+  T.game.lines = T.upNext; T.upStep();
   T.saveGame(true);
   const raw = JSON.parse(localStorage.getItem(T.SAVE_KEY));
   ok(Array.isArray(raw.ups) && raw.ups.length >= 2, '存档里有 ups');
-  ok(raw.upNext === T.UP_EVERY * 2, `存档里有 upNext（${raw.upNext}）`);
-  ok(!('upLeft' in raw), '刻意不存 upLeft —— 存了会让这局之后再也不发修行');
+  ok(raw.upNext === T.upNext, `存档里的 upNext 跟着活的走（${raw.upNext}）`);
   const want = T.ups.slice();
   T.restoreGame(raw);
   ok(JSON.stringify(T.ups) === JSON.stringify(want), '续玩把修行卡接回来了');
+  const n0 = T.ups.length;
   T.upStep();
-  ok(T.upLeft === 0, '续玩之后不连环弹面板');
+  ok(T.ups.length === n0, '续玩之后不连环命中');
   // 老存档里的未知 key 要被过滤掉
   T.restoreGame(Object.assign({}, raw, { ups: ['forge', '这张卡已经删了'] }));
   ok(T.ups.length === 1 && T.ups[0] === 'forge', '续玩过滤掉未知的修行 key');
 
-  // ── Esc 必须走 upSkip，不能只是把面板藏起来 ──
+  // ── 随机触发 ──
+  //
+  // 「期望值不变、只是不可预测」这句承诺得量出来，否则改成随机顺手把节奏
+  // 调快调慢了都看不见 —— 整局能拿几张卡直接决定数值强度。
+  const lo = Math.round(T.UP_EVERY * (1 - T.UP_JIT));
+  const hi = Math.round(T.UP_EVERY * (1 + T.UP_JIT));
+  const N = 4000, seen = new Set();
+  let sum = 0, out = 0;
+  for (let i = 0; i < N; i++){
+    T.upRoll(0);
+    const v = T.upNext;
+    seen.add(v); sum += v;
+    if (v < lo || v > hi) out++;
+  }
+  ok(out === 0, `${N} 次掷都落在 [${lo}, ${hi}]（越界 ${out} 次）`);
+  // 真的在随机：常数实现会只有一个取值
+  ok(seen.size > (hi - lo) * .8, `取值铺开了（${seen.size} 种，区间宽 ${hi - lo + 1}）`);
+  const mean = sum / N;
+  ok(Math.abs(mean - T.UP_EVERY) < T.UP_EVERY * .03,
+     `平均间隔 ${mean.toFixed(1)} 行 ≈ UP_EVERY ${T.UP_EVERY}（节奏没被悄悄改）`);
+  // 从 from 往后推，不是从 0 —— 累加式碰上压实那种一次吞好几行会连弹两次
+  T.upRoll(300);
+  ok(T.upNext >= 300 + lo && T.upNext <= 300 + hi,
+     `从当前行数往后推（upRoll(300) → ${T.upNext}）`);
+
+  // ── 如常：这张卡的「正确」是什么都不发生 ──
   T.ups.length = 0;
-  T.upOffer(1);
-  ok(T.game.frozen === true, 'Esc 前：面板开着、方块停住');
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
-  ok(document.getElementById('upSheet').hidden, 'Esc 关掉了面板');
-  ok(T.game.frozen === false && T.upLeft === 0,
-     `Esc 走的是 upSkip 不是直接 hidden（frozen=${T.game.frozen} upLeft=${T.upLeft}）—— 否则整局卡死`);
+  T.heat = 5000;
+  const snap = () => [T.crazyScoreMult(), T.garbagePeriod(), T.heatGain(2), T.modRate(false),
+                      T.chestRate(), T.zoneNeed(), T.delayCost(), T.lockDelay(),
+                      T.rainMult(), T.deepAt(300, false)];
+  const b4 = snap();
+  T.ups.push('plain');
+  const af = snap();
+  ok(b4.every((v, i) => v === af[i]),
+     `如常：${b4.length} 个观测点一个都没动（${b4.map(v=>+v.toFixed(2))} → ${af.map(v=>+v.toFixed(2))}）`);
+  ok(!T.upNever('hold') && !T.upNever('mod'), '如常：不禁 HOLD、不禁变异块');
+  ok(T.rollMod(false) !== undefined, '如常：变异块照常掷');
+  T.ups.length = 0;
+  ok(T.UPS.filter(u => !u.mul && !u.never).length === 1,
+     '表里只有一张空卡 —— 多了就是有卡忘了填 mul');
+
+  // ── 不打断：提示是非阻塞的，梭哈和 ZONE 进行中照发 ──
+  // 原来这三件事要专门防（面板会把整局冻住）。改成提示之后守卫删了，
+  // 这里把「删对了」钉住：不冻方块、不关掉正在进行的窗口。
+  T.restart();
+  T.heat = 5000;
+  T.crazyOnClear(T.BET_OFFER_NEED, null, false);
+  ok(T.betOffer > 0, '梭哈待接');
+  let n1 = T.ups.length;
+  T.game.lines = T.upNext; T.upStep();
+  ok(T.ups.length === n1 + 1, '梭哈待接时照样命中，不推迟');
+  ok(T.betOffer > 0, '而且没有把梭哈窗口挤掉');
+  ok(T.game.frozen !== true, '方块没有被冻住');
+
+  T.restart();
+  T.zoneCharge = T.zoneNeed(); T.step(20);
+  ok(T.zoneLeft > 0, 'ZONE 开着');
+  n1 = T.ups.length;
+  T.game.lines = T.upNext; T.upStep();
+  ok(T.ups.length === n1 + 1, 'ZONE 期间照样命中');
+  ok(T.zoneLeft > 0, '而且 ZONE 没被打断');
 
   // 重开要清空
   document.getElementById('againBtn')?.click();
-  ok(T.ups.length <= 1, `重开后 ups 清空（现在 ${T.ups.length} 张，开局那次刚发）`);
+  ok(T.ups.length === T.UP_FIRST, `重开后只剩开局那次命中的（${T.ups.length} 张）`);
 
   return L;
 }"""
@@ -174,9 +224,11 @@ with sync_playwright() as p:
         if name=='标准版':
             r=pg.evaluate("""() => { const T=__tetris; document.getElementById('startBtn').click();
               const L=[]; const ok=(c,m)=>L.push((c?'PASS ':'FAIL ')+m);
-              ok(document.getElementById('upSheet').hidden, '标准版开局不弹修行面板');
-              T.upOffer(3);
-              ok(document.getElementById('upSheet').hidden, '标准版 upOffer 无效');
+              ok(T.ups.length===0, '标准版开局不发修行');
+              ok(document.getElementById('toast').classList.contains('show')===false,
+                 '标准版开局没有修行提示');
+              T.upOffer(3); T.upHit(); T.game.lines=999; T.upStep();
+              ok(T.ups.length===0, '标准版 upOffer / upHit / upStep 全都不给卡');
               ok(T.upMul('heat')===1 && T.upMul('score')===1, '标准版所有乘数恒为 1');
               ok(T.upNever('hold')===false, '标准版不禁用任何东西');
               return L; }""")

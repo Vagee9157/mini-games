@@ -605,12 +605,21 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
   pointer-events: none;
   opacity: 0;
   /* 原来是 white-space: nowrap 且**没有宽度上限** —— 任何长一点的文案都会
-     横着溢出棋盘跑到画面外。短的本来就不换行，所以放开换行不影响它们。 */
+     横着溢出棋盘跑到画面外。短的本来就不换行，所以放开换行不影响它们。
+
+     width: max-content 不能省。绝对定位 + left:50% 时，shrink-to-fit 的可用宽度
+     只有容器右半边，于是 max-width:92% 根本碰不到 —— 实际上限是 50%，
+     修行那种带描述的长句会被挤成四行窄条。给了 width 之后盒子先取
+     max-content，再由 max-width 收到 92%，translateX(-50%) 照旧居中。 */
+  width: max-content;
   max-width: 92%;
   text-align: center;
   line-height: 1.35;
 }
-.toast.show{ animation: toast 1.1s cubic-bezier(.2,.8,.3,1) forwards; }
+/* 时长必须跟着 showToast 传进来的走。写死 1.1s 的时候，传多长的 ms 都没用 ——
+   JS 那个定时器只负责摘 class，而动画早就 forwards 到 opacity:0 了，
+   «提示挂 3.2 秒» 是句空话。实测 1.5 秒时 opacity 已经是 0。 */
+.toast.show{ animation: toast var(--toast-ms, 1.1s) cubic-bezier(.2,.8,.3,1) forwards; }
 @keyframes toast{
   0%  { opacity: 0; transform: translate(-50%, 10px) scale(.86); }
   18% { opacity: 1; transform: translate(-50%, -4px) scale(1.06); }
@@ -1429,40 +1438,6 @@ body.zoning .board-aura{
    局内那次（每 50 行）弹出时你的堆就在盘面下半部分，盖住了等于
    选完回来丢了对局面的记忆。两行卡片时整个面板 393px、盖住 57~62%。 */
 .ups{ display: flex; flex-direction: column; gap: 7px; margin: 7px 0 2px; }
-.upcard{
-  display: flex; align-items: baseline; gap: 7px;
-  width: 100%; text-align: left;
-  padding: 9px 12px; border-radius: 11px;
-  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.03));
-  border: 1px solid rgba(255,255,255,.14);
-  color: var(--ink); font: inherit; cursor: pointer;
-  transition: transform .12s, border-color .12s, background .12s;
-}
-.upcard:hover, .upcard:focus-visible{
-  border-color: rgba(127,227,255,.6);
-  background: linear-gradient(180deg, rgba(127,227,255,.14), rgba(127,227,255,.05));
-}
-.upcard:active{ transform: translateY(1px); }
-.upcard b{ flex: none; font-size: 15px; color: #7fe3ff; }
-.upcard span{ flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; opacity: .82; }
-/* 血契：有代价的卡要一眼能认出来，不能让人误以为是纯加强 */
-.upcard.vow b{ color: #ff9f6e; }
-.upcard.vow:hover, .upcard.vow:focus-visible{
-  border-color: rgba(255,159,110,.6);
-  background: linear-gradient(180deg, rgba(255,159,110,.14), rgba(255,159,110,.05));
-}
-.upcard em{
-  flex: none; font-style: normal; font-size: 10px;
-  padding: 1px 5px; border-radius: 5px;
-  background: rgba(255,159,110,.2); color: #ffb98f;
-}
-.upsheet .sheet-box{ padding-bottom: 12px; padding-top: 12px; }
-.upsheet .sheet-top{ margin-bottom: 6px; }
-
-/* 「不选」。刻意做成安静的那一个 —— 它是出口不是第四张卡，
-   但也不能藏起来，一上来被必答题拦住是纯摩擦。 */
-.upskip{ width: 100%; margin-top: 8px; padding: 7px; font-size: 12.5px; }
-
 /* 彩虹行指示：棋盘右框外侧的小三角，尖端朝左指那一行。
    用 border 画三角，这样它完全在 canvas 之外，一个格子都挡不到。 */
 .rainmark{

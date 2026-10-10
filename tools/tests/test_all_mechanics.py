@@ -15,16 +15,16 @@ from playwright.sync_api import sync_playwright
 JS = r"""() => {
   const T = __tetris, L = [];
   const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
-  const passUp = () => { const s=document.getElementById('upSheet');
-    if (s && !s.hidden){ const c=document.querySelector('#upList [data-up]'); if (c) T.upTake(c.dataset.up); } };
+  // 开局会自动命中一张修行，每条用例都要从「一张都没挂」开始量，否则
+  // 随机命中的那张会悄悄改掉热度/灰线/得分，断言变成跟着骰子走
   const fresh = () => { document.getElementById('againBtn')?.click();
-                        document.getElementById('startBtn')?.click(); passUp(); T.ups.length = 0; };
+                        document.getElementById('startBtn')?.click(); T.ups.length = 0; };
   const B = () => T.game.board;
   const Z = T.ZONE;
   const clean = () => { const b=B(); for (let y=0;y<b.length;y++) for (let x=0;x<b[0].length;x++) b[y][x]=null; };
   const fillRow = (y, gap) => { const b=B(); for (let x=0;x<b[0].length;x++) b[y][x] = (x===gap?null:'T'); };
 
-  document.getElementById('startBtn').click(); passUp(); T.ups.length = 0;
+  document.getElementById('startBtn').click(); T.ups.length = 0;
   const R = B().length, C = B()[0].length;
 
   // ── 热度 ──
@@ -259,7 +259,7 @@ JS = r"""() => {
 
   // ── 修行 ──
   fresh();
-  ok(T.UPS.length === 12, `修行共 ${T.UPS.length} 张卡`);
+  ok(T.UPS.length === 13, `修行共 ${T.UPS.length} 张卡`);
   ok(T.UPS.filter(u=>u.vow).length === 3, `其中 ${T.UPS.filter(u=>u.vow).length} 张血契`);
   for (const u of T.UPS){
     T.ups.length = 0; T.ups.push(u.k);
@@ -268,6 +268,15 @@ JS = r"""() => {
     // 等于验数据表自洽。把 upMul('rain') 从计算点整条删掉它照样全绿。
     // 真正的覆盖在 test_ups 的「每个 mul 字段都被计算点读到」那条（带探针、
     // 没探针直接判失败）。这里只验「卡声明了点什么」，说清楚免得再被当成行为验证。
+    if (!u.mul && !u.never){
+      // 如常：唯一一张什么都不声明的。它的「对」正好是反过来的 ——
+      // 在**所有**字段上都必须是 1，一个都不能漏。写成全字段扫描是为了
+      // 以后新增字段时它自动纳入，不用记得回来改这里。
+      const all = [...new Set(T.UPS.flatMap(x => Object.keys(x.mul || {})))];
+      const inert = all.every(k => T.upMul(k) === 1) && !T.upNever('hold') && !T.upNever('mod');
+      ok(inert, `修行「${u.n}」在全部 ${all.length} 个字段上都不动，也不禁任何东西`);
+      continue;
+    }
     const changed = u.never ? T.upNever(u.never) : (f ? T.upMul(f) !== 1 : false);
     ok(changed, `修行「${u.n}」声明的字段是活的（行为验证在 test_ups）`);
   }
@@ -368,38 +377,29 @@ JS = r"""() => {
 
   // ── 提示不打架 ──
   fresh();
-  // 开局点「不选」之后，第二次不能还叫「开局修行」（看着像游戏自己重开了）
-  T.upSkip();
-  ok(T.upRound === 1, '开局那次也算发过一次');
-  T.game.lines = T.UP_EVERY + 1; T.upStep();
-  const title = document.getElementById('upTitle').textContent;
-  ok(!/开局/.test(title), `第二次标题不再是「开局修行」（实为「${title}」）`);
-  ok(T.ups.length === 0, '而且这时确实一张都没选');
-  T.upSkip();
+  // 修行改成自动命中之后，这一段验的是「不再有可打断的东西」。
+  // 原来三条用例分别盯着面板在梭哈待接 / 赌局中 / ZONE 期间不弹、结束后补上 ——
+  // 那套守卫随面板一起删了，现在要钉住的是反面：照发，且不碰正在进行的窗口。
+  ok(T.upRound === 1, '开局那次算发过一次');
+  ok(document.querySelector('.sheet:not([hidden])') === null, '开局不打开任何面板');
+  ok(T.game.frozen !== true, '开局不冻住方块');
 
-  // 梭哈进行中不弹修行面板
   fresh(); T.heat = 5000;
   T.crazyOnClear(T.BET_OFFER_NEED, null, false);
   ok(T.betOffer > 0, '梭哈待接');
-  T.game.lines = T.UP_EVERY + 1; T.upStep();
-  ok(document.getElementById('upSheet').hidden, '梭哈待接时不弹修行面板');
+  let n = T.ups.length;
+  T.game.lines = T.upNext; T.upStep();
+  ok(T.ups.length === n + 1 && T.betOffer > 0, '梭哈待接时修行照发，且没挤掉梭哈');
   T.betAccept();
-  T.upStep();
-  ok(document.getElementById('upSheet').hidden, '梭哈进行中也不弹');
-  T.step(T.BET_MS + 500);
-  T.upStep();
-  ok(!document.getElementById('upSheet').hidden, '梭哈结束后补上，不会漏');
-  T.upSkip();
+  n = T.ups.length; T.game.lines = T.upNext; T.upStep();
+  ok(T.ups.length === n + 1 && T.betLeft > 0, '赌局进行中照发，且赌局还在跑');
 
-  // ZONE 的十秒也是在抢时间，同样不该被全屏弹窗拦下
   fresh();
   T.zoneCharge = T.zoneNeed(); T.step(20);
   ok(T.zoneLeft > 0, 'ZONE 开着');
-  T.game.lines = T.UP_EVERY + 1; T.upStep();
-  ok(document.getElementById('upSheet').hidden, 'ZONE 期间不弹修行面板');
-  T.zoneEnd(''); T.upStep();
-  ok(!document.getElementById('upSheet').hidden, 'ZONE 结束后补上');
-  T.upSkip();
+  n = T.ups.length; T.game.lines = T.upNext; T.upStep();
+  ok(T.ups.length === n + 1 && T.zoneLeft > 0, 'ZONE 期间照发，且 ZONE 没被打断');
+  T.zoneEnd('');
 
   // 盘面提示的重叠审计搬到了 test_prompts.py —— 它要等 toast 的渐显动画跑完，
   // 而这个大 JS 块是同步执行的，等不了。

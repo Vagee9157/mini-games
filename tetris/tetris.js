@@ -618,9 +618,7 @@ function saveGame(force){
       upNext,                   // 不存的话续玩会拿 lines 去比默认值，连环弹面板
       zoneCharge,
       delayUsed,
-      // 刻意不存 upLeft：续玩不会开面板，而 upStep 见到 upLeft > 0 就早退 ——
-      // 存了反而会让这局之后再也不发修行。欠的那一次宁可丢掉。
-      // 也不存 zoneLeft：ZONE 是十秒的窗口，隔一次重开再接着倒计时没有意义。
+      // 不存 zoneLeft：ZONE 是十秒的窗口，隔一次重开再接着倒计时没有意义。
       // 盘底那几行死行靠 restoreGame 直接从盘面数出来再结算，见那边。
       at: Date.now(),
     }));
@@ -676,7 +674,7 @@ function restoreGame(d){
   heat = CRAZY ? Math.max(HEAT_FLOOR, +d.heat || 0) : 0;
   // 修行接回来。过滤一遍未知 key —— 老存档里可能有已经删掉的卡。
   ups = CRAZY && Array.isArray(d.ups) ? d.ups.filter(k => UP_BY[k]) : [];
-  upNext = typeof d.upNext === 'number' ? d.upNext : UP_EVERY;
+  if (typeof d.upNext === 'number') upNext = d.upNext; else upRoll(game.lines);
   zoneCharge = CRAZY ? (+d.zoneCharge || 0) : 0;
   delayUsed = !!d.delayUsed;
   // ZONE 的死行：**从盘面数出来**，不信任存档字段。
@@ -1232,12 +1230,14 @@ function helpSections(){
               + '消满 ' + BET_CAP + ' 行直接封顶。'
               + '结算后冷却 ' + (BET_COOL / 1000) + ' 秒' },
       { dot: '⟳', name: '换牌', meta: REROLL_COST + ' 热度', text: '点 NEXT 框，花热度把当前这块换掉' },
-      { dot: '✸', name: '修行', meta: '开局 + 每 ' + UP_EVERY + ' 行',
-        text: '开局给 ' + UP_FIRST + ' 次三选一，之后每打够 ' + UP_EVERY + ' 行再给一次。'
-              + '每次都可以「不选」—— 不选就是这次不要，不攒着。'
-              + '选中的整局有效、不可更换，一共 ' + UPS.length + ' 张卡。'
+      { dot: '✸', name: '修行', meta: '开局 + 平均每 ' + UP_EVERY + ' 行',
+        text: '开局命中 ' + UP_FIRST + ' 张，之后随机触发 —— '
+              + '平均每 ' + UP_EVERY + ' 行一次，但具体哪一行来是掷出来的，等不到也攒不出。'
+              + '**不用你选**：掷中哪张就是哪张，屏幕上会报名字和效果。'
+              + '命中的整局有效、不可更换，一共 ' + UPS.length + ' 张，每张最多中一次。'
               + '其中 ' + UPS.filter(u => u.vow).length + ' 张是血契 —— 有明码标价的代价，'
-              + '不是更强的卡，是换一种打法。同时最多挂两张血契' },
+              + '不是更强的卡，是换一种打法，同时最多挂两张；'
+              + '还有一张「如常」是空的，中了它这次什么都不给' },
       { dot: '◉', name: 'ZONE', meta: '攒 ' + ZONE_NEED + ' 行',
         text: '消够 ' + ZONE_NEED + ' 行就**自动开始**，不用你操作。开启 ' + (ZONE_MS / 1000)
               + ' 秒：重力、灰线、事件三个钟全停，你随便摆。但这期间消掉的行不会消失，'
@@ -2766,14 +2766,19 @@ function tip(text, minGap){
   return true;
 }
 
-function showToast(text){
+// ms 可选。默认 1100 是给「金块」「开箱」这种一眼就懂的短句用的；
+// 修行要连效果一起报，一句带数字的描述读不完 —— 那边自己传时长。
+function showToast(text, ms){
   const el = $('toast');
   el.textContent = text;
   el.classList.remove('show');
   void el.offsetWidth;          // 重置动画
+  // 动画时长也要改，光改定时器没用：keyframes 会 forwards 到 opacity:0，
+  // class 还挂着但人早就看不见了
+  el.style.setProperty('--toast-ms', (ms || 1100) + 'ms');
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 1100);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms || 1100);
 }
 
 function flashLevel(){
@@ -3588,8 +3593,13 @@ function zoneFloor(){
 // 实现上只有一个约定：每张卡声明自己乘在**哪个字段**上，计算点统一读 upMul()。
 // 这样加一张卡不用碰任何计算代码，也不会出现「这张卡改了 A 忘了改 B」。
 const UP_FIRST = 1;              // 开局给几次选择
-const UP_EVERY = 50;             // 之后每多少行再给一次
-const UP_PICK  = 3;              // 每次给几张候选
+const UP_EVERY = 50;             // 之后平均每多少行再给一次（期望值，不是刻度）
+// 随机抖动幅度：真实间隔在 UP_EVERY × (1 ± UP_JIT) 里均匀取。
+// 期望值仍是 UP_EVERY，所以整局能拿到的卡数、以及由此产生的数值强度都不变 ——
+// 变的只是「什么时候来」。原来是 50 / 100 / 150 的整数刻度，打到四十几行
+// 就知道下一张马上到，可以提前攒着不消行去等它。
+const UP_JIT   = .5;
+const UP_SAY_MS = 3200;          // 命中提示挂多久。默认 1.1 秒读不完一句带数字的描述
 
 // mul 里的字段名就是 upMul() 的参数。never 列出的是「这局禁用什么」。
 // 数值标定的依据（2026-10-08 重标）
@@ -3627,6 +3637,13 @@ const UPS = [
   { k:'ice',    n:'薄冰', t:'灰线快 28%，但全局得分 ×1.25', mul:{ garb: .78, score: 1.25 }, vow: true },
   { k:'vow',    n:'断舍', t:'不能用 HOLD，但热度注入 ×2.4',  mul:{ heat: 2.4 }, never: 'hold', vow: true },
   { k:'bare',   n:'孤注', t:'不再出变异块，但全局得分 ×1.3', mul:{ score: 1.3 }, never: 'mod', vow: true },
+  // 如常：没有 mul 也没有 never，所以 upMul() 恒返回 1、upNever() 恒为假。
+  //
+  //
+  // 它是骰子上的空面：掷到它这次什么都不给，照样消耗掉。
+  // 有这一面，「修行命中」才不等于「一定变强」—— 否则这个机制只是
+  // 按固定节奏发的免费增益，掷骰那下毫无悬念。
+  { k:'plain',  n:'如常', t:'什么都不变，这一局按原样打' },
 ];
 const UP_BY = Object.fromEntries(UPS.map(u => [u.k, u]));
 
@@ -3635,8 +3652,14 @@ let ups = [];            // 这局已选的 key
 // 读 ups.length 的话，开局点了「不选」之后第 50 行那次会再标成「开局修行」，
 // 看着就像游戏自己重开了。
 let upRound = 0;
-let upLeft = 0;          // 还欠几次选择
-let upNext = UP_EVERY;   // 下一次给选择的行数
+let upNext = UP_EVERY;   // 下一次给选择的行数，由 upRoll() 掷出来
+
+// 掷下一次的门槛。**从 from 往后推**，不是在上一个门槛上累加 ——
+// 压实、炸弹、激光都能一次吞掉好几行，累加式碰上那种跳跃会把门槛甩在身后，
+// 于是下一块落地时 game.lines 已经越过两个门槛，连着弹两次面板。
+function upRoll(from){
+  upNext = from + Math.max(1, Math.round(UP_EVERY * (1 + (rndFx() * 2 - 1) * UP_JIT)));
+}
 
 // 某个字段的总乘数。没有任何卡命中就是 1，所以计算点写法统一：× upMul('heat')
 function upMul(field){
@@ -3650,69 +3673,43 @@ function upNever(what){
   return false;
 }
 
-// 抽候选：已选过的不再出；血契最多同时挂两张（三张血契的局基本没法玩）
-function upDraw(){
+// 可抽的池子：已经命中过的不再出；血契最多同时挂两张（三张血契的局基本没法玩）
+function upPool(){
   const vows = ups.filter(k => UP_BY[k] && UP_BY[k].vow).length;
-  const pool = UPS.filter(u => !ups.includes(u.k) && !(u.vow && vows >= 2));
-  const out = [];
-  const bag = pool.slice();
-  while (out.length < UP_PICK && bag.length){
-    out.push(bag.splice((rndFx() * bag.length) | 0, 1)[0]);
-  }
-  return out;
+  return UPS.filter(u => !ups.includes(u.k) && !(u.vow && vows >= 2));
 }
 
+// 修行命中。不弹面板让人选，直接掷一张用上，再在屏幕上报一下。
+//
+// 三选一那套的张力其实很薄：面板真正做的事是把整局停住、让人读三段字，
+// 而十几张里多数时候有一张明显更好，所谓「选择」是在确认一个已经确定的答案。
+// 直接命中之后悬念还在（掷到什么事先不知道），停顿没了 —— 跟整套机制
+// 「除了梭哈，其他尽可能自动触发」是同一条。
+//
+// 面板没了，为面板服务的那一串状态也一起没了：选的时候要冻住方块、
+// 关面板要按特定顺序复位否则整局卡死、梭哈和 ZONE 进行中得推迟发牌。
+// 提示是非阻塞的，不打断任何东西，所以这三件事都不用再防。
 function upOffer(n){
   if (!CRAZY) return;
-  upLeft += n;
-  if (upLeft > 0 && $('upSheet') && $('upSheet').hidden) upOpen();
+  for (let i = 0; i < n; i++) upHit();
 }
 
-function upOpen(){
-  const sheet = $('upSheet'), list = $('upList');
-  if (!sheet || !list) return;
-  const cards = upDraw();
-  if (!cards.length){ upLeft = 0; return; }     // 池子抽干了就不再打扰
+function upHit(){
+  // 自己守 CRAZY，不靠 upOffer 挡 —— 标准版承诺「什么都没加」，
+  // 而这是个能从外面直接调到的入口。
+  if (!CRAZY) return;
+  const pool = upPool();
+  if (!pool.length) return;              // 抽干了就不再打扰
+  const u = pool[(rndFx() * pool.length) | 0];
   upRound++;
-  // 单行排版：名字和描述同一行。
-  // 原来是两行卡片，整个面板 393px，在 iPhone 上盖住盘面的 57~62% ——
-  // 而那正好是堆所在的下半部分，选完回来等于丢了对局面的记忆。
-  list.innerHTML = cards.map(u =>
-    '<button class="upcard' + (u.vow ? ' vow' : '') + '" type="button" data-up="' + u.k + '">'
-    + '<b>' + u.n + '</b>' + (u.vow ? '<em>血契</em>' : '')
-    + '<span>' + u.t + '</span></button>').join('');
-  $('upTitle').textContent = upRound > 1 ? '修行　第 ' + upRound + ' 次' : '开局修行';
-  const sk = $('upSkip');
-  if (sk) sk.textContent = ups.length ? '这次不选' : '不选，直接开';
-  sheet.hidden = false;
-  game.frozen = true;          // 选的时候方块别接着掉
-}
-
-// 不选。开局那次尤其要有这个口子 —— 一上来就被一个必答题拦住，
-// 对「我只想马上开一局」的时候是纯粹的摩擦。跳过就是这次不要，不攒着。
-function upSkip(){
-  if (upLeft <= 0) return;
-  upLeft--;
-  $('upSheet').hidden = true;
-  game.frozen = false;
-  if (upLeft > 0) upOpen(); else resumeLoop();
-}
-
-function upTake(k){
-  const u = UP_BY[k];
-  if (!u || ups.includes(k)) return;
-  ups.push(k);
-  upLeft--;
-  $('upSheet').hidden = true;
-  game.frozen = false;
+  ups.push(u.k);
   if (game.run) game.run.ups = ups.slice();
-  // 只报名字。把整段描述塞进 toast 会折成三行，而面板刚刚才显示过同样的文字 ——
-  // 这也是 .toast 没有宽度上限那个老毛病最早暴露出来的地方
-  showToast('修行　' + u.n);
+  // 名字 + 效果一起报。没有面板了，这是玩家唯一一次看到这张卡写了什么，
+  // 所以描述必须进提示，时长也得给够。
+  showToast('修行　' + u.n + (u.vow ? '（血契）' : '') + '　' + u.t, UP_SAY_MS);
   sfx('tetris', 1.1); buzz([35, 20, 35]);
   // 立刻生效的那几张要刷一下 UI
   heatQuant = -1; syncHeat(); syncEdge(); syncFx(); syncHud();
-  if (upLeft > 0) upOpen(); else resumeLoop();
 }
 
 // 攒够就自己开，不再等玩家按按钮。
@@ -3725,13 +3722,8 @@ function zoneAuto(){
 }
 
 function upStep(){
-  if (!CRAZY || upLeft > 0) return;
-  // 限时窗口进行中不打断。面板会把整局冻住 —— 计时也跟着冻、不会判你输，
-  // 但「正抢着摆方块时被一个全屏弹窗拦下」本身就是打断。
-  // 等它结束再发，upNext 已经推过了，不会漏。
-  if (betOffer > 0 || betLeft > 0) return;   // 梭哈待接 / 赌局进行中
-  if (zoneLeft > 0) return;                  // ZONE 的十秒也是在抢时间
-  if (game.lines >= upNext){ upNext += UP_EVERY; upOffer(1); }
+  if (!CRAZY) return;
+  if (game.lines >= upNext){ upRoll(game.lines); upOffer(1); }
 }
 
 function zoneReady(){
@@ -3962,8 +3954,7 @@ function crazyReset(){
   actKind = ''; actLast = ''; zoneTold = false;
   for (const k of Object.keys(actSeen)) delete actSeen[k];
   zoneCharge = 0; zoneLeft = 0; zoneRows = 0; zoneFull = false;
-  ups = []; upLeft = 0; upNext = UP_EVERY; upRound = 0;
-  if ($('upSheet')) $('upSheet').hidden = true;
+  ups = []; upRound = 0; upRoll(0);
   document.body.classList.remove('zoning');
   burnLeft = 0; burnHist.length = 0; burnT = 0; burnClock = 0;
   document.body.classList.remove('burning');
@@ -5697,7 +5688,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['upSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -5712,10 +5703,7 @@ window.addEventListener('keydown', (e) => {
   if (sheet){
     // Esc 关掉它，其它键一律吞掉
     if (act === 'pause'){
-      // 修行面板必须走 upSkip：直接 hidden = true 会把 upLeft 和 game.frozen
-      // 留在原地，整局就卡死在「方块不往下掉、也没有面板可点」。
-      if (sheet.id === 'upSheet') upSkip();
-      else if (sheet.id === 'styleSheet') toggleStylePanel(false);
+      if (sheet.id === 'styleSheet') toggleStylePanel(false);
       else sheet.hidden = true;
     }
     return;
@@ -6040,8 +6028,8 @@ function restart(){
   if (game.rush) showRushIntro();     // 报幕结束时才 spawnNext
   else spawnNext();
   syncHud();
-  // 开局修行放在最后：它会把 game.frozen 置上，所以必须等盘面、队列、报幕
-  // 都铺好再开，否则关掉面板之后看到的是个半成品
+  // 开局修行仍放在最后：它会发提示、还会 syncHeat/syncEdge/syncFx/syncHud，
+  // 得等盘面、队列、报幕都铺好，否则刷的是个半成品
   if (CRAZY) upOffer(UP_FIRST);
   lastFrame = performance.now();
   cancelAnimationFrame(rafId);
@@ -6173,14 +6161,6 @@ function init(){
   // 必须包一层：addEventListener 会把 Event 当第一个参数传进去，
   $('startBtn').addEventListener('click', () => restart());
   $('againBtn').addEventListener('click', () => restart());
-  // 修行卡。委托到容器上 —— 卡片是 innerHTML 重建的，挂不住监听器
-  const ul = $('upList');
-  if (ul) ul.addEventListener('click', (e) => {
-    const c = e.target.closest('[data-up]');
-    if (c) upTake(c.dataset.up);
-  });
-  const usk = $('upSkip');
-  if (usk) usk.addEventListener('click', () => upSkip());
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
   const openHelpSheet = () => openHelp();
@@ -6343,8 +6323,8 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   rerollPiece, canReroll, REROLL_COST, topSheet,
   swapTap, doSwap, canSwap, SWAP_COST, get swapSel(){ return swapSel; },
   crazyStep,
-  UPS, UP_BY, UP_FIRST, UP_EVERY, UP_PICK, upMul, upNever, upDraw, upOffer, upOpen, upTake, upSkip, upStep, zoneNeed,
-  get ups(){ return ups; }, get upRound(){ return upRound; }, get upLeft(){ return upLeft; },
+  UPS, UP_BY, UP_FIRST, UP_EVERY, UP_JIT, UP_SAY_MS, upRoll, get upNext(){ return upNext; }, upMul, upNever, upPool, upHit, upOffer, upStep, zoneNeed,
+  get ups(){ return ups; }, get upRound(){ return upRound; },
   ZONE_EDGE, zoneReady, zoneStart, zoneEnd, zoneStep, zoneFloor, fxAct, applyClear, lockPiece, ZONE_NEED, ZONE_MS, ZONE_MAX, ZONE_UNIT, ZONE_CURVE, ZONE_EG, ZONE,
   get zoneCharge(){ return zoneCharge; }, set zoneCharge(v){ zoneCharge = v; },
   get zoneLeft(){ return zoneLeft; }, get zoneRows(){ return zoneRows; },
