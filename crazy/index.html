@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=cb84d2e5">
+<link rel="stylesheet" href="../tetris/tetris.css?v=dce50d49">
 </head>
 <body>
 <div class="topline"></div>
@@ -80,6 +80,8 @@
             <button class="helplink" id="helpLink" type="button" hidden>玩法说明</button>
             <button class="pbtn" id="resumeSaveBtn" data-save>接着上次玩 · <b id="resumeScore">0</b></button>
             <button class="pbtn" id="startBtn">开始</button>
+            <!-- 练习：不涨灰线、不记成绩、能撤销能指定出块。
+                 疯狂版用不上（它的分数靠机制叠，练手型没意义），bump.py 会把它删掉。 -->
           </div>
 
           <div data-when="pause">
@@ -185,6 +187,7 @@
 
     <!-- 按键区：一排四个。落底比旁边三个小一圈、贴着格子下沿，
          四周留出死区 —— 它是这里唯一不可撤销的操作，不该和别的键一样好按。 -->
+
     <div class="pads">
       <div class="pad-g pad-l">
         <button class="k" id="btnLeft"  aria-label="左移"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.8 7 9.4 12l5.4 5z"/></svg><em>左移</em></button>
@@ -246,7 +249,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=b7454852"></script>
+<script src="../tetris/tetris.js?v=ebf1a841"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

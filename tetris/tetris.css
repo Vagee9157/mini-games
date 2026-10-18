@@ -1493,3 +1493,42 @@ body.flashing .toast{ top: 38%; }
   .side{ gap: 5px; }
   .side .stats{ gap: 3px; }
 }
+
+
+/* ── 练习模式 ──
+   只在 body.practising 下出现。正常局里 #prBar 带 hidden，一格都不占。 */
+.prbar{ display: none; }
+body.practising .prbar{
+  display: flex; flex-direction: column; gap: 7px;
+  margin: 8px 0 2px; padding: 10px 12px;
+  background: rgba(255,255,255,.045);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+}
+.pr-head{ display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pr-head b{ font-size: 14px; color: #7fe3ff; }
+.pr-x{
+  font: inherit; font-size: 11.5px; color: var(--ink); opacity: .62;
+  background: none; border: 0; padding: 2px 4px; cursor: pointer;
+}
+.pr-tip{ margin: 0; font-size: 11.5px; line-height: 1.5; opacity: .72; }
+.pr-levels, .pr-pieces{ display: flex; flex-wrap: wrap; gap: 6px; }
+.pr-levels button, .pr-pieces button, .pr-b{
+  font: inherit; font-size: 12px; line-height: 1;
+  padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  color: var(--ink);
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.14);
+}
+.pr-levels button.on{
+  border-color: rgba(127,227,255,.65);
+  background: linear-gradient(180deg, rgba(127,227,255,.16), rgba(127,227,255,.05));
+  color: #7fe3ff;
+}
+.pr-pieces button{ min-width: 34px; font-weight: 600; font-family: var(--mono, monospace); }
+.pr-row{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pr-lb{ font-size: 11.5px; opacity: .6; flex: none; }
+.pr-b{ flex: 1; min-width: 92px; text-align: center; }
+.pr-b:disabled{ opacity: .38; cursor: default; }
+/* 练习局不该让人以为在冲分 —— 把分数那格压暗 */
+body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }

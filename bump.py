@@ -45,6 +45,12 @@ def gen_crazy():
     t = t.replace('<h2>俄罗斯<span class="neon">方块</span></h2>',
                   '<h2>疯狂<span class="warn">方块</span></h2>')
     t = t.replace('href="../assets/icons/icon-180.png"', 'href="../assets/icons/crazy-180.png"')
+    # 标准版专属节点（练习入口）。疯狂版的分数靠机制叠，练手型没意义，
+    # 而且练习要关灰线、不记成绩，和疯狂版那一整套记账是冲突的。
+    t = re.sub(r'\n?[^\n]*<!-- std-only:start -->.*?<!-- std-only:end -->', '', t, flags=re.S)
+    t = re.sub(r'\n?\s*<button[^>]*\sdata-std-only[^>]*>.*?</button>', '', t, flags=re.S)
+    for mark in ('data-std-only', 'std-only:start', 'id="prBar"'):
+        assert mark not in t, f'标准版专属节点没删干净: {mark}'
     os.makedirs(os.path.join(ROOT, 'crazy'), exist_ok=True)
     p = os.path.join(ROOT, 'crazy/index.html')
     old = io.open(p, encoding='utf-8').read() if os.path.exists(p) else ''
