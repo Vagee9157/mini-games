@@ -921,6 +921,11 @@ function hardDrop(){
     while (trails.length > TRAIL_MAX) trails.shift();
   }
   p.y += d;
+  // 落了格就不再算「最后一步是旋转」。原来不清：半空转一下、硬降 19 格落进一个
+  // 三角都被挡的坑，实测被判成 mini T-spin。Guideline 要求的是最后一个**成功的动作**
+  // 是旋转，19 格下落就是一次位移。
+  // 但 d = 0 必须保留 —— 贴地转进槽、再按落底锁定，正是手机上做 T 旋的操作链。
+  if (d > 0) game.lastWasRot = false;
   game.score += d * 2;
   needsDraw = true;
   burst(p, 1.4);
@@ -976,8 +981,11 @@ function touchGround(fromAction){
 //   ② 不写任何记录（最高分、累计、今日、狂欢局保底计数全部跳过）
 //   ③ 不存档（练习盘面续回来没有意义，而且会污染「接着上次玩」）
 let practice = false;
-let practiceGoal = null;     // { spin, n, name } —— 这一关要做出什么
+let practiceLevel = null;    // 当前这一关（LEVELS 里的对象）；null = 自由练习
+let practiceStep = 0;        // 多步关卡做到第几步了
 let practiceDone = false;
+let demoRunning = false;     // 正在放演示：重力和锁定计时都停，玩家输入也先挡掉
+let lastClearB2B = false;    // scoreFor 写，practiceCheck 读 —— 判「这一下 B2B 有没有接上」
 let undoStack = [];          // 每次锁定前压一份快照
 const UNDO_MAX = 20;
 
@@ -987,72 +995,138 @@ function snapForUndo(){
     board: game.board.map(r => r.slice()),
     score: game.score, lines: game.lines, level: game.level,
     combo: game.combo, b2b: game.b2b,
-    queue: game.queue.slice(), bag: game.bag.slice(),
+    queue: game.queue.slice(), mods: game.mods.slice(), bag: game.bag.slice(),
     hold: game.hold, holdUsed: game.holdUsed, pieces: game.pieces,
-    done: practiceDone,
+    // 当前这块也要存 —— 撤销是「回到这块落下之前」，不是「换一块新的」
+    piece: game.piece ? game.piece.type : null,
+    done: practiceDone, step: practiceStep,
   });
   if (undoStack.length > UNDO_MAX) undoStack.shift();
 }
 
 function practiceUndo(){
-  if (!practice || !undoStack.length) return;
+  if (!practice || demoRunning || !undoStack.length) return;
   const u = undoStack.pop();
   game.board = u.board; game.score = u.score; game.lines = u.lines;
   game.level = u.level; game.combo = u.combo; game.b2b = u.b2b;
-  game.queue = u.queue.slice(); game.bag = u.bag.slice();
+  game.queue = u.queue.slice(); game.mods = u.mods.slice(); game.bag = u.bag.slice();
   game.hold = u.hold; game.holdUsed = u.holdUsed; game.pieces = u.pieces;
-  practiceDone = u.done;
+  practiceDone = u.done; practiceStep = u.step;
   clearing = null; game.over = false;
   $('overlay').classList.remove('show');
+  // 把刚才那块放回队头再出，于是撤销之后拿到的还是同一块
+  if (u.piece){ game.queue.unshift(u.piece); game.mods.unshift(null); }
+  game.piece = null;
   spawnNext();
   staticDirty = true; previewDirty = true; needsDraw = true;
   syncHud(); syncPractice();
   if (!rafId){ lastFrame = performance.now(); rafId = requestAnimationFrame(tick); }
 }
 
-// 指定下一块。塞到队头，不动 bag —— bag 继续按 7-bag 走，
-// 所以「指定」是插队不是替换，不会把随机性搞坏。
 // ── 训练关卡 ──
 //
-// 盘面按「最底下一行写在最后」铺，# 实心 . 空。只写用到的那几行，
-// 其余自动留空。goal 是这一关要做出来的消除，达成就判过。
+// 盘面按「最底下一行写在最后」铺，# 实心 . 空，只写用到的那几行。
+// queue 是这一关固定的出块顺序（用完之后接回正常的 7-bag）。
+// goals 是**有序**的：第一步做出 goals[0]，第二步做出 goals[1] …… 全做到才算过。
+// 只有消行会被拿去比对；搭形状那几块（比如先放个 O 做屋檐）不消行，不占一步。
 //
-// 每一关的 solution 不是我画出来的 —— tools/tests/test_practice.py 会把
-// 所有可达的 (列, 朝向) 穷举一遍，确认目标真的做得出来，做不出来就红。
+// solution 是每一块的操作串，「看演示」照着放，test_practice.py 照着回放 ——
+// 回放做不出目标就红。所以这里每一关都是**被证明做得出来**的，不是我画出来的。
+//   L/R 左右  d 软降一格  C 顺时针  A 逆时针  H 落底（硬降）  X 暂存
+//   字母后面跟数字 = 重复几次，比如 R3 = 右移三格
+// 解法都只用顺时针 —— 手机上只有那一个旋转键，演示里出现逆时针等于教了个按不出来的操作。
 const LEVELS = [
-  { k:'tss', n:'T-spin 单', goal:{ spin:'tspin', n:1 },
-    tip:'T 在槽上方竖着落下，贴地之后再转进去 —— 单行吃到 ' +
+  // ─ 单招：一块定生死，学「这个形状怎么转进去」─
+  { k:'tss', n:'T-spin 单', group:'single', queue:['T'],
+    goals:[{ spin:'tspin', n:1 }],
+    tip:'T 在槽口上方竖着软降下去，贴地之后再转进去 —— 单行吃到 ' +
         [400,800,1200,1600][1] + ' 分，是普通单行的八倍',
-    rows:['........#.',
-          '.#####...#',
-          '#######.##'] },
-  { k:'tsd', n:'T-spin 双', goal:{ spin:'tspin', n:2 },
+    rows:['.#........',
+          '#...#####.',
+          '##.#######'],
+    solution:['CL2d19CH'] },
+  { k:'tsd', n:'T-spin 双', group:'single', queue:['T'],
+    goals:[{ spin:'tspin', n:2 }],
     tip:'本作分数效率最高的一招：接上 B2B 是每行 900 分，四消才 300',
-    rows:['........#.',
-          '######...#',
-          '#######.##'] },
-  { k:'tetris', n:'四消井', goal:{ n:4 },
+    rows:['.#........',
+          '#...######',
+          '##.#######'],
+    solution:['CL2d19CH'] },
+  { k:'tetris', n:'四消井', group:'single', queue:['I'],
+    goals:[{ n:4 }],
     tip:'九列铺平、留一列井，等 I 块。每行 200 分，接上 B2B 是 300',
     rows:['#########.',
           '#########.',
           '#########.',
-          '#########.'] },
-  { k:'pc', n:'全消', goal:{ perfect:true },
+          '#########.'],
+    solution:['CR4d18H'] },
+  { k:'pc', n:'全消', group:'single', queue:['O'],
+    goals:[{ perfect:true }],
     tip:'把盘面清空。全消按行数给 800~2000，还要再乘等级倍率',
     rows:['########..',
-          '########..'] },
+          '########..'],
+    solution:['R4d20H'] },
+
+  // ─ 组合：几块连起来，学「搭 → 旋 → 接下一招」，以及怎么不断 B2B ─
+  { k:'eave', n:'搭屋檐 → T 双', group:'combo', queue:['O','T'],
+    goals:[{ spin:'tspin', n:2 }],
+    tip:'槽是现成的，缺的是头顶那块屋檐。先把 O 放到左边盖住槽口一角，' +
+        'T 就只能转进去 —— 这就是「搭 TSD」的全部诀窍',
+    rows:['#...######',
+          '##.#######'],
+    solution:['L4d18H', 'CL2d19CH'] },
+  { k:'tsd4', n:'T 双 → 四消', group:'combo', queue:['T','I'],
+    goals:[{ spin:'tspin', n:2 }, { n:4, b2b:true }],
+    tip:'左边那口井被上面两行封着。先 T 旋把那两行消掉，井口自己就开了，' +
+        '再下 I 打四消 —— 两招都是「难消」，B2B 不断，四消多拿五成',
+    rows:['.#........',
+          '#...######',
+          '##.#######',
+          '.#########',
+          '.#########',
+          '.#########',
+          '.#########'],
+    solution:['CL2d15CH', 'CL5d18H'] },
+  { k:'tsd2', n:'T 双 × 2', group:'combo', queue:['T','T'],
+    goals:[{ spin:'tspin', n:2 }, { spin:'tspin', n:2, b2b:true }],
+    tip:'上下两个 TSD 槽。先打上面那个，下面那个的屋檐才露出来；' +
+        '第二下接上 B2B，单这一下就是 ' + Math.floor(1200 * 1.5) + ' 分',
+    rows:['.#........',
+          '#...######',
+          '##.#######',
+          '##..######',
+          '.#..######',
+          '#...######',
+          '##.#######'],
+    solution:['CL2d15CH', 'CL2d19CH'] },
 ];
 // T-spin 三没收进来：它要求前四次踢墙全部失败、第五次 (+1,+2) 才把 T 甩进深槽，
 // 而那两个条件互相打架 —— 起手位要求槽上方那一行空着，可那样第二次踢墙就先成功了。
 // 穷举过槽上方一整行的 64 种填法，一种都不成立。与其塞个没验证过的盘面，不如先不要。
 const LEVEL_BY = Object.fromEntries(LEVELS.map(l => [l.k, l]));
 
+const SPIN_NAME = ['', '单', '双', '三'];
+function goalName(g){
+  let t = g.perfect ? '全消'
+        : g.spin === 'tspin' ? 'T-spin ' + (SPIN_NAME[g.n] || g.n)
+        : g.spin === 'mini' ? 'mini T-spin'
+        : g.n === 4 ? '四消' : g.n + ' 行';
+  if (g.b2b) t += '（接 B2B）';
+  return t;
+}
+function clearName(n, spin, perfect){
+  if (perfect) return '全消';
+  if (spin === 'tspin') return 'T-spin ' + (SPIN_NAME[n] || n);
+  if (spin === 'mini') return 'mini T-spin';
+  return ['空转', '单行', '双行', '三行', '四消'][n] || n + ' 行';
+}
+
 function practiceLoad(k){
   const lv = LEVEL_BY[k];
   if (!practice || !lv) return;
+  demoRunning = false;
   undoStack.length = 0;
-  practiceGoal = Object.assign({ name: lv.n }, lv.goal);
-  practiceDone = false;
+  practiceLevel = lv; practiceStep = 0; practiceDone = false;
   for (let y = 0; y < TOTAL_ROWS; y++) game.board[y].fill(null);
   // 底对齐：最后一行贴盘底
   lv.rows.forEach((row, i) => {
@@ -1061,7 +1135,10 @@ function practiceLoad(k){
   });
   game.combo = -1; game.b2b = false;
   game.hold = null; game.holdUsed = false;
-  clearing = null; game.over = false;
+  // 固定出块顺序排在最前，后面接回正常的 bag
+  game.queue = lv.queue.slice(); game.mods = lv.queue.map(() => null);
+  game.bag = [];
+  clearing = null; game.over = false; softDropping = false;
   $('overlay').classList.remove('show');
   game.piece = null; spawnNext();
   staticDirty = true; previewDirty = true; needsDraw = true;
@@ -1069,22 +1146,113 @@ function practiceLoad(k){
   if (!rafId){ lastFrame = performance.now(); rafId = requestAnimationFrame(tick); }
 }
 
-// 达成判定。goal 里写了哪几项就比哪几项 —— 四消关只看行数，
-// 全消关只看 perfect，T-spin 关两样都看。
+// 达成判定。goal 里写了哪几项就比哪几项。多步关卡只比「当前这一步」。
+// 没对上不算失败也不重置 —— 练习就是要能撤销一步接着来，只提示一句差在哪。
 function practiceCheck(n, spin, perfect){
-  if (!practice || !practiceGoal || practiceDone) return;
-  const g = practiceGoal;
-  if (g.spin !== undefined && spin !== g.spin) return;
-  if (g.n !== undefined && n !== g.n) return;
-  if (g.perfect !== undefined && !!perfect !== g.perfect) return;
-  practiceDone = true;
-  showToast('✓ ' + g.name + '　做到了', 2600);
-  sfx('tetris', 1.25); buzz([40, 30, 40, 30, 90]);
+  if (!practice || !practiceLevel || practiceDone) return;
+  const goals = practiceLevel.goals;
+  const g = goals[practiceStep];
+  const hit = (g.spin === undefined || spin === g.spin)
+           && (g.n === undefined || n === g.n)
+           && (g.perfect === undefined || !!perfect === g.perfect)
+           && (g.b2b === undefined || lastClearB2B === g.b2b);
+  if (!hit){
+    if (!demoRunning)
+      showToast('这一下是' + clearName(n, spin, perfect) + (lastClearB2B ? '（B2B）' : '')
+                + '，要的是' + goalName(g) + ' —— 撤销一步再来', 2800);
+    return;
+  }
+  practiceStep++;
+  if (practiceStep >= goals.length){
+    practiceDone = true;
+    if (!demoRunning){
+      showToast('✓ ' + practiceLevel.n + '　做到了', 2600);
+      sfx('tetris', 1.25); buzz([40, 30, 40, 30, 90]);
+    }
+  } else if (!demoRunning){
+    showToast('第 ' + practiceStep + ' 步 ✓　接着：' + goalName(goals[practiceStep]), 2400);
+    sfx('tspin', 1.1);
+  }
   syncPractice();
 }
 
+// ── 解法回放 ──
+function parseActs(str){
+  const out = [];
+  const re = /([LRdCAHX])(\d*)/g;
+  let m;
+  while ((m = re.exec(str))){
+    const n = m[2] ? +m[2] : 1;
+    for (let i = 0; i < n; i++) out.push(m[1]);
+  }
+  return out;
+}
+function doAct(a){
+  switch (a){
+    case 'L': return tryMove(-1, 0);
+    case 'R': return tryMove(1, 0);
+    // 软降一格：和按住软降键一样每格 +1 分、清掉「最后一步是旋转」
+    case 'd': if (tryMove(0, 1)){ game.score++; return true; } return false;
+    case 'C': return tryRotate(1);
+    case 'A': return tryRotate(-1);
+    case 'H': hardDrop(); return true;
+    case 'X': holdPiece(); return true;
+  }
+  return false;
+}
+
+// 同步跑完一关的解法，返回过没过。测试用 —— 不走定时器，消行动画用 step() 推过去。
+function practiceSolve(k){
+  const lv = LEVEL_BY[k];
+  if (!lv) return false;
+  practiceLoad(k);
+  demoRunning = true;
+  for (const seg of lv.solution){
+    let g = 0;
+    while ((clearing || !game.piece) && g++ < 400) step(16);
+    for (const a of parseActs(seg)) doAct(a);
+  }
+  let g = 0;
+  while (clearing && g++ < 400) step(16);
+  demoRunning = false;
+  syncPractice();
+  return practiceDone;
+}
+
+// 看演示：重摆本关，然后一个动作一个动作地放给你看。
+// 放的时候重力和锁定计时都停 —— 否则 1 级重力一秒掉一格，演示到一半位置就偏了，
+// 照着那条路径转出来的东西会和解法对不上。
+function practiceDemo(){
+  if (!practice || !practiceLevel || !practiceLevel.solution.length) return;
+  const lv = practiceLevel;
+  practiceLoad(lv.k);
+  demoRunning = true;
+  syncPractice();
+  const segs = lv.solution.slice();
+  let acts = [];
+  const run = () => {
+    if (!practice || !demoRunning || practiceLevel !== lv) return;
+    if (clearing || !game.piece) return void setTimeout(run, 60);
+    if (!acts.length){
+      if (!segs.length){
+        demoRunning = false;
+        showToast('演示完了 —— 点「重摆本关」自己来一遍', 2800);
+        syncPractice();
+        return;
+      }
+      acts = parseActs(segs.shift());
+    }
+    doAct(acts.shift());
+    needsDraw = true;
+    setTimeout(run, acts.length ? 140 : 320);   // 每块最后那下落底多停一拍，看清落在哪
+  };
+  setTimeout(run, 500);
+}
+
+// 指定下一块。塞到队头，不动 bag —— bag 继续按 7-bag 走，
+// 所以「指定」是插队不是替换，不会把随机性搞坏。
 function practicePick(type){
-  if (!practice || !PIECES[type]) return;
+  if (!practice || demoRunning || !PIECES[type]) return;
   game.queue.unshift(type);
   game.mods.unshift(null);
   // 当前这块直接换掉，否则要等落完才生效，手感像没反应。
@@ -1100,21 +1268,45 @@ function practicePick(type){
 
 function syncPractice(){
   document.body.classList.toggle('practising', practice);
+  document.body.classList.toggle('demoing', practice && demoRunning);
   if (!practice) return;
+  const lv = practiceLevel;
   const g = $('prGoal');
-  if (g) g.textContent = practiceGoal
-    ? (practiceDone ? '✓ ' + practiceGoal.name : '目标　' + practiceGoal.name)
-    : '自由练习';
-  const t = $('prTip');
-  if (t){
-    const lv = LEVELS.find(l => practiceGoal && l.n === practiceGoal.name);
-    t.textContent = lv ? lv.tip : '随便摆，不涨灰线、不记成绩';
+  if (g){
+    if (!lv) g.textContent = '自由练习';
+    else if (practiceDone) g.textContent = '✓ ' + lv.n;
+    else if (lv.goals.length > 1)
+      g.textContent = '第 ' + (practiceStep + 1) + '/' + lv.goals.length + ' 步　' + goalName(lv.goals[practiceStep]);
+    else g.textContent = '目标　' + goalName(lv.goals[0]);
   }
+  const t = $('prTip');
+  if (t) t.textContent = demoRunning ? '演示中 —— 看它先把块送到哪、在哪一刻转'
+                       : lv ? lv.tip : '随便摆，不涨灰线、不记成绩';
   const u = $('prUndo');
-  if (u) u.disabled = !undoStack.length;
+  if (u) u.disabled = demoRunning || !undoStack.length;
+  const d = $('prDemo');
+  if (d){ d.disabled = demoRunning || !lv || !lv.solution.length;
+          d.textContent = demoRunning ? '演示中' : '演示'; }
+  const rs = $('prReset');
+  if (rs) rs.disabled = !lv;
   for (const b of document.querySelectorAll('#prLevels [data-lv]'))
-    b.classList.toggle('on', !!practiceGoal && LEVEL_BY[b.dataset.lv]
-                            && LEVEL_BY[b.dataset.lv].n === practiceGoal.name);
+    b.classList.toggle('on', !!lv && b.dataset.lv === lv.k);
+}
+
+// 练习弹层。开着时方块停住（和样式面板同一个开关 game.frozen），关掉再接着走。
+function openPrSheet(){
+  const sh = $('prSheet');
+  if (!practice || !sh) return;
+  sh.hidden = false;
+  game.frozen = true;
+  syncPractice();
+}
+function closePrSheet(){
+  const sh = $('prSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  game.frozen = false;
+  resumeLoop();
 }
 
 // 进练习：先按正常开局把一切铺好，再把模式标志挂上并关掉灰线。
@@ -1125,7 +1317,7 @@ function startPractice(){
   practice = true;                  // restart 不碰它，这行是防御，别指望
   game.noGarbage = true;
   undoStack.length = 0;
-  practiceGoal = null; practiceDone = false;
+  practiceLevel = null; practiceStep = 0; practiceDone = false; demoRunning = false;
   syncPractice();
 }
 
@@ -1134,7 +1326,7 @@ function exitPractice(){
   // restart 不碰 noGarbage（那是 game 对象上的字段，newGame 才铺），
   // 不显式收掉的话退出练习之后这一局永远不涨灰线
   game.noGarbage = false;
-  practiceGoal = null; practiceDone = false;
+  practiceLevel = null; practiceStep = 0; practiceDone = false; demoRunning = false;
   undoStack.length = 0;
   syncPractice();
   restart();
@@ -1665,6 +1857,7 @@ function scoreFor(n, spin, perfect){
   const isHard = n > 0 && (n === 4 || spin);
   if (n > 0){
     if (isHard && game.b2b){ base = Math.floor(base * 1.5); label = 'B2B ' + label; b2bApplied = true; }
+    lastClearB2B = b2bApplied;
     game.b2b = isHard;
     game.combo++;
     if (game.combo > 0){
@@ -5770,7 +5963,7 @@ function stepOnce(dt){
     const speed = softDropping ? g / SOFT_DROP_FACTOR : g;
     // ZONE 期间重力停 —— 手动软降/硬降照常，所以限制你的是摆放速度不是重力。
     // 这是 ZONE 和 FEVER 手感不同的根源：FEVER 是被动吃倍率，ZONE 是主动抢时间。
-    if (zoneLeft > 0) dropTimer = 0; else dropTimer += dt;
+    if (zoneLeft > 0 || demoRunning) dropTimer = 0; else dropTimer += dt;
     while (zoneLeft <= 0 && dropTimer >= speed){
       dropTimer -= speed;
       if (!collides(game.piece.type, game.piece.x, game.piece.y + 1, game.piece.rot)){
@@ -5782,7 +5975,7 @@ function stepOnce(dt){
     }
     touchGround(false);
     if (grounded){
-      lockTimer += dt;
+      if (!demoRunning) lockTimer += dt;
       const phase = Math.min(4, (lockTimer / lockDelay() * 5) | 0);
       if (phase !== lockStep){ lockStep = phase; needsDraw = true; }
       if (lockTimer >= lockDelay()) lockPiece();
@@ -5913,7 +6106,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -5929,10 +6122,13 @@ window.addEventListener('keydown', (e) => {
     // Esc 关掉它，其它键一律吞掉
     if (act === 'pause'){
       if (sheet.id === 'styleSheet') toggleStylePanel(false);
+      // 练习弹层把 game.frozen 置上了，直接 hidden 的话方块永远不再掉
+      else if (sheet.id === 'prSheet') closePrSheet();
       else sheet.hidden = true;
     }
     return;
   }
+  if (demoRunning) return;
   if (act === 'restart'){ restart(); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
@@ -5980,7 +6176,8 @@ function bindButtons(){
     if (!el) continue;
     const start = (e) => {
       e.preventDefault();
-      if (!game.started || game.over || game.paused) return;
+      // 演示放着的时候手指一碰就会把路径带偏，先挡掉
+      if (!game.started || game.over || game.paused || demoRunning) return;
       el.classList.add('active');
       down();
     };
@@ -6388,14 +6585,18 @@ function init(){
   $('startBtn').addEventListener('click', () => restart());
   // ── 练习模式接线 ──
   const pb = $('practiceBtn');
-  if (pb) pb.addEventListener('click', () => startPractice());
+  if (pb) pb.addEventListener('click', () => { startPractice(); openPrSheet(); });
   const plv = $('prLevels');
   if (plv){
-    plv.innerHTML = LEVELS.map(l =>
-      '<button type="button" data-lv="' + l.k + '">' + l.n + '</button>').join('');
+    plv.innerHTML = [['single', '单招'], ['combo', '组合']].map(([g, t]) =>
+      '<span class="pr-grp">' + t + '</span>' + LEVELS.filter(l => l.group === g).map(l =>
+        '<button type="button" data-lv="' + l.k + '">' + l.n + '</button>').join('')).join('');
     plv.addEventListener('click', (e) => {
       const b = e.target.closest('[data-lv]');
-      if (b) practiceLoad(b.dataset.lv);
+      if (!b) return;
+      practiceLoad(b.dataset.lv);
+      // 先停在弹层里让人把说明读完，点「开始练」再走
+      syncPractice();
     });
   }
   const ppc = $('prPieces');
@@ -6404,18 +6605,21 @@ function init(){
       '<button type="button" data-pc="' + t + '">' + t + '</button>').join('');
     ppc.addEventListener('click', (e) => {
       const b = e.target.closest('[data-pc]');
-      if (b) practicePick(b.dataset.pc);
+      if (!b) return;
+      closePrSheet();
+      practicePick(b.dataset.pc);
     });
   }
-  const pu = $('prUndo');  if (pu) pu.addEventListener('click', () => practiceUndo());
-  const pr = $('prReset'); if (pr) pr.addEventListener('click', () => {
-    if (practiceGoal){
-      const lv = LEVELS.find(l => l.n === practiceGoal.name);
-      if (lv) return practiceLoad(lv.k);
-    }
-    startPractice();
-  });
-  const px = $('prExit'); if (px) px.addEventListener('click', () => exitPractice());
+  const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  on('prMenu',  () => openPrSheet());
+  on('prUndo',  () => practiceUndo());
+  on('prDemo',  () => { closePrSheet(); practiceDemo(); });
+  on('prDone',  () => closePrSheet());
+  on('prReset', () => { if (practiceLevel) practiceLoad(practiceLevel.k); closePrSheet(); });
+  on('prFree',  () => { startPractice(); closePrSheet(); });
+  on('prExit',  () => { closePrSheet(); exitPractice(); });
+  const psh = $('prSheet');
+  if (psh) psh.addEventListener('click', (e) => { if (e.target === psh) closePrSheet(); });
   $('againBtn').addEventListener('click', () => restart());
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
@@ -6610,7 +6814,9 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   LEVELS, LEVEL_BY, startPractice, exitPractice, practiceLoad, practicePick, practiceUndo, practiceCheck, detectTSpin,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
-  get practiceGoal(){ return practiceGoal; }, get undoDepth(){ return undoStack.length; },
+  get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },
+  get demoRunning(){ return demoRunning; }, get undoDepth(){ return undoStack.length; },
+  practiceSolve, practiceDemo, parseActs, doAct, goalName,
   dbg, peek: () => ({ clearing, grounded, lockTimer, lockResets, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

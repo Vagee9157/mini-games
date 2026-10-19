@@ -1501,26 +1501,35 @@ body.flashing .toast{ top: 38%; }
 
 
 /* ── 练习模式 ──
-   只在 body.practising 下出现。正常局里 #prBar 带 hidden，一格都不占。 */
+   对局时只有一条细栏（一行），其余都在 #prSheet 弹层里。
+   细栏横跨两列、自成一行 —— 它总归要从盘面那一行（1fr）分走高度，
+   所以只给一行：实测 iPhone 13 上格子从 26px 只降到 24px。 */
 .prbar{ display: none; }
 body.practising .prbar{
-  display: flex; flex-direction: column; gap: 7px;
-  margin: 8px 0 2px; padding: 10px 12px;
-  background: rgba(255,255,255,.045);
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 12px;
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 6px;
+  min-height: 34px;
 }
-.pr-head{ display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.pr-head b{ font-size: 14px; color: #7fe3ff; }
-.pr-x{
-  font: inherit; font-size: 11.5px; color: var(--ink); opacity: .62;
-  background: none; border: 0; padding: 2px 4px; cursor: pointer;
+.pr-goal{
+  flex: 1; min-width: 0;
+  font-size: 13px; color: #7fe3ff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.pr-tip{ margin: 0; font-size: 11.5px; line-height: 1.5; opacity: .72; }
+.pr-s{
+  flex: none; font: inherit; font-size: 12px; line-height: 1;
+  padding: 8px 11px; border-radius: 9px; cursor: pointer;
+  color: var(--ink);
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.14);
+}
+.pr-s:disabled{ opacity: .38; cursor: default; }
+.pr-menu{ border-color: rgba(127,227,255,.55); color: #7fe3ff; }
+/* 弹层里的内容 */
+.pr-tip{ margin: 0 0 4px; font-size: 12.5px; line-height: 1.55; opacity: .78; }
 .pr-levels, .pr-pieces{ display: flex; flex-wrap: wrap; gap: 6px; }
 .pr-levels button, .pr-pieces button, .pr-b{
-  font: inherit; font-size: 12px; line-height: 1;
-  padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  font: inherit; font-size: 12.5px; line-height: 1;
+  padding: 8px 11px; border-radius: 9px; cursor: pointer;
   color: var(--ink);
   background: rgba(255,255,255,.07);
   border: 1px solid rgba(255,255,255,.14);
@@ -1530,10 +1539,15 @@ body.practising .prbar{
   background: linear-gradient(180deg, rgba(127,227,255,.16), rgba(127,227,255,.05));
   color: #7fe3ff;
 }
-.pr-pieces button{ min-width: 34px; font-weight: 600; font-family: var(--mono, monospace); }
-.pr-row{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.pr-lb{ font-size: 11.5px; opacity: .6; flex: none; }
-.pr-b{ flex: 1; min-width: 92px; text-align: center; }
+.pr-pieces button{ min-width: 36px; font-weight: 600; font-family: var(--mono, monospace); }
+.pr-row{ display: flex; gap: 6px; margin-top: 8px; }
+#prSheet .sheet-lb{ margin-top: 10px; }
+.pr-b{ flex: 1; min-width: 0; text-align: center; }
+/* 「单招 / 组合」分组标签，独占一行 */
+.pr-grp{ flex-basis: 100%; font-size: 11px; opacity: .55; letter-spacing: .08em; margin-top: 2px; }
+.pr-grp:first-child{ margin-top: 0; }
+/* 演示放着时把整条操作区压暗，告诉你现在别按 */
+body.demoing .pads{ opacity: .4; pointer-events: none; }
 .pr-b:disabled{ opacity: .38; cursor: default; }
 /* 练习局不该让人以为在冲分 —— 把分数那格压暗 */
 body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }

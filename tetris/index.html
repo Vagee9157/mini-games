@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=507867bb">
+<link rel="stylesheet" href="tetris.css?v=d41f4696">
 </head>
 <body>
 <div class="topline"></div>
@@ -190,22 +190,15 @@
     <!-- 按键区：一排四个。落底比旁边三个小一圈、贴着格子下沿，
          四周留出死区 —— 它是这里唯一不可撤销的操作，不该和别的键一样好按。 -->
     <!-- std-only:start -->
-    <!-- 练习条。只有 body.practising 时显示，正常局完全不占位。 -->
+    <!-- 练习细栏：对局时只占一行。选关、指定出块、说明都在 #prSheet 弹层里 ——
+         弹层是浮着的，不进布局；第一版把这些全塞在这一条里，它没有 grid-area，
+         被排成主网格的一个额外 auto 行，长多高盘面就缩多少，实测格子从 26px
+         压到 10px（iPhone SE 上 8px），右栏还被挤得盖到了顶栏和变换键上。 -->
     <div class="prbar" id="prBar">
-      <div class="pr-head">
-        <b id="prGoal">自由练习</b>
-        <button class="pr-x" id="prExit" type="button">退出练习</button>
-      </div>
-      <p class="pr-tip" id="prTip"></p>
-      <div class="pr-levels" id="prLevels"></div>
-      <div class="pr-row">
-        <span class="pr-lb">指定下一块</span>
-        <div class="pr-pieces" id="prPieces"></div>
-      </div>
-      <div class="pr-row">
-        <button class="pr-b" id="prUndo" type="button">撤销一步</button>
-        <button class="pr-b" id="prReset" type="button">重摆本关</button>
-      </div>
+      <b class="pr-goal" id="prGoal">自由练习</b>
+      <button class="pr-s" id="prUndo" type="button">撤销</button>
+      <button class="pr-s" id="prDemo" type="button">演示</button>
+      <button class="pr-s pr-menu" id="prMenu" type="button">关卡</button>
     </div>
     <!-- std-only:end -->
 
@@ -229,6 +222,24 @@
   <!-- 称号面板。两条梯子各自从高往低排，拿到的在上、亮着；没拿到的灰着并写出门槛。 -->
   <!-- 修行三选一。刻意不给关闭按钮、也不进 Esc 的关闭名单 ——
        它是一次必须做的选择，不是一个可以划走的弹窗。 -->
+  <!-- std-only:start -->
+  <div class="sheet" id="prSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>练习</h3></div>
+      <p class="pr-tip" id="prTip"></p>
+      <div class="pr-levels" id="prLevels"></div>
+      <span class="sheet-lb">指定下一块</span>
+      <div class="pr-pieces" id="prPieces"></div>
+      <div class="pr-row">
+        <button class="pr-b" id="prReset" type="button">重摆本关</button>
+        <button class="pr-b" id="prFree" type="button">自由练习</button>
+        <button class="pr-b" id="prExit" type="button">退出练习</button>
+      </div>
+      <button class="pbtn sheet-done" id="prDone">开始练</button>
+    </div>
+  </div>
+  <!-- std-only:end -->
+
   <div class="sheet" id="rankSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>称号</h3></div>
@@ -273,7 +284,7 @@
 
 </div>
 
-<script src="tetris.js?v=1f9219d1"></script>
+<script src="tetris.js?v=79eaa1d3"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

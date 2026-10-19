@@ -43,8 +43,7 @@ JS = r"""() => {
     T.startPractice();
     T.practiceLoad(k);
     const board = T.game.board.map(r => r.slice());
-    const need = { tsd:'T', tss:'T', tst:'T', tetris:'I', pc:'O' }[k] || 'T';
-    T.practicePick(need);
+    const need = T.LEVEL_BY[k].queue[0];
     const p0 = T.game.piece;
     if (!p0 || p0.type !== need) return { err: '拿不到 ' + need + ' 块' };
 
@@ -106,10 +105,11 @@ JS = r"""() => {
     return { hits, states: seen.size };
   }
 
-  for (const lv of T.LEVELS){
+  // 单招关：对唯一那一块做穷举，证明目标落点存在
+  for (const lv of T.LEVELS.filter(l => l.group === 'single')){
     const r = probe(lv.k);
     if (r.err){ ok(false, `${lv.n}：${r.err}`); continue; }
-    const g = lv.goal;
+    const g = lv.goals[0];
     const good = r.hits.filter(h =>
       (g.spin === undefined || h.spin === g.spin) &&
       (g.n === undefined || h.n === g.n) &&
@@ -120,6 +120,58 @@ JS = r"""() => {
        + (good.length ? `，例如列 ${good[0].x} 朝向 ${good[0].rot}` : `；最好的只有 ${best?best.n:0} 行 spin=${best?best.spin:null}`)
        + '）');
   }
+
+  // ── 每一关：照解法回放必须过关 ──
+  // 组合关多块连着走，穷举太贵；用「构造性证明」—— 给出一条解，回放它，看目标是否全部达成。
+  // 这条解也就是「看演示」放的那条，所以这里红 = 演示会演砸。
+  for (const lv of T.LEVELS){
+    const okSolve = T.practiceSolve(lv.k);
+    ok(okSolve, `「${lv.n}」照解法回放能过关（${lv.solution.join(' → ')}；做到第 ${T.practiceStep}/${lv.goals.length} 步）`);
+  }
+  // 解法只能用手机上按得出来的键：左右、软降、顺时针、落底
+  for (const lv of T.LEVELS){
+    const bad = lv.solution.join('').replace(/[LRdCH0-9]/g, '');
+    ok(bad === '', `「${lv.n}」解法只用手机有的键${bad ? '，多了：' + bad : ''}`);
+  }
+  // 固定出块顺序生效：开局那块就是 queue[0]，NEXT 第一个是 queue[1]
+  T.startPractice(); T.practiceLoad('tsd4');
+  ok(T.game.piece.type === 'T' && T.game.queue[0] === 'I',
+     `组合关按固定顺序出块（现在 ${T.game.piece.type}，下一个 ${T.game.queue[0]}）`);
+  // 多步关：做完第一步只算进了一步，不算过关
+  T.startPractice(); T.practiceLoad('tsd4');
+  for (const a of T.parseActs(T.LEVEL_BY.tsd4.solution[0])) T.doAct(a);
+  { let g=0; while (T.clearing && g++<400) T.step(16); }
+  ok(T.practiceStep === 1 && !T.practiceDone, `第一步做完是 1/2，还没过关（step=${T.practiceStep}）`);
+
+  // ── 硬降不该保留「最后一步是旋转」──
+  // 原来半空转一下、硬降 19 格落进三角都被挡的坑，会被判成 mini T-spin。
+  T.startPractice();
+  for (let y=0;y<T.TOTAL_ROWS;y++) T.game.board[y].fill(null);
+  const RR = T.TOTAL_ROWS;
+  T.game.board[RR-3][4]='X'; T.game.board[RR-1][4]='X'; T.game.board[RR-1][6]='X';
+  T.practicePick('T');
+  T.tryRotate(1);
+  const hp = T.game.piece;
+  while (hp.x < 4) T.tryMove(1,0);
+  T.tryRotate(1); T.tryRotate(-1);
+  ok(T.game.lastWasRot === true, '硬降前一刻最后一步确实是旋转');
+  // 看分数，不看标志位 —— 硬降完新块已经出生，出生本身就会清 lastWasRot，
+  // 拿它当判据的话修没修都会绿。分数是锁定那一刻算的，骗不了：
+  // 只该涨硬降的 2 分/格；被误判成 mini T-spin 会再多 100 分。
+  let hd = 0; while (!T.collides('T', hp.x, hp.y + hd + 1, hp.rot)) hd++;
+  const hs0 = T.game.score;
+  T.hardDrop();
+  ok(T.game.score - hs0 === hd * 2,
+     `硬降 ${hd} 格只拿硬降分 ${hd * 2}（实得 ${T.game.score - hs0}，多出来就是误判成了 T-spin）`);
+  // 贴地转进去再落底（d=0）必须保留 —— 这是手机上做 T 旋的操作链
+  ok(T.practiceSolve('tsd'), '贴地转进槽再按落底，T-spin 照样成立');
+
+  // ── 撤销拿回的是同一块 ──
+  T.startPractice(); T.practiceLoad('tsd4');
+  T.hardDrop();                       // 把 T 随手扔掉
+  T.practiceUndo();
+  ok(T.game.piece && T.game.piece.type === 'T' && T.game.queue[0] === 'I',
+     `撤销之后手里还是那块 T、下一个还是 I（现在 ${T.game.piece && T.game.piece.type} / ${T.game.queue[0]}）`);
 
   // 撤销
   T.startPractice(); T.practiceLoad('tsd');
@@ -227,6 +279,29 @@ with sync_playwright() as p:
         pg.goto(f"http://127.0.0.1:{port}/{url}")
         pg.wait_for_function("window.__tetris !== undefined", timeout=10000)
         r = pg.evaluate(js)
+        if name == '标准版':
+            # ── 演示：走真实定时器，不是同步回放 ──
+            # 上面的 practiceSolve 是同步跑的，演示另有一套 setTimeout 驱动、要等消行动画、
+            # 要冻住重力。这里把每一关真放一遍，中途还故意按一下左移，看会不会被带偏。
+            for k in pg.evaluate("() => __tetris.LEVELS.map(l => l.k)"):
+                pg.evaluate(f"() => {{ __tetris.startPractice(); __tetris.practiceLoad('{k}'); __tetris.practiceDemo(); }}")
+                pg.wait_for_timeout(900)
+                running = pg.evaluate("() => __tetris.demoRunning")
+                pg.evaluate("() => { const b=document.getElementById('btnLeft');"
+                            " b.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));"
+                            " b.dispatchEvent(new MouseEvent('mouseup',{bubbles:true})); }")
+                try:
+                    pg.wait_for_function("() => !__tetris.demoRunning", timeout=30000)
+                    finished = True
+                except Exception:
+                    finished = False
+                res = pg.evaluate("() => ({ done: __tetris.practiceDone, step: __tetris.practiceStep,"
+                                  " n: __tetris.practiceLevel && __tetris.practiceLevel.n,"
+                                  " goals: __tetris.practiceLevel && __tetris.practiceLevel.goals.length })")
+                ok = running and finished and res['done']
+                r.append(('PASS ' if ok else 'FAIL ') +
+                         f"「{res['n']}」演示真放一遍能过关，中途乱按也带不偏"
+                         f"（放着={running} 放完={finished} 第 {res['step']}/{res['goals']} 步）")
         print(f"== {name} ==  JS错误 {len(errs)}")
         for e in errs[:4]: print("   !", e)
         fails += len(errs)
@@ -234,6 +309,58 @@ with sync_playwright() as p:
             print("  ", l)
             if l.startswith('FAIL'): fails += 1
         pg.close()
+    b.close()
+
+# ── 布局：练习模式不能把盘面压扁、不能把右栏挤到别的控件上 ──
+#
+# 第一版练习条住在主网格里一个自动生成的 auto 行，长多高盘面就缩多少：
+# iPhone 13 上格子 26px → 10px，SE 上 8px，右栏的子元素还溢出盖住了顶栏和变换键。
+# 当时只验了「横向没溢出」，没看盘面被压成什么样。这一段把两件事都钉住。
+#
+# 量右栏要逐个量**子元素** —— <aside> 自己的盒子不会越界，溢出来的是它里面的格子，
+# 只量 aside 会得到 0px 的假阴性（实际就这么错过一次）。
+LAYOUT = r"""() => {
+  const rect = e => e.getBoundingClientRect();
+  const header = document.querySelector('.bar'), pads = document.querySelector('.pads');
+  const hb = rect(header).bottom, pt = rect(pads).top;
+  let worst = 0, who = '';
+  for (const c of document.querySelector('.side').children){
+    const r = rect(c);
+    if (!r.height || getComputedStyle(c).display === 'none') continue;
+    const over = Math.max(0, hb - r.top) + Math.max(0, r.bottom - pt);
+    if (over > worst){ worst = over; who = c.className || c.id || c.tagName; }
+  }
+  const bb = rect(document.querySelector('.board-box'));
+  return { cell: +(bb.height / 20).toFixed(1), worst: Math.round(worst), who,
+           scroll: document.documentElement.scrollHeight - innerHeight };
+}"""
+with sync_playwright() as p:
+    b = p.webkit.launch()
+    for dev, min_cell in (('iPhone 13', 22), ('iPhone SE', 17)):
+        res = {}
+        for mode in ('正常', '练习'):
+            pg = b.new_page(**p.devices[dev])
+            pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
+            pg.goto(f"http://127.0.0.1:{port}/tetris/index.html")
+            pg.wait_for_function("() => !!window.__tetris")
+            if mode == '正常':
+                pg.evaluate("() => document.getElementById('startBtn').click()")
+            else:
+                pg.evaluate("() => { __tetris.startPractice(); __tetris.practiceLoad('tsd4'); }")
+            pg.wait_for_timeout(300)
+            res[mode] = pg.evaluate(LAYOUT)
+            pg.close()
+        n, pr = res['正常'], res['练习']
+        checks = [
+            (pr['cell'] >= min_cell, f"{dev} 练习时盘面格子 {pr['cell']}px（正常局 {n['cell']}px，下限 {min_cell}）"),
+            (pr['worst'] == 0, f"{dev} 练习时右栏不压顶栏/按键（最大越界 {pr['worst']}px {pr['who']}）"),
+            (n['worst'] == 0, f"{dev} 正常局右栏不压顶栏/按键（最大越界 {n['worst']}px {n['who']}）"),
+            (pr['scroll'] <= 0, f"{dev} 练习时页面不出现滚动（{pr['scroll']}px）"),
+        ]
+        print(f"== 布局 {dev} ==")
+        for c, m in checks:
+            print("  ", ('PASS ' if c else 'FAIL ') + m)
+            if not c: fails += 1
     b.close()
 srv.shutdown(); srv.server_close()
 sys.exit(1 if fails else 0)
