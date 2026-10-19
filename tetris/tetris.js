@@ -141,7 +141,20 @@ const KICKS = {
 };
 
 const LOCK_DELAY = 500;      // 落地后多久锁死（毫秒）
-const LOCK_RESET_LIMIT = 15; // 靠移动/旋转续命的次数上限
+// 锁定模式。Guideline 给了三种，不是一种：
+//   Infinite Placement —— 每次移动/旋转都重置，没有次数上限
+//   Extended Placement —— 15 次上限，且落到更低的新行时重置（Guideline 默认值）
+//   Classic            —— 只有往下掉才重置
+//
+// 这里选 Infinite。之前的实现是第四种、比三种都严：15 次上限但**从不重置**
+// （实测蹭满之后 lockTimer 450→450 不再回退，掉到更低的新行额度也还是 15）。
+// 在手机上这条尤其疼 —— 五个按键、没有 DAS 微调，贴地之后调整位置本来就慢，
+// 而 T 旋要求的正是「贴地之后再转」。
+//
+// 没有刷分口子：灰线按墙钟涨、热度按墙钟衰减，磨蹭只会让局面更差；
+// 贴墙按住也续不了命（tryMove 撞到就 return false，根本走不到 touchGround）。
+// 计数本身留着，lockPiece 还靠它说那句「你在那磨蹭什么」。
+const LOCK_RESET_LIMIT = Infinity;
 const DAS = 150;             // 按住方向键多久开始连发
 const ARR = 40;              // 连发间隔
 const SOFT_DROP_FACTOR = 20; // 软降速度倍率
@@ -943,7 +956,7 @@ function touchGround(fromAction){
     if (!grounded){
       grounded = true;
       lockTimer = 0;
-    } else if (fromAction && lockResets < LOCK_RESET_LIMIT){
+    } else if (fromAction && lockResets < LOCK_RESET_LIMIT){   // 现在恒真，见常量那边
       lockTimer = 0;
       lockResets++;
     }
@@ -6598,7 +6611,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   LEVELS, LEVEL_BY, startPractice, exitPractice, practiceLoad, practicePick, practiceUndo, practiceCheck, detectTSpin,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceGoal(){ return practiceGoal; }, get undoDepth(){ return undoStack.length; },
-  dbg, peek: () => ({ clearing, grounded, lockTimer, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
+  dbg, peek: () => ({ clearing, grounded, lockTimer, lockResets, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();

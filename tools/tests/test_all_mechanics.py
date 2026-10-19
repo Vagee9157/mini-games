@@ -257,6 +257,39 @@ JS = r"""() => {
   ok(T.game.score > sz, 'ZONE 结算给奖金');
   ok(B().filter(r=>r.every(c=>c===Z)).length === 0, 'ZONE 结算清掉死行');
 
+  // ── 锁定延迟：Infinite Placement（没有次数上限）──
+  //
+  // 这一段钉的是「选了三种锁定模式里的哪一种」。改回有上限的话这里会红。
+  // 之前的实现是第四种、比 Guideline 三种都严（15 次上限 + 从不重置），
+  // 实测蹭满之后 lockTimer 450→450 不再回退。
+  fresh();
+  const Rr = T.TOTAL_ROWS;
+  for (let y = 0; y < Rr; y++) B()[y].fill(null);
+  T.spawnNext();
+  const lp = T.game.piece;
+  while (!T.collides(lp.type, lp.x, lp.y + 1, lp.rot)) lp.y++;
+  T.step(16);
+  const lpieces = T.game.pieces;
+  for (let i = 0; i < 30; i++){ T.tryMove(1, 0); T.tryMove(-1, 0); }
+  ok(T.peek().lockResets > 15,
+     `续命次数不封顶（蹭 60 次，计数 ${T.peek().lockResets}）`);
+  T.step(450);                       // 走到锁定延迟的九成
+  const lt0 = T.peek().lockTimer;
+  T.tryMove(1, 0);
+  const lt1 = T.peek().lockTimer;
+  ok(lt1 < lt0, `蹭满之后移动仍然重置计时（${Math.round(lt0)} → ${Math.round(lt1)}）`);
+  T.step(200);
+  ok(T.game.pieces === lpieces, '所以它不会在这时候被锁死');
+
+  // 但贴墙按住不能白嫖 —— tryMove 撞到就 return false，走不到 touchGround。
+  // 没有这一条，Infinite 就成了「按住方向键永不锁定」的刷时间口子。
+  while (T.tryMove(-1, 0));          // 顶到左墙
+  T.step(450);
+  const wt0 = T.peek().lockTimer;
+  ok(T.tryMove(-1, 0) === false, '已经贴住左墙');
+  const wt1 = T.peek().lockTimer;
+  ok(wt1 >= wt0, `贴墙按住续不了命（${Math.round(wt0)} → ${Math.round(wt1)}）`);
+
   // ── 修行 ──
   fresh();
   ok(T.UPS.length === 13, `修行共 ${T.UPS.length} 张卡`);
