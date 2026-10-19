@@ -302,6 +302,23 @@ with sync_playwright() as p:
                 r.append(('PASS ' if ok else 'FAIL ') +
                          f"「{res['n']}」演示真放一遍能过关，中途乱按也带不偏"
                          f"（放着={running} 放完={finished} 第 {res['step']}/{res['goals']} 步）")
+        if name == '标准版':
+            # ── 消行动画在 60Hz 上一帧都不能少画 ──
+            # CLEAR_DRAW_MS 的算术在 test_all_mechanics 里验过；这里验真实渲染路径：
+            # 打出一次四消，由真实 rAF 推进动画，数动画期间跑了几帧、画了几次。
+            fd = pg.evaluate("""() => new Promise(done => {
+              const T = __tetris;
+              T.startPractice(); T.practiceLoad('tetris');
+              const f0 = T.dbg.frames, d0 = T.dbg.draws;
+              for (const a of T.parseActs(T.LEVEL_BY.tetris.solution[0])) T.doAct(a);
+              let seen = false;
+              const w = () => { if (T.clearing) seen = true;
+                if (seen && !T.clearing) return done({f: T.dbg.frames - f0, d: T.dbg.draws - d0});
+                requestAnimationFrame(w); };
+              requestAnimationFrame(w);
+            })""")
+            r.append(('PASS ' if fd['f'] > 3 and fd['d'] >= fd['f'] else 'FAIL ') +
+                     f"60Hz 下消行动画每帧都画（{fd['f']} 帧，画了 {fd['d']} 次）")
         print(f"== {name} ==  JS错误 {len(errs)}")
         for e in errs[:4]: print("   !", e)
         fails += len(errs)

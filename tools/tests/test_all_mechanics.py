@@ -257,6 +257,18 @@ JS = r"""() => {
   ok(T.game.score > sz, 'ZONE 结算给奖金');
   ok(B().filter(r=>r.every(c=>c===Z)).length === 0, 'ZONE 结算清掉死行');
 
+  // ── 消行动画的重绘节流（120Hz 屏）──
+  // headless 跑不出 120Hz 的 rAF，所以这里按真实的门槛常数模拟两种帧距，数一秒画几次。
+  // 钉的是两件事：60Hz 上一帧都不能少（行为不变），120Hz 上封顶在 60 左右。
+  const cad = (hz) => { let last = -1e9, n = 0;
+    for (let t = 0; t < 1000; t += 1000 / hz) if (t - last >= T.CLEAR_DRAW_MS){ n++; last = t; }
+    return n; };
+  const c60 = cad(60), c120 = cad(120);
+  ok(c60 >= 60, `60Hz 消行动画每帧都画（一秒 ${c60} 次）`);
+  ok(c120 >= 58 && c120 <= 61, `120Hz 消行动画封顶约 60fps（一秒 ${c120} 次，原来是 120）`);
+  // 60Hz 的帧距会抖，16.4ms 的帧不能被跳掉
+  ok(16.4 >= T.CLEAR_DRAW_MS && 8.4 < T.CLEAR_DRAW_MS, `门槛 ${T.CLEAR_DRAW_MS}ms 卡在 8.3 和 16.4 之间`);
+
   // ── 锁定延迟：Infinite Placement（没有次数上限）──
   //
   // 这一段钉的是「选了三种锁定模式里的哪一种」。改回有上限的话这里会红。

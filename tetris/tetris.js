@@ -772,7 +772,7 @@ const game = {
   lastWasRot: false,
 };
 
-const dbg = { frames: 0, layouts: 0 };
+const dbg = { frames: 0, layouts: 0, draws: 0 };   // draws：测消行重绘节流用
 let garbageTimer = 0;
 let lockStep = -1;          // 落地渐白只分几档，省掉大部分重绘
 let dropTimer = 0;
@@ -2379,6 +2379,7 @@ function drawStatic(){
 }
 
 function draw(){
+  dbg.draws++;
   const W = CELL * COLS, H = CELL * ROWS;
   if (!W || !H) return;
   ctx.clearRect(0, 0, W, H);
@@ -6013,6 +6014,16 @@ function step(dt){
 // 250ms = 15 帧，正常卡顿足够补；再长不是卡顿是冻结，宁可丢。
 const MAX_CATCHUP = 250;
 
+// 消行动画期间的重绘间隔。平时画面按时间限到 30fps（见 tick 末尾），
+// 消行那零点几秒要顺，所以单独放宽 —— 但原来是「每帧都画」，没有上限：
+// 60Hz 屏上一秒 60 次，120Hz 屏（iPhone 17 起基础款也是）就变成 120 次，
+// 动画看着一样，功耗翻倍。改成按时间封顶到约 60fps：
+//   60Hz  帧距 16.7ms ≥ 12 → 每帧照画，行为和原来完全一样
+//   120Hz 帧距 8.3ms，隔一帧画一次 → 60fps
+// 门槛取 12 而不是 16，是给 60Hz 的帧距抖动留余量（16.4ms 的帧不能被跳掉）。
+// 只管画面，逻辑一直按毫秒走 —— 60Hz/120Hz 喂同一套操作，结果逐项一致（实测过）。
+const CLEAR_DRAW_MS = 12;
+
 function tick(now){
   rafId = requestAnimationFrame(tick);
   dbg.frames++;
@@ -6027,7 +6038,10 @@ function tick(now){
     rafId = 0;
     return;
   }
-  if (r === 'clearing'){ draw(); return; }
+  if (r === 'clearing'){
+    if (now - lastDrawAt >= CLEAR_DRAW_MS){ draw(); lastDrawAt = now; }
+    return;
+  }
 
   // 方块匀速往下掉的时候，一秒里其实只有一帧画面变了。
   // 没变就别画——这是手机发烫的主因。
@@ -6812,6 +6826,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   feverStart, feverEnd, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
+  CLEAR_DRAW_MS,
   LEVELS, LEVEL_BY, startPractice, exitPractice, practiceLoad, practicePick, practiceUndo, practiceCheck, detectTSpin,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },
