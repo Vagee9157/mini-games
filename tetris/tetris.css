@@ -628,28 +628,21 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 }
 
 /* ── 按键区 ── */
-/* 一排五个：左移 · 右移 · 软降 ｜ 落底 · 变换。
-   为什么是一排而不是两排：按键区下方只剩 32px，再起一行要 67px，差额只能
-   从盘面身上出 —— 实测两排布局会把格子从 26px 压到 23px。盘面是全程盯着
-   看的东西，按键从 86px 缩到 67px 仍然远在 44pt 可点阈值之上，这笔更划算。
-
-   落底夹在软降和变换中间，它自带的 6px 死区边距正好把「想按软降按成落底」
-   这个方向隔开 —— 那是这里唯一不可撤销的操作。 */
 .pads{
   grid-area: pads;
   display: grid;
-  /* 列宽：左移/右移最宽（用得最多，用户要求再长一点），软降窄一档（夹在右移和
-     落底之间，老按错）。软降和落底各自带左右死区边距，所以那两列给最小宽度兜底，
-     保证扣掉死区之后键本身仍 ≥ 44pt；剩下的宽度按 fr 分，优先给左右移。 */
-  grid-template-columns: 1.35fr 1.35fr minmax(56px, .85fr) minmax(56px, 1fr) 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 9px;
   align-items: start;
 }
-/* 分组只保留语义（左边走位、右边动作），布局交给 .pads 那一排五列 */
-.pad-g{ display: contents; }
-/* 窄屏收紧，见文件末尾那条 @media —— .k-drop 的边距在下面还会被重设一次，
-   覆盖必须放在它之后，否则同特异性下后者胜。 */
-@media (max-width: 360px){ .pads{ gap: 7px; } }
+/* 两组各两个键：左边走位（左移 右移），右边动作（落底 变换）。
+   软降不在这一排 —— 它在右栏最底下、变换正上方，见 .side .k-soft。
+   （中间有一周软降挤在这一排里，五个键一排，左右移被压窄、软降老按错，退回来了。） */
+.pad-g{
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 1fr 1fr;
+}
 .k{
   display: flex;
   flex-direction: column;
@@ -680,10 +673,14 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 /* 落底和其他三个等高、上下对齐，只在左右各留 6px 死区。
    高度压矮那版看着一排不齐，防误触换成横向留白这一条。 */
 .k-drop{ margin: 0 6px; }
-/* 软降：和落底一样左右留死区，再矮一圈、上下居中 —— 上下也空出来，
-   拇指从右移滑过来、或者往落底按的时候，擦边不会碰到它。
-   尺寸底线 44pt，布局测试里卡着。 */
-.k-soft{ margin: 0 6px; min-height: 46px; align-self: center; }
+
+.k-soft{ min-height: 46px; }
+/* 竖屏：软降钉在右栏最底下，正好在「变换」正上方。右栏原本是上下居中的，
+   两个 auto 外边距把剩余空间均分：其余内容仍居中，软降贴底。 */
+.side > :first-child{ margin-top: auto; }
+/* 和变换之间多留 8px（网格本身只隔 6px）—— 这个键挪到这儿就是因为老按错，
+   拇指往上够变换的时候不能擦到它 */
+.side .k-soft{ margin-top: auto; margin-bottom: 8px; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);
@@ -856,13 +853,13 @@ body.practising .modesw{ border-color: rgba(127,227,255,.5); }
   .pads{ display: contents; }
   .pad-l{ grid-area: padl; align-self: end; }
   .pad-r{ grid-area: padr; align-self: end; }
-  /* 竖屏里 .pad-g 是 display:contents（五个键摊成一排），横屏得恢复成网格 ——
-     grid-area 写在 display:contents 的元素上不生效。加软降键那次只改了竖屏，
-     横屏两组按键区尺寸直接变 0，五个键摊成 230px 宽的大横条、落底横在盘面
-     正下方、盘面从 150×300 缩到 120×240。软降跟在左组（左移 右移 软降），
-     和竖屏顺序一致。 */
+  /* 横屏两组按键区是 stage 的直接网格项（grid-area 要写在网格元素上）。
+     中间有一周竖屏把 .pad-g 改成过 display:contents，横屏两组直接变 0 尺寸，
+     这条显式写 display:grid 就是防那个。 */
   .pad-g{ display: grid; gap: 7px; grid-template-columns: 1fr 1fr; }
-  .pad-l{ grid-template-columns: 1fr 1fr .85fr; }
+  /* 横屏里 .side 是 display:contents，软降成了 stage 的直接网格项，得自己找位置：
+     和右下那组（落底 变换）共用一格，贴顶靠右 —— 就在变换上面 */
+  .side .k-soft{ grid-area: padr; align-self: start; justify-self: end; width: 112px; margin: 0; min-height: 44px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
   .k-drop{ margin: 0 6px; }
@@ -1592,12 +1589,7 @@ body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }
    死区变薄但还在，总比按不中强。
    这条必须留在文件末尾：上面的 .k-drop{ margin: 0 6px } 和它特异性相同，
    写在前面会被后者盖掉（第一版就是这么失效的，实测 42px 没变）。 */
-@media (max-width: 360px){
-  .k-drop{ margin: 0 3px; }
-  /* 320 宽：死区收窄（软降 2px、落底 3px），兜底宽度跟着降到 48 / 50 */
-  .pads{ grid-template-columns: 1.25fr 1.25fr minmax(48px, .9fr) minmax(50px, 1fr) 1fr; }
-  .k-soft{ margin: 0 2px; min-height: 44px; }
-}
+@media (max-width: 360px){ .k-drop{ margin: 0 3px; } }
 
 /* 有模式开关的顶栏（只在标准版）：手机宽度上「样式 / 暂停 / 重开」只留图标。
    实测 iPhone 13 带文字要 422px、顶栏只有 370px，会折行；收成图标之后余 30 多 px。

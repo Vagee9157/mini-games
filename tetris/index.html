@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=6f97e8e7">
+<link rel="stylesheet" href="tetris.css?v=780d89a5">
 </head>
 <body>
 <div class="topline"></div>
@@ -193,6 +193,13 @@
         </div>
       </div>
 
+      <!-- std-only:start -->
+      <!-- 软降：按住加速下落，落地**不锁死**（落底才锁），T 旋全靠这个区别。
+           放在右栏最底下，正好在「变换」正上方 —— 原来夹在按键排里（左移 右移 软降 落底
+           变换），五个键挤一排，用户老按错，四个键也都被挤窄了。
+           疯狂版右栏底下只剩十几像素（多一个状态框），放不下，所以只给标准版。 -->
+      <button class="k k-soft" id="btnSoft" aria-label="软降"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v9"/><path d="M8.4 10.4 12 14l3.6-3.6"/><path d="M6.6 18.4h10.8" stroke-width="2.4"/></svg><em>软降</em></button>
+      <!-- std-only:end -->
     </aside>
 
     <!-- 按键区：一排四个。落底比旁边三个小一圈、贴着格子下沿，
@@ -214,10 +221,6 @@
       <div class="pad-g pad-l">
         <button class="k" id="btnLeft"  aria-label="左移"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.8 7 9.4 12l5.4 5z"/></svg><em>左移</em></button>
         <button class="k" id="btnRight" aria-label="右移"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 7l5.4 5-5.4 5z"/></svg><em>右移</em></button>
-        <!-- 软降：按住加速下落，落地**不锁死**（落底才锁）。T 旋全靠这个区别 ——
-             要先把块送到槽口上方、让它贴地，再转进去。图标是空心箭头落到线上，
-             和落底的实心三角有意画成两种形状，缩到 67px 也分得开。 -->
-        <button class="k k-soft" id="btnSoft" aria-label="软降"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v9"/><path d="M8.4 10.4 12 14l3.6-3.6"/><path d="M6.6 18.4h10.8" stroke-width="2.4"/></svg><em>软降</em></button>
       </div>
       <div class="pad-g pad-r">
         <button class="k k-drop" id="btnDrop" aria-label="直接落底"><svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6.4h8L12 13z"/><path d="M5.8 18.6h12.4" fill="none" stroke-width="2.8"/></svg><em>落底</em></button>

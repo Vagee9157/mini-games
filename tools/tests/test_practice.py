@@ -309,6 +309,7 @@ STD_ONLY = r"""() => {
   ok(document.getElementById('practiceBtn') === null, '疯狂版没有练习入口按钮');
   ok(document.getElementById('prBar') === null, '疯狂版没有练习条');
   ok(document.getElementById('modeSw') === null, '疯狂版顶栏没有模式切换');
+  ok(document.getElementById('btnSoft') === null, '疯狂版没有软降键（右栏底下只剩十几像素，放不下）');
   return L;
 }"""
 
@@ -395,7 +396,13 @@ LAYOUT = r"""() => {
   // 每个键的宽高都不能低于 44pt（软降缩小之后尤其要卡）
   const keys = [...document.querySelectorAll('.pads .k')].map(k => rect(k));
   const keyMin = Math.round(Math.min(...keys.map(r => Math.min(r.width, r.height))));
-  return { cell: +(bb.height / 20).toFixed(1), worst: Math.round(worst), who, keyMin,
+  // 软降在右栏最底下、变换正上方（用户要的位置），中间留缝防误按
+  const so = document.getElementById('btnSoft'), cw = rect(document.getElementById('btnCw'));
+  const sr = so ? rect(so) : null;
+  const soft = sr ? { above: sr.bottom <= cw.top + 0.5 && sr.left >= cw.left - 1 && sr.right <= cw.right + 1,
+                      gap: Math.round(cw.top - sr.bottom),
+                      min: Math.round(Math.min(sr.width, sr.height)) } : null;
+  return { cell: +(bb.height / 20).toFixed(1), worst: Math.round(worst), who, keyMin, soft,
            scroll: document.documentElement.scrollHeight - innerHeight,
            barH: Math.round(rect(bar).height), barWrap: bar.scrollWidth > bar.clientWidth + 1 };
 }"""
@@ -424,6 +431,8 @@ with sync_playwright() as p:
             (pr['scroll'] <= 0, f"{dev} 练习时页面不出现滚动（{pr['scroll']}px）"),
             (not n['barWrap'] and n['barH'] <= 40, f"{dev} 顶栏加了模式开关不折行、不变高（高 {n['barH']}px）"),
             (n['keyMin'] >= 44, f"{dev} 每个键都不小于 44pt（最小一边 {n['keyMin']}px）"),
+            (bool(n['soft']) and n['soft']['above'] and n['soft']['gap'] >= 10 and n['soft']['min'] >= 44,
+             f"{dev} 软降在变换正上方、隔开 ≥10px、不小于 44pt（{n['soft']}）"),
         ]
         print(f"== 布局 {dev} ==")
         for c, m in checks:
