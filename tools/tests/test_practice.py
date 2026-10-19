@@ -31,11 +31,17 @@ JS = r"""() => {
 
   // 练习局一个记录都不许写
   const best0 = T.readBest(), total0 = T.readTotal();
+  // 存档：进练习前那一局普通局会被存一份（为了切回来能接着打）。练习本身既不能
+  // 写自己的存档、也不能把那份清掉 —— 比对练习前后存档一字不差。
+  // （原来这里断言 readSave() === null，那是「进练习不保留普通局」时代的写法。）
+  const save0 = JSON.stringify(T.readSave());
+  ok(save0 !== 'null', '进练习前那局普通局被存了一份');
+  T.hardDrop(); T.hardDrop();
   T.game.score = 999999999;
   T.endGame('堆到顶了');
   ok(T.readBest() === best0, `练习局不写最高分（${best0} → ${T.readBest()}）`);
   ok(T.readTotal() === total0, '练习局不写累计分');
-  ok(T.readSave() === null, '练习局不存档');
+  ok(JSON.stringify(T.readSave()) === save0, '练习局不写也不清存档（落块、死掉之后存档原样）');
 
   // ── 逐关可达性证明 ──
   const cellsOf = T.cellsOf, COLS = T.COLS, R = T.TOTAL_ROWS;
@@ -252,7 +258,43 @@ JS = r"""() => {
   }
   ok(tsd > 0, `只用手机那套键（左右 + 顺时针 + 软降）也做得出 TSD（${tsd} 个落点）`);
 
+  // ── 顶栏模式切换 + 普通局存档不能被练习冲掉 ──
+  T.exitPractice();
+  const msw = document.getElementById('modeSw');
+  ok(!!msw, '顶栏有「普通 | 练习」切换');
+  const hb = document.getElementById('helpBtn');
+  ok(getComputedStyle(hb).display === 'none',
+     '标准版顶栏的「?」真的藏着（原来 hidden 被 CSS 盖掉，点开是疯狂版规则）');
+  // 开一局普通局，打几块，攒点分
+  document.getElementById('startBtn').click();
+  T.game.noGarbage = true;
+  for (let i = 0; i < 6; i++){ T.hardDrop(); let g=0; while ((T.clearing || !T.game.piece) && g++<200) T.step(16); }
+  const normalScore = T.game.score, normalPieces = T.game.pieces;
+  ok(normalScore > 0 && !T.practice, `普通局打了 ${normalPieces} 块、${normalScore} 分`);
+  // 点「练习」
+  msw.querySelector('[data-m="practice"]').click();
+  ok(T.practice && !document.getElementById('prSheet').hidden, '点「练习」进练习、弹出选关');
+  ok(msw.querySelector('[data-m="practice"]').classList.contains('on'), '开关高亮在「练习」');
+  // 在练习里随便折腾：选关、落块、做到、甚至死一次
+  T.practiceLoad('tsd'); T.practiceSolve('tsd'); T.hardDrop(); T.endGame('堆到顶了');
+  // 点「普通」
+  T.startPractice();
+  msw.querySelector('[data-m="normal"]').click();
+  ok(!T.practice && T.game.started === false, '点「普通」回到开局面板，不自动开新局');
+  ok(document.getElementById('overlay').classList.contains('show')
+     && document.getElementById('overlay').dataset.mode === 'start', '显示的是开局面板');
+  ok(document.getElementById('overlay').classList.contains('has-save'),
+     '「接着上次玩」还在 —— 练习没把普通局的存档冲掉');
+  ok(document.getElementById('resumeScore').textContent === normalScore.toLocaleString(),
+     `续玩按钮上是那局的分（${document.getElementById('resumeScore').textContent}）`);
+  document.getElementById('resumeSaveBtn').click();
+  ok(T.game.score === normalScore && T.game.pieces === normalPieces && !T.practice,
+     `点续玩接回的是练习之前那一局（${T.game.score} 分、${T.game.pieces} 块）`);
+  ok(T.game.noGarbage !== true, '接回来的普通局照常涨灰线');
+  ok(msw.querySelector('[data-m="normal"]').classList.contains('on'), '开关高亮回到「普通」');
+
   // 退出练习要把一切收干净
+  T.startPractice();
   T.exitPractice();
   ok(T.practice === false && !document.body.classList.contains('practising'),
      '退出练习，标志和 class 都收掉');
@@ -266,6 +308,7 @@ STD_ONLY = r"""() => {
   const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
   ok(document.getElementById('practiceBtn') === null, '疯狂版没有练习入口按钮');
   ok(document.getElementById('prBar') === null, '疯狂版没有练习条');
+  ok(document.getElementById('modeSw') === null, '疯狂版顶栏没有模式切换');
   return L;
 }"""
 
@@ -348,15 +391,18 @@ LAYOUT = r"""() => {
     if (over > worst){ worst = over; who = c.className || c.id || c.tagName; }
   }
   const bb = rect(document.querySelector('.board-box'));
+  const bar = document.querySelector('.bar');
   return { cell: +(bb.height / 20).toFixed(1), worst: Math.round(worst), who,
-           scroll: document.documentElement.scrollHeight - innerHeight };
+           scroll: document.documentElement.scrollHeight - innerHeight,
+           barH: Math.round(rect(bar).height), barWrap: bar.scrollWidth > bar.clientWidth + 1 };
 }"""
 with sync_playwright() as p:
     b = p.webkit.launch()
-    for dev, min_cell in (('iPhone 13', 22), ('iPhone SE', 17)):
+    ip17 = dict(p.devices['iPhone 15 Pro']); ip17['viewport'] = {'width': 402, 'height': 681}
+    for dev, min_cell in (('iPhone 13', 22), ('iPhone SE', 17), ('iPhone 17', 22)):
         res = {}
         for mode in ('正常', '练习'):
-            pg = b.new_page(**p.devices[dev])
+            pg = b.new_page(**(ip17 if dev == 'iPhone 17' else p.devices[dev]))
             pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
             pg.goto(f"http://127.0.0.1:{port}/tetris/index.html")
             pg.wait_for_function("() => !!window.__tetris")
@@ -373,6 +419,7 @@ with sync_playwright() as p:
             (pr['worst'] == 0, f"{dev} 练习时右栏不压顶栏/按键（最大越界 {pr['worst']}px {pr['who']}）"),
             (n['worst'] == 0, f"{dev} 正常局右栏不压顶栏/按键（最大越界 {n['worst']}px {n['who']}）"),
             (pr['scroll'] <= 0, f"{dev} 练习时页面不出现滚动（{pr['scroll']}px）"),
+            (not n['barWrap'] and n['barH'] <= 40, f"{dev} 顶栏加了模式开关不折行、不变高（高 {n['barH']}px）"),
         ]
         print(f"== 布局 {dev} ==")
         for c, m in checks:

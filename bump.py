@@ -49,7 +49,7 @@ def gen_crazy():
     # 而且练习要关灰线、不记成绩，和疯狂版那一整套记账是冲突的。
     t = re.sub(r'\n?[^\n]*<!-- std-only:start -->.*?<!-- std-only:end -->', '', t, flags=re.S)
     t = re.sub(r'\n?\s*<button[^>]*\sdata-std-only[^>]*>.*?</button>', '', t, flags=re.S)
-    for mark in ('data-std-only', 'std-only:start', 'id="prBar"', 'id="prSheet"'):
+    for mark in ('data-std-only', 'std-only:start', 'id="prBar"', 'id="prSheet"', 'id="modeSw"'):
         assert mark not in t, f'标准版专属节点没删干净: {mark}'
     os.makedirs(os.path.join(ROOT, 'crazy'), exist_ok=True)
     p = os.path.join(ROOT, 'crazy/index.html')

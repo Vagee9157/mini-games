@@ -50,15 +50,20 @@ const PAL_NAMES = {
 const PAL_ORDER = ['clear', 'classic', 'guide', 'candy', 'cyan', 'mint'];
 
 // 四种画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
+// gap 是每格四边各内缩多少（占格宽的比例），两格之间的缝 = 2 × gap。
+// 原来默认的「纯色」是 .08，缝占了格宽的 16%，堆起来像一格一格的瓷砖、不像一整块。
+// 统一收到 .03 上下（缝 6%），圆角也跟着收一点 —— 圆角越大，四个角漏出的底色越多，
+// 同样显得空。四套样式之间的相对差别保留。
 const STYLES = {
-  gap:   { name:'标准',  gap:.055, fill:.14, edge:.30, lw:.07, rad:.20 },
-  soft:  { name:'柔和',  gap:.06,  fill:.22, edge:.40, lw:.06, rad:.26 },
-  ring:  { name:'暗圈',  gap:.045, fill:.14, edge:.32, lw:.07, rad:.20, ring:.40 },
-  plain: { name:'纯色',  gap:.08,  fill:.10, edge:0,   lw:0,   rad:.22 },
+  gap:   { name:'标准',  gap:.03,  fill:.14, edge:.30, lw:.07, rad:.15 },
+  soft:  { name:'柔和',  gap:.035, fill:.22, edge:.40, lw:.06, rad:.20 },
+  ring:  { name:'暗圈',  gap:.025, fill:.14, edge:.32, lw:.07, rad:.15, ring:.40 },
+  plain: { name:'纯色',  gap:.035, fill:.10, edge:0,   lw:0,   rad:.16 },
 };
 
 const skin = { pal: 'clear', style: 'plain' };
 let activePal = null;   // FEVER 期间临时换肤用，不落盘
+const PRESET_COLOR = '#5d6b86';   // 练习关卡预置格子的颜色，见画盘面那里
 function colorOf(type){
   if (type === GARBAGE) return '#93a4c4';
   if (type === FROZEN)  return '#8fd8ff';
@@ -600,7 +605,8 @@ const careerOf = (v) => tierOf(CAREER, v);
 // 正在玩的这一局也存下来：手机上切个 App、锁个屏回来还能接着打
 let lastSaveAt = 0;
 function saveGame(force){
-  if (!game.started || game.over || practice){ clearSave(); return; }
+  if (practice) return;            // 练习不存也不清 —— 见 clearSave
+  if (!game.started || game.over){ clearSave(); return; }
   // localStorage 是同步 I/O，连续落块时每次都写会拖帧
   const now = performance.now();
   if (!force && now - lastSaveAt < 1500) return;
@@ -647,7 +653,11 @@ function readSave(){
   } catch { return null; }
 }
 
+// 练习模式下一律不动存档。存档是普通局的「接着上次玩」，而练习会调 restart()、
+// 会 endGame()、会不停地落块 —— 这些路径原来都会顺手 clearSave()，于是普通局
+// 打到一半切去练一下，回来那局就没了。
 function clearSave(){
+  if (practice) return;
   try { localStorage.removeItem(SAVE_KEY); } catch { /* 忽略 */ }
 }
 
@@ -1267,6 +1277,7 @@ function practicePick(type){
 }
 
 function syncPractice(){
+  syncModeSwitch();
   document.body.classList.toggle('practising', practice);
   document.body.classList.toggle('demoing', practice && demoRunning);
   if (!practice) return;
@@ -1312,6 +1323,9 @@ function closePrSheet(){
 // 进练习：先按正常开局把一切铺好，再把模式标志挂上并关掉灰线。
 // 顺序不能反 —— restart 里会 crazyReset，挂早了会被它冲掉。
 function startPractice(){
+  // 普通局打到一半切过来：先存一份。练习期间 clearSave/saveGame 都是空操作，
+  // 这份存档会原样留到切回普通模式，开局面板上「接着上次玩」就能接上。
+  if (!practice && game.started && !game.over) saveGame(true);
   practice = true;
   restart();
   practice = true;                  // restart 不碰它，这行是防御，别指望
@@ -1321,15 +1335,46 @@ function startPractice(){
   syncPractice();
 }
 
+// 切回普通模式：不自动开新局，回到开局面板。原来这里直接 restart() 开一局新的 ——
+// 一来普通局打到一半去练习的那一局就被跳过了，二来「切模式」不该顺手替你按「开始」。
 function exitPractice(){
+  closePrSheet();
   practice = false;
   // restart 不碰 noGarbage（那是 game 对象上的字段，newGame 才铺），
-  // 不显式收掉的话退出练习之后这一局永远不涨灰线
+  // 不显式收掉的话之后的普通局永远不涨灰线
   game.noGarbage = false;
   practiceLevel = null; practiceStep = 0; practiceDone = false; demoRunning = false;
   undoStack.length = 0;
+  softDropping = false;
+  // 停在「还没开局」的状态：盘面清空、没有当前块、循环停掉，和刚打开页面一样
+  game.started = false; game.over = false; game.piece = null; clearing = null;
+  for (let y = 0; y < TOTAL_ROWS; y++) game.board[y].fill(null);
+  cancelAnimationFrame(rafId); rafId = 0;
+  staticDirty = true; previewDirty = true; needsDraw = true;
+  draw();
   syncPractice();
-  restart();
+  syncResume();
+  $('overlay').dataset.mode = 'start';
+  $('overlay').classList.add('show');
+}
+
+// 「接着上次玩」按存档的**当前**状态显示。原来只在页面打开时读一次，
+// 点击回调还捕获了那一刻的存档 —— 之后存档变了（比如切去练习前刚存的那份），
+// 按钮不出现，或者点下去恢复的是旧的那局。
+function syncResume(){
+  const save = readSave(), ov = $('overlay');
+  if (!ov) return;
+  ov.classList.toggle('has-save', !!save);
+  if (save && $('resumeScore')) $('resumeScore').textContent = (save.score || 0).toLocaleString();
+}
+
+// 顶栏的「普通 | 练习」。只在标准版有（疯狂版 bump.py 把节点删了，这里拿不到就跳过）。
+function syncModeSwitch(){
+  for (const b of document.querySelectorAll('#modeSw [data-m]')){
+    const on = (b.dataset.m === 'practice') === practice;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
 }
 
 // ───────────────────────── 锁定与消行 ─────────────────────────
@@ -1930,7 +1975,9 @@ function scoreFor(n, spin, perfect){
   // 里程碑放在 label 的 toast 之后。放前面会被它当场盖掉 —— 而里程碑偏偏
   // 总是和大消除同时发生，等于永远看不见。两者冲突时让里程碑赢，它更少见。
   checkMilestone();
-  if (game.score > game.best){
+  // 练习局不刷最高分。endGame 那条早就挡了，但这里是**每次锁定**都会走的实时刷新，
+  // 原来没挡：练习里落两块就把纪录改了（实测 0 → 76）。
+  if (!practice && game.score > game.best){
     // 破纪录的检测挪到 syncHud 了 —— 分数有三个增长入口（scoreFor /
     // clearFullNow / 软降），只在这里判会漏：道具消行把你推过纪录线时不响。
     game.best = game.score; writeBest(game.best);
@@ -2214,8 +2261,10 @@ function drawCell(c, px, py, size, color, opts = {}){
   }
 
   if (garbage){
-    // 底部顶上来的灰线：虚线框 + 很淡的填充，一眼能和自己的方块分开
-    c.fillStyle = 'rgba(150,170,205,.30)';
+    // 底部顶上来的灰线：虚线框 + 灰色填充，一眼能和自己的方块分开。
+    // 填充从 .30 提到 .52 —— 原来太淡，一片灰线看着是空心的，盘面显得稀。
+    // 能和自己的方块分开靠的是「灰色 + 虚线框」，不靠它透明。
+    c.fillStyle = 'rgba(150,170,205,.52)';
     roundRect(c, x, y, d, d, R);
     c.fill();
     c.strokeStyle = 'rgba(205,218,242,.62)';
@@ -2371,8 +2420,12 @@ function drawStatic(){
       if (!t) continue;
       if (squash && squash.keys.has(y * COLS + x)) continue;   // 这几格由主画布带缩放画
       // 暗幕：只剩轮廓，逼你记棋盘。走 ghost 那套画法，不另写一份。
-      drawCell(bgCtx, x * CELL, (y - BUFFER) * CELL, CELL, colorOf(t),
-               evBlackout() ? { ghost: true } : { garbage: t === GARBAGE });
+      // 练习不涨灰线，盘面上的 X 全是关卡预置的格子 —— 按实心方块画。虚线框是给
+      // 普通局里「这是顶上来的灰线」用的，练习里只会显得空。颜色压到暗一档的石板灰：
+      // 灰线那个浅灰画成实心太亮，会抢掉落点虚影和手上那块，槽的形状反而不突出。
+      const preset = practice && t === GARBAGE;
+      drawCell(bgCtx, x * CELL, (y - BUFFER) * CELL, CELL, preset ? PRESET_COLOR : colorOf(t),
+               evBlackout() ? { ghost: true } : { garbage: t === GARBAGE && !preset });
     }
   }
   staticDirty = false;
@@ -6597,6 +6650,17 @@ function init(){
 
   // 必须包一层：addEventListener 会把 Event 当第一个参数传进去，
   $('startBtn').addEventListener('click', () => restart());
+  // ── 顶栏模式切换 ──
+  const msw = $('modeSw');
+  if (msw){
+    msw.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-m]');
+      if (!b) return;
+      if (b.dataset.m === 'practice' && !practice){ startPractice(); openPrSheet(); }
+      else if (b.dataset.m === 'normal' && practice) exitPractice();
+    });
+    syncModeSwitch();
+  }
   // ── 练习模式接线 ──
   const pb = $('practiceBtn');
   if (pb) pb.addEventListener('click', () => { startPractice(); openPrSheet(); });
@@ -6631,7 +6695,7 @@ function init(){
   on('prDone',  () => closePrSheet());
   on('prReset', () => { if (practiceLevel) practiceLoad(practiceLevel.k); closePrSheet(); });
   on('prFree',  () => { startPractice(); closePrSheet(); });
-  on('prExit',  () => { closePrSheet(); exitPractice(); });
+  on('prExit',  () => exitPractice());
   const psh = $('prSheet');
   if (psh) psh.addEventListener('click', (e) => { if (e.target === psh) closePrSheet(); });
   $('againBtn').addEventListener('click', () => restart());
@@ -6769,12 +6833,11 @@ function init(){
   syncMuteBtn();
 
   // 上次没打完的那局还在，就给个「接着玩」的入口
-  const save = readSave();
-  if (save){
-    $('resumeScore').textContent = (save.score || 0).toLocaleString();
-    $('overlay').classList.add('has-save');
-    $('resumeSaveBtn').addEventListener('click', () => restoreGame(save));
-  }
+  syncResume();
+  $('resumeSaveBtn').addEventListener('click', () => {
+    const save = readSave();
+    if (save) restoreGame(save);
+  });
 
   $('overlay').dataset.mode = 'start';
   $('overlay').classList.add('show');
@@ -6831,6 +6894,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },
   get demoRunning(){ return demoRunning; }, get undoDepth(){ return undoStack.length; },
+  syncResume, syncModeSwitch,
   practiceSolve, practiceDemo, parseActs, doAct, goalName,
   dbg, peek: () => ({ clearing, grounded, lockTimer, lockResets, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
 

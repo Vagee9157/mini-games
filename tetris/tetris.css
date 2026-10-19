@@ -788,6 +788,27 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
   height: 30px;
 }
 .tbtn-sq svg{ width: 17px; height: 17px; }
+/* hidden 属性要赢过上面的 display —— 原来 .tbtn-sq{display:inline-flex} 把它盖掉了，
+   标准版顶栏的「?」本该藏着却一直显示，点开是疯狂版的规则（变异块、金块……）。 */
+.tbtn[hidden]{ display: none; }
+
+/* 顶栏模式切换：普通 | 练习 */
+.modesw{
+  flex: none; display: inline-flex; gap: 2px; padding: 2px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.13);
+}
+.modesw button{
+  font: inherit; font-size: 12px; line-height: 1;
+  padding: 6px 9px; border: 0; border-radius: 8px;
+  background: none; color: var(--ink-soft); cursor: pointer;
+}
+.modesw button.on{
+  background: linear-gradient(180deg, rgba(127,227,255,.22), rgba(127,227,255,.08));
+  color: #7fe3ff;
+}
+body.practising .modesw{ border-color: rgba(127,227,255,.5); }
 .tbtn-sq .cross{ display: none; }
 .tbtn-sq.muted{ color: var(--ink-dim); }
 .tbtn-sq.muted .wave{ display: none; }
@@ -1559,3 +1580,18 @@ body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }
    这条必须留在文件末尾：上面的 .k-drop{ margin: 0 6px } 和它特异性相同，
    写在前面会被后者盖掉（第一版就是这么失效的，实测 42px 没变）。 */
 @media (max-width: 360px){ .k-drop{ margin: 0 3px; } }
+
+/* 有模式开关的顶栏（只在标准版）：手机宽度上「样式 / 暂停 / 重开」只留图标。
+   实测 iPhone 13 带文字要 422px、顶栏只有 370px，会折行；收成图标之后余 30 多 px。
+   用 :has 只管标准版 —— 疯狂版没有开关，顶栏照旧带文字。 */
+@media (max-width: 480px){
+  .bar:has(.modesw) .tbtn-ic span{ display: none; }
+  .bar:has(.modesw) .tbtn-ic{ padding: 6px 8px; gap: 0; }
+}
+/* 窄屏顶栏：加了模式开关之后，320 宽排不下（按钮已经只剩图标了）。
+   「合集」两个字收起来只留箭头，开关再紧一点。 */
+@media (max-width: 360px){
+  .bar:has(.modesw) .back span{ display: none; }
+  .modesw button{ font-size: 11px; padding: 6px 7px; }
+  .bar:has(.modesw){ gap: 6px; }
+}
