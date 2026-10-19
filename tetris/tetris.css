@@ -638,7 +638,10 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 .pads{
   grid-area: pads;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* 列宽：左移/右移最宽（用得最多，用户要求再长一点），软降窄一档（夹在右移和
+     落底之间，老按错）。软降和落底各自带左右死区边距，所以那两列给最小宽度兜底，
+     保证扣掉死区之后键本身仍 ≥ 44pt；剩下的宽度按 fr 分，优先给左右移。 */
+  grid-template-columns: 1.35fr 1.35fr minmax(56px, .85fr) minmax(56px, 1fr) 1fr;
   gap: 9px;
   align-items: start;
 }
@@ -677,6 +680,10 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 /* 落底和其他三个等高、上下对齐，只在左右各留 6px 死区。
    高度压矮那版看着一排不齐，防误触换成横向留白这一条。 */
 .k-drop{ margin: 0 6px; }
+/* 软降：和落底一样左右留死区，再矮一圈、上下居中 —— 上下也空出来，
+   拇指从右移滑过来、或者往落底按的时候，擦边不会碰到它。
+   尺寸底线 44pt，布局测试里卡着。 */
+.k-soft{ margin: 0 6px; min-height: 46px; align-self: center; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);
@@ -849,7 +856,13 @@ body.practising .modesw{ border-color: rgba(127,227,255,.5); }
   .pads{ display: contents; }
   .pad-l{ grid-area: padl; align-self: end; }
   .pad-r{ grid-area: padr; align-self: end; }
-  .pad-g{ gap: 7px; }
+  /* 竖屏里 .pad-g 是 display:contents（五个键摊成一排），横屏得恢复成网格 ——
+     grid-area 写在 display:contents 的元素上不生效。加软降键那次只改了竖屏，
+     横屏两组按键区尺寸直接变 0，五个键摊成 230px 宽的大横条、落底横在盘面
+     正下方、盘面从 150×300 缩到 120×240。软降跟在左组（左移 右移 软降），
+     和竖屏顺序一致。 */
+  .pad-g{ display: grid; gap: 7px; grid-template-columns: 1fr 1fr; }
+  .pad-l{ grid-template-columns: 1fr 1fr .85fr; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
   .k-drop{ margin: 0 6px; }
@@ -1579,7 +1592,12 @@ body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }
    死区变薄但还在，总比按不中强。
    这条必须留在文件末尾：上面的 .k-drop{ margin: 0 6px } 和它特异性相同，
    写在前面会被后者盖掉（第一版就是这么失效的，实测 42px 没变）。 */
-@media (max-width: 360px){ .k-drop{ margin: 0 3px; } }
+@media (max-width: 360px){
+  .k-drop{ margin: 0 3px; }
+  /* 320 宽：死区收窄（软降 2px、落底 3px），兜底宽度跟着降到 48 / 50 */
+  .pads{ grid-template-columns: 1.25fr 1.25fr minmax(48px, .9fr) minmax(50px, 1fr) 1fr; }
+  .k-soft{ margin: 0 2px; min-height: 44px; }
+}
 
 /* 有模式开关的顶栏（只在标准版）：手机宽度上「样式 / 暂停 / 重开」只留图标。
    实测 iPhone 13 带文字要 422px、顶栏只有 370px，会折行；收成图标之后余 30 多 px。

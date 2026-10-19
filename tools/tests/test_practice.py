@@ -134,9 +134,9 @@ JS = r"""() => {
     const okSolve = T.practiceSolve(lv.k);
     ok(okSolve, `「${lv.n}」照解法回放能过关（${lv.solution.join(' → ')}；做到第 ${T.practiceStep}/${lv.goals.length} 步）`);
   }
-  // 解法只能用手机上按得出来的键：左右、软降、顺时针、落底
+  // 解法只能用手机上按得出来的键：左右、软降、顺时针、落底、暂存（点 HOLD 框）
   for (const lv of T.LEVELS){
-    const bad = lv.solution.join('').replace(/[LRdCH0-9]/g, '');
+    const bad = lv.solution.join('').replace(/[LRdCHX0-9]/g, '');
     ok(bad === '', `「${lv.n}」解法只用手机有的键${bad ? '，多了：' + bad : ''}`);
   }
   // 固定出块顺序生效：开局那块就是 queue[0]，NEXT 第一个是 queue[1]
@@ -392,7 +392,10 @@ LAYOUT = r"""() => {
   }
   const bb = rect(document.querySelector('.board-box'));
   const bar = document.querySelector('.bar');
-  return { cell: +(bb.height / 20).toFixed(1), worst: Math.round(worst), who,
+  // 每个键的宽高都不能低于 44pt（软降缩小之后尤其要卡）
+  const keys = [...document.querySelectorAll('.pads .k')].map(k => rect(k));
+  const keyMin = Math.round(Math.min(...keys.map(r => Math.min(r.width, r.height))));
+  return { cell: +(bb.height / 20).toFixed(1), worst: Math.round(worst), who, keyMin,
            scroll: document.documentElement.scrollHeight - innerHeight,
            barH: Math.round(rect(bar).height), barWrap: bar.scrollWidth > bar.clientWidth + 1 };
 }"""
@@ -420,11 +423,45 @@ with sync_playwright() as p:
             (n['worst'] == 0, f"{dev} 正常局右栏不压顶栏/按键（最大越界 {n['worst']}px {n['who']}）"),
             (pr['scroll'] <= 0, f"{dev} 练习时页面不出现滚动（{pr['scroll']}px）"),
             (not n['barWrap'] and n['barH'] <= 40, f"{dev} 顶栏加了模式开关不折行、不变高（高 {n['barH']}px）"),
+            (n['keyMin'] >= 44, f"{dev} 每个键都不小于 44pt（最小一边 {n['keyMin']}px）"),
         ]
         print(f"== 布局 {dev} ==")
         for c, m in checks:
             print("  ", ('PASS ' if c else 'FAIL ') + m)
             if not c: fails += 1
+    # ── 横屏 ──
+    # 加软降键那次只验了竖屏，横屏两组按键区被 display:contents 吃成 0 尺寸、五个键摊成
+    # 大横条、落底横在盘面底下、盘面从 150×300 缩到 120×240 —— 隔了一周才发现。
+    pg = b.new_page(**p.devices['iPhone 13 landscape'])
+    pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
+    pg.goto(f"http://127.0.0.1:{port}/tetris/index.html")
+    pg.wait_for_function("() => !!window.__tetris")
+    pg.evaluate("() => document.getElementById('startBtn').click()")
+    pg.wait_for_timeout(300)
+    L = pg.evaluate("""() => {
+      const r = e => e.getBoundingClientRect();
+      const bb = r(document.querySelector('.board-box'));
+      const keys = [...document.querySelectorAll('.pads .k')];
+      const hitBoard = keys.filter(k => { const q = r(k);
+        return q.right > bb.left && q.left < bb.right; }).map(k => k.querySelector('em').textContent);
+      const pl = r(document.querySelector('.pad-l')), pr = r(document.querySelector('.pad-r'));
+      return { boardH: Math.round(bb.height), hitBoard,
+               groups: pl.width > 0 && pr.width > 0,
+               keyMin: Math.round(Math.min(...keys.map(k => Math.min(r(k).width, r(k).height)))),
+               scroll: [document.documentElement.scrollWidth - innerWidth,
+                        document.documentElement.scrollHeight - innerHeight] };
+    }""")
+    pg.close()
+    print("== 布局 iPhone 13 横屏 ==")
+    for c, m in (
+        (L['groups'], '左右两组按键区都在（不是 0 尺寸）'),
+        (not L['hitBoard'], f"没有键压在盘面那一列上（压着的：{L['hitBoard'] or '无'}）"),
+        (L['boardH'] >= 280, f"盘面高 {L['boardH']}px（坏掉那版是 240）"),
+        (L['keyMin'] >= 44, f"每个键都不小于 44pt（最小一边 {L['keyMin']}px）"),
+        (L['scroll'] == [0, 0], f"不出现滚动（{L['scroll']}）"),
+    ):
+        print("  ", ('PASS ' if c else 'FAIL ') + m)
+        if not c: fails += 1
     b.close()
 srv.shutdown(); srv.server_close()
 sys.exit(1 if fails else 0)

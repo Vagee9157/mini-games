@@ -994,6 +994,7 @@ let practice = false;
 let practiceLevel = null;    // 当前这一关（LEVELS 里的对象）；null = 自由练习
 let practiceStep = 0;        // 多步关卡做到第几步了
 let practiceDone = false;
+let practiceReps = 0;        // 这一关自己做到了几次（演示不算）。换关清零
 let demoRunning = false;     // 正在放演示：重力和锁定计时都停，玩家输入也先挡掉
 let lastClearB2B = false;    // scoreFor 写，practiceCheck 读 —— 判「这一下 B2B 有没有接上」
 let undoStack = [];          // 每次锁定前压一份快照
@@ -1047,7 +1048,7 @@ function practiceUndo(){
 // 解法都只用顺时针 —— 手机上只有那一个旋转键，演示里出现逆时针等于教了个按不出来的操作。
 const LEVELS = [
   // ─ 单招：一块定生死，学「这个形状怎么转进去」─
-  { k:'tss', n:'T-spin 单', group:'single', queue:['T'],
+  { k:'tss', n:'T-spin 单', group:'tspin', queue:['T'],
     goals:[{ spin:'tspin', n:1 }],
     tip:'T 在槽口上方竖着软降下去，贴地之后再转进去 —— 单行吃到 ' +
         [400,800,1200,1600][1] + ' 分，是普通单行的八倍',
@@ -1055,14 +1056,14 @@ const LEVELS = [
           '#...#####.',
           '##.#######'],
     solution:['CL2d19CH'] },
-  { k:'tsd', n:'T-spin 双', group:'single', queue:['T'],
+  { k:'tsd', n:'T-spin 双', group:'tspin', queue:['T'],
     goals:[{ spin:'tspin', n:2 }],
     tip:'本作分数效率最高的一招：接上 B2B 是每行 900 分，四消才 300',
     rows:['.#........',
           '#...######',
           '##.#######'],
     solution:['CL2d19CH'] },
-  { k:'tetris', n:'四消井', group:'single', queue:['I'],
+  { k:'tetris', n:'四消井', group:'basic', queue:['I'],
     goals:[{ n:4 }],
     tip:'九列铺平、留一列井，等 I 块。每行 200 分，接上 B2B 是 300',
     rows:['#########.',
@@ -1070,7 +1071,7 @@ const LEVELS = [
           '#########.',
           '#########.'],
     solution:['CR4d18H'] },
-  { k:'pc', n:'全消', group:'single', queue:['O'],
+  { k:'pc', n:'全消', group:'basic', queue:['O'],
     goals:[{ perfect:true }],
     tip:'把盘面清空。全消按行数给 800~2000，还要再乘等级倍率',
     rows:['########..',
@@ -1078,7 +1079,7 @@ const LEVELS = [
     solution:['R4d20H'] },
 
   // ─ 组合：几块连起来，学「搭 → 旋 → 接下一招」，以及怎么不断 B2B ─
-  { k:'eave', n:'搭屋檐 → T 双', group:'combo', queue:['O','T'],
+  { k:'eave', n:'搭屋檐 → T 双', group:'tspin', queue:['O','T'],
     goals:[{ spin:'tspin', n:2 }],
     tip:'槽是现成的，缺的是头顶那块屋檐。先把 O 放到左边盖住槽口一角，' +
         'T 就只能转进去 —— 这就是「搭 TSD」的全部诀窍',
@@ -1109,6 +1110,24 @@ const LEVELS = [
           '#...######',
           '##.#######'],
     solution:['CL2d15CH', 'CL2d19CH'] },
+
+
+
+  // ─ 组合：新增 ─
+  { k:'hold', n:'先存后旋', group:'combo', queue:['I','T'],
+    goals:[{ spin:'tspin', n:2 }, { n:4, b2b:true }],
+    tip:'先来的是 I，可井口被封着，现在放哪都是浪费。点 HOLD 把 I 存起来，' +
+        '用 T 旋把井打开，下一块再点 HOLD 把 I 换出来打四消',
+    rows:['.#........',
+          '#...######',
+          '##.#######',
+          '.#########',
+          '.#########',
+          '.#########',
+          '.#########'],
+    // 手写拼出来的（求解器不搜 HOLD）：X 存 I → T 走「T 双 → 四消」那条 → 下一块 X 换回 I
+    solution:['XCL2d15CH', 'XCL5d18H'] },
+
 ];
 // T-spin 三没收进来：它要求前四次踢墙全部失败、第五次 (+1,+2) 才把 T 甩进深槽，
 // 而那两个条件互相打架 —— 起手位要求槽上方那一行空着，可那样第二次踢墙就先成功了。
@@ -1117,6 +1136,7 @@ const LEVEL_BY = Object.fromEntries(LEVELS.map(l => [l.k, l]));
 
 const SPIN_NAME = ['', '单', '双', '三'];
 function goalName(g){
+  if (g.combo !== undefined) return g.combo === 0 ? '消一行（起连）' : g.combo + ' 连击';
   let t = g.perfect ? '全消'
         : g.spin === 'tspin' ? 'T-spin ' + (SPIN_NAME[g.n] || g.n)
         : g.spin === 'mini' ? 'mini T-spin'
@@ -1136,6 +1156,7 @@ function practiceLoad(k){
   if (!practice || !lv) return;
   demoRunning = false;
   undoStack.length = 0;
+  if (practiceLevel !== lv) practiceReps = 0;
   practiceLevel = lv; practiceStep = 0; practiceDone = false;
   for (let y = 0; y < TOTAL_ROWS; y++) game.board[y].fill(null);
   // 底对齐：最后一行贴盘底
@@ -1163,6 +1184,7 @@ function practiceCheck(n, spin, perfect){
   const goals = practiceLevel.goals;
   const g = goals[practiceStep];
   const hit = (g.spin === undefined || spin === g.spin)
+           && (g.combo === undefined || (n > 0 && game.combo >= g.combo))
            && (g.n === undefined || n === g.n)
            && (g.perfect === undefined || !!perfect === g.perfect)
            && (g.b2b === undefined || lastClearB2B === g.b2b);
@@ -1176,8 +1198,15 @@ function practiceCheck(n, spin, perfect){
   if (practiceStep >= goals.length){
     practiceDone = true;
     if (!demoRunning){
-      showToast('✓ ' + practiceLevel.n + '　做到了', 2600);
+      practiceReps++;
+      showToast('✓ ' + practiceLevel.n + '　第 ' + practiceReps + ' 次做到', 2000);
       sfx('tetris', 1.25); buzz([40, 30, 40, 30, 90]);
+      // 反复练：自动重摆同一关。手感靠的是一遍遍重复，不是过一次就算会了。
+      // 只认自己打出来的 —— 演示和测试里的同步回放都在 demoRunning 下跑，不会触发。
+      const lv = practiceLevel;
+      setTimeout(() => {
+        if (practice && practiceLevel === lv && practiceDone && !demoRunning) practiceLoad(lv.k);
+      }, 1500);
     }
   } else if (!demoRunning){
     showToast('第 ' + practiceStep + ' 步 ✓　接着：' + goalName(goals[practiceStep]), 2400);
@@ -1285,10 +1314,11 @@ function syncPractice(){
   const g = $('prGoal');
   if (g){
     if (!lv) g.textContent = '自由练习';
-    else if (practiceDone) g.textContent = '✓ ' + lv.n;
+    else if (practiceDone) g.textContent = '✓ ' + lv.n + (practiceReps > 1 ? '　×' + practiceReps : '');
     else if (lv.goals.length > 1)
-      g.textContent = '第 ' + (practiceStep + 1) + '/' + lv.goals.length + ' 步　' + goalName(lv.goals[practiceStep]);
-    else g.textContent = '目标　' + goalName(lv.goals[0]);
+      g.textContent = '第 ' + (practiceStep + 1) + '/' + lv.goals.length + ' 步　' + goalName(lv.goals[practiceStep])
+                      + (practiceReps ? '　✓×' + practiceReps : '');
+    else g.textContent = '目标　' + goalName(lv.goals[0]) + (practiceReps ? '　✓×' + practiceReps : '');
   }
   const t = $('prTip');
   if (t) t.textContent = demoRunning ? '演示中 —— 看它先把块送到哪、在哪一刻转'
@@ -6666,7 +6696,7 @@ function init(){
   if (pb) pb.addEventListener('click', () => { startPractice(); openPrSheet(); });
   const plv = $('prLevels');
   if (plv){
-    plv.innerHTML = [['single', '单招'], ['combo', '组合']].map(([g, t]) =>
+    plv.innerHTML = [['basic', '基本功'], ['tspin', 'T 旋'], ['combo', '组合']].map(([g, t]) =>
       '<span class="pr-grp">' + t + '</span>' + LEVELS.filter(l => l.group === g).map(l =>
         '<button type="button" data-lv="' + l.k + '">' + l.n + '</button>').join('')).join('');
     plv.addEventListener('click', (e) => {
@@ -6894,6 +6924,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },
   get demoRunning(){ return demoRunning; }, get undoDepth(){ return undoStack.length; },
+  get practiceReps(){ return practiceReps; },
   syncResume, syncModeSwitch,
   practiceSolve, practiceDemo, parseActs, doAct, goalName,
   dbg, peek: () => ({ clearing, grounded, lockTimer, lockResets, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
