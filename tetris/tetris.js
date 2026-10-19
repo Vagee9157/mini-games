@@ -5954,6 +5954,7 @@ function bindButtons(){
   const map = [
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
+    ['btnSoft',  () => { softDropping = true;  }, () => { softDropping = false; }],
     ['btnCw',    () => { preHeld.cw = true;  tryRotate(1);  }, () => { preHeld.cw = false;  }],
     ['btnDrop',  () => hardDrop(),      null],
     // HOLD 走同一套 touch 处理，不然它比别的键慢半拍（click 要等浏览器确认不是双击/滚动）

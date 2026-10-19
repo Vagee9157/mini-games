@@ -136,6 +136,70 @@ JS = r"""() => {
   T.practicePick('T');
   ok(T.game.piece && T.game.piece.type === 'T', `指定出块生效（现在是 ${T.game.piece && T.game.piece.type}）`);
 
+  // ── 软降（手机上原来没有这个键，T 旋等于做不出来）──
+  T.startPractice();
+  for (let y=0;y<T.TOTAL_ROWS;y++) T.game.board[y].fill(null);
+  T.practicePick('T');
+  ok(!!document.getElementById('btnSoft'), '手机按键区有软降键');
+  const y0 = T.game.piece.y, s0 = T.game.score;
+  // 模拟按住：走够时间让它掉几格
+  // 按键走的是 touchstart / mousedown，不是 pointer 事件
+  const g = T.gravityFor(T.game.level);
+  const soft = document.getElementById('btnSoft');
+  soft.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+  T.step(g / 4);                   // 这点时间自然重力一格都掉不了
+  const dy = T.game.piece ? T.game.piece.y - y0 : -1;
+  ok(dy >= 4, `按住软降明显更快（${g/4}ms 掉了 ${dy} 格，自然重力同期是 0 格）`);
+  ok(T.game.score - s0 === dy, `软降每格 +1 分（掉 ${dy} 格，加了 ${T.game.score - s0}）`);
+  soft.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+  const y1 = T.game.piece.y, s1 = T.game.score;
+  T.step(g / 4);
+  ok(T.game.piece.y === y1 && T.game.score === s1, '松手就停');
+
+  // 软降落地**不锁死** —— 这是它和落底唯一的本质区别，也是 T 旋成立的前提
+  T.startPractice();
+  for (let y=0;y<T.TOTAL_ROWS;y++) T.game.board[y].fill(null);
+  T.practicePick('T');
+  const pc = T.game.piece, n0 = T.game.pieces;
+  while (!T.collides('T', pc.x, pc.y+1, pc.rot)) pc.y++;
+  T.step(16);
+  ok(T.game.pieces === n0 && T.game.piece && T.game.piece.type === 'T',
+     '软降贴地后没有立刻锁定（还有锁定延迟）');
+  ok(T.tryRotate(1) && T.game.lastWasRot === true, '贴地之后还能转，lastWasRot 为真');
+
+  // 只用手机那套键（左右 + 顺时针 + 软降），TSD 还做不做得出来
+  T.startPractice(); T.practiceLoad('tsd');
+  const bd = T.game.board.map(r=>r.slice());
+  T.practicePick('T');
+  const pp = T.game.piece;
+  const kk = s2 => s2.x+','+s2.y+','+s2.rot+','+(s2.r?1:0);
+  const st0 = {x:pp.x,y:pp.y,rot:pp.rot,r:false,kick:0};
+  const sn = new Set([kk(st0)]); const qq=[st0]; let tsd=0, gd=0;
+  while (qq.length && gd++ < 30000){
+    const st = qq.shift();
+    T.game.board = bd.map(r=>r.slice());
+    T.game.piece = {type:'T',x:st.x,y:st.y,rot:st.rot,mod:null};
+    T.game.lastWasRot = st.r; T.game.lastRotKick = st.kick;
+    if (T.collides('T', st.x, st.y+1, st.rot)){
+      const sp = T.detectTSpin(); const b = T.game.board; let bad=false;
+      for (const [cx,cy] of T.cellsOf('T', st.rot)){ const X=st.x+cx, Y=st.y+cy;
+        if (X<0||X>=T.COLS||Y<0||Y>=T.TOTAL_ROWS){bad=true;break;} b[Y][X]='T'; }
+      if (!bad){ let f=0; for (let y=0;y<T.TOTAL_ROWS;y++) if (b[y].every(c=>!!c)) f++;
+        if (sp === 'tspin' && f === 2) tsd++; }
+    }
+    const pu = (nx,ny,nr) => { if (T.collides('T',nx,ny,nr)) return;
+      const ns={x:nx,y:ny,rot:nr,r:false,kick:0};
+      if (sn.has(kk(ns))) return; sn.add(kk(ns)); qq.push(ns); };
+    pu(st.x-1,st.y,st.rot); pu(st.x+1,st.y,st.rot); pu(st.x,st.y+1,st.rot);
+    // 手机上只有顺时针一个旋转键
+    T.game.board = bd.map(r=>r.slice());
+    T.game.piece = {type:'T',x:st.x,y:st.y,rot:st.rot,mod:null};
+    if (T.tryRotate(1)){ const q3=T.game.piece;
+      const ns={x:q3.x,y:q3.y,rot:q3.rot,r:true,kick:T.game.lastRotKick|0};
+      if (!sn.has(kk(ns))){ sn.add(kk(ns)); qq.push(ns); } }
+  }
+  ok(tsd > 0, `只用手机那套键（左右 + 顺时针 + 软降）也做得出 TSD（${tsd} 个落点）`);
+
   // 退出练习要把一切收干净
   T.exitPractice();
   ok(T.practice === false && !document.body.classList.contains('practising'),

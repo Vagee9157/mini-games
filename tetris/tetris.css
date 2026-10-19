@@ -628,20 +628,25 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 }
 
 /* ── 按键区 ── */
+/* 一排五个：左移 · 右移 · 软降 ｜ 落底 · 变换。
+   为什么是一排而不是两排：按键区下方只剩 32px，再起一行要 67px，差额只能
+   从盘面身上出 —— 实测两排布局会把格子从 26px 压到 23px。盘面是全程盯着
+   看的东西，按键从 86px 缩到 67px 仍然远在 44pt 可点阈值之上，这笔更划算。
+
+   落底夹在软降和变换中间，它自带的 6px 死区边距正好把「想按软降按成落底」
+   这个方向隔开 —— 那是这里唯一不可撤销的操作。 */
 .pads{
   grid-area: pads;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(5, 1fr);
   gap: 9px;
   align-items: start;
 }
-/* 左右各三个：上排两个主力键，下排一个跨满两格的矮键。
-   左下是逆转，右下是落底 —— 都属于"想清楚再按"的操作，压矮下移防误触。 */
-.pad-g{
-  display: grid;
-  gap: 9px;
-  grid-template-columns: 1fr 1fr;
-}
+/* 分组只保留语义（左边走位、右边动作），布局交给 .pads 那一排五列 */
+.pad-g{ display: contents; }
+/* 窄屏收紧，见文件末尾那条 @media —— .k-drop 的边距在下面还会被重设一次，
+   覆盖必须放在它之后，否则同特异性下后者胜。 */
+@media (max-width: 360px){ .pads{ gap: 7px; } }
 .k{
   display: flex;
   flex-direction: column;
@@ -1532,3 +1537,11 @@ body.practising .prbar{
 .pr-b:disabled{ opacity: .38; cursor: default; }
 /* 练习局不该让人以为在冲分 —— 把分数那格压暗 */
 body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }
+
+
+/* 窄屏（iPhone SE 一类 320px）：五列之后落底只剩 42px，低于 44pt 的可点下限
+   —— 它自带的 6px 死区边距在这个宽度下反而把自己挤没了。收窄到 3px 换回 48px，
+   死区变薄但还在，总比按不中强。
+   这条必须留在文件末尾：上面的 .k-drop{ margin: 0 6px } 和它特异性相同，
+   写在前面会被后者盖掉（第一版就是这么失效的，实测 42px 没变）。 */
+@media (max-width: 360px){ .k-drop{ margin: 0 3px; } }
