@@ -2547,12 +2547,14 @@ function drawCell(c, px, py, size, color, opts = {}){
   c.globalAlpha = alpha;
 
   if (ghost){
-    c.globalAlpha = alpha * .40;
+    // 落点影子是转完再落底时唯一能确认「会落到哪」的东西：原来 .40/.07 在手机
+    // 亮度下几乎看不见，转一下（I 会挪一列）就看不出落点变了。
+    c.globalAlpha = alpha * .58;
     c.strokeStyle = color;
     c.lineWidth = Math.max(1.5, d * .075);
     roundRect(c, x + 1, y + 1, d - 2, d - 2, R);
     c.stroke();
-    c.globalAlpha = alpha * .07;
+    c.globalAlpha = alpha * .14;
     c.fillStyle = color;
     c.fill();
     c.restore();
@@ -6417,7 +6419,7 @@ function tick(now){
 
 const held = { left: false, right: false };
 // 按住旋转 / 暂存键的时候下一块正好出来，就让它带着这个动作出场（IRS / IHS）。
-// 连着摆块的时候手感顺很多，标准实现都有。
+// 连着摆块的时候手感顺很多，标准实现都有。只接键盘，屏幕按键不接（见 bindButtons）。
 const preHeld = { cw: false, ccw: false, hold: false };
 let armPre = false;    // 只有「锁定后自动出的那一块」才吃 IRS/IHS
 const repeat = { left: 0, right: 0, started: { left: false, right: false } };
@@ -6532,16 +6534,29 @@ window.addEventListener('keyup', (e) => {
   if (act === 'hold')  preHeld.hold = false;
 });
 
+// 落底键连点保护：两下落底挨得太近（手抖、屏幕回弹算两次），第二下会把刚出生、
+// 还没看清的下一块一起砸下去。只拦屏幕按键，键盘不拦。
+const DROP_GUARD_MS = 160;
+let lastBtnDrop = -1e9;
+function btnHardDrop(){
+  const now = performance.now();
+  if (now - lastBtnDrop < DROP_GUARD_MS) return;
+  lastBtnDrop = now;
+  hardDrop();
+}
+
 // 底部按钮：按住能连发
 function bindButtons(){
   const map = [
     ['btnLeft',  () => press('left'),   () => release('left')],
     ['btnRight', () => press('right'),  () => release('right')],
     ['btnSoft',  () => { softDropping = true;  }, () => { softDropping = false; }],
-    ['btnCw',    () => { preHeld.cw = true;  tryRotate(1);  }, () => { preHeld.cw = false;  }],
-    ['btnDrop',  () => hardDrop(),      null],
+    // 屏幕按键不吃 IRS/IHS：键盘上按住旋转是有意的，触屏上多半是手指还没抬
+    // 就去按落底 —— 下一块出生就是转过的，正好落错地方。
+    ['btnCw',    () => tryRotate(1),    null],
+    ['btnDrop',  () => btnHardDrop(),   null],
     // HOLD 走同一套 touch 处理，不然它比别的键慢半拍（click 要等浏览器确认不是双击/滚动）
-    ['holdSlot', () => { preHeld.hold = true; holdPiece(); }, () => { preHeld.hold = false; }],
+    ['holdSlot', () => holdPiece(),     null],
     // 点 NEXT 换牌。标准版里 rerollPiece 开头就 !CRAZY 早退，等于没绑。
     ['nextSlot', () => rerollPiece(), null],
   ];
@@ -7198,7 +7213,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   feverStart, feverEnd, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
-  CLEAR_DRAW_MS,
+  CLEAR_DRAW_MS, DROP_GUARD_MS,
   LEVELS, LEVEL_BY, startPractice, exitPractice, practiceLoad, practicePick, practiceUndo, practiceCheck, detectTSpin,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },
