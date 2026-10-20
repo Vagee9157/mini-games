@@ -3031,6 +3031,9 @@ function layout(){
 
   for (const [cv, c] of [[nextCv, nextCtx], [holdCv, holdCtx]]){
     const r = cv.getBoundingClientRect();
+    // 存下 CSS 尺寸给 drawPreview 用：它画的时候再读 clientWidth，同一帧里前面刚写过
+    // 分数/行数的 DOM，读一下就是一次强制重排（实测它是普通局第二耗时的函数）
+    cv._w = r.width; cv._h = r.height;
     cv.width = Math.round(r.width * dpr);
     cv.height = Math.round(r.height * dpr);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -3430,7 +3433,8 @@ function drawHoldHint(c, w, h){
 }
 
 function drawPreview(){
-  const nw = nextCv.clientWidth, nh = nextCv.clientHeight;
+  // layout() 还没量到（样式没到位）时退回现读
+  const nw = nextCv._w || nextCv.clientWidth, nh = nextCv._h || nextCv.clientHeight;
   nextCtx.clearRect(0, 0, nw, nh);
   if (!nw || !nh) return;
 
@@ -3449,7 +3453,7 @@ function drawPreview(){
   }
 
   // hold
-  const hw = holdCv.clientWidth, hh = holdCv.clientHeight;
+  const hw = holdCv._w || holdCv.clientWidth, hh = holdCv._h || holdCv.clientHeight;
   holdCtx.clearRect(0, 0, hw, hh);
   if (game.hold) drawMini(holdCtx, game.hold, 0, 0, hw, hh, game.holdUsed ? .28 : 1, game.holdMod);
   else drawHoldHint(holdCtx, hw, hh);
@@ -3965,9 +3969,16 @@ function trimZeros(t){
   if (t.indexOf('.') < 0) return t;
   return t.replace(/0+$/, '').replace(/\.$/, '');
 }
+// 千分位手写，不用 toLocaleString：它每次都要走一遍 Intl，滚分动画每帧都调，
+// 实测是普通局里最耗时的一个函数。这里只会出现 0~9999 的整数（再大就换万/亿），
+// 逗号写死也和原来一致 —— 中文/英文环境下 toLocaleString 给的都是逗号。
 function fmtScore(v){
   v = Math.round(v);
-  if (v < 10000) return v.toLocaleString();
+  if (v < 10000){
+    if (v < 1000) return String(v);
+    const r = v % 1000;
+    return ((v / 1000) | 0) + ',' + (r < 10 ? '00' : r < 100 ? '0' : '') + r;
+  }
   if (v >= 100000000) return trimZeros((v / 100000000).toFixed(2)) + '亿';
   const w = v / 10000;
   let d = w < 100 ? 2 : w < 1000 ? 1 : 0;
@@ -3985,8 +3996,13 @@ function fmtScore(v){
 const STAT_FIT = { 6: .90, 7: .76, 8: .66, 9: .58 };
 function setStat(el, text){
   if (!el) return;
+  // 滚分动画的后半段每帧取整后是同一个数，原来照样每帧写一遍 textContent 和 --fit
+  if (el._stat === text) return;
+  el._stat = text;
   el.textContent = text;
-  el.style.setProperty('--fit', STAT_FIT[Math.min(9, text.length)] || 1);
+  // 字号档只跟字数有关，字数没变就别重设 —— 改 CSS 变量会让这一格重算样式
+  const fit = STAT_FIT[Math.min(9, text.length)] || 1;
+  if (el._fit !== fit){ el._fit = fit; el.style.setProperty('--fit', fit); }
 }
 
 function rollScore(snap){
