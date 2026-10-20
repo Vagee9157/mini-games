@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=9a6a665b">
+<link rel="stylesheet" href="tetris.css?v=a21090aa">
 </head>
 <body>
 <div class="topline"></div>
@@ -220,10 +220,13 @@
       <button class="pr-s" id="prDemo" type="button">演示</button>
       <button class="pr-s pr-menu" id="prMenu" type="button">关卡</button>
     </div>
-    <!-- 堆叠提示细栏：推荐的理由 + 跟推荐一致了几块。只有 body.hinting 时显示 -->
+    <!-- 堆叠提示细栏：推荐的理由（按规则说：找哪种台阶 · 为什么是这一处）+ 放对几块。
+         点理由那段开规则卡；「先自己找」把推荐藏起来，放完再亮。只有 body.hinting 时显示 -->
     <div class="hintbar" id="hintBar">
-      <b class="hint-why" id="hintWhy"></b>
+      <b class="hint-why" id="hintWhy" role="button" tabindex="0"></b>
       <span class="hint-score" id="hintScore"></span>
+      <button class="pr-s" id="hintHide" type="button">先自己找</button>
+      <button class="pr-s pr-menu hint-rules" id="hintRules" type="button">规则</button>
     </div>
     <!-- 每日练习细栏：这一段在练什么 + 计时/进度。堆叠段的推荐理由也写在这里，
          提示细栏那时候收起来 —— 两条一起挂盘面要少两行 -->
@@ -266,6 +269,16 @@
         <button class="pr-b" id="prExit" type="button">退出练习</button>
       </div>
       <button class="pbtn sheet-done" id="prDone">开始练</button>
+    </div>
+  </div>
+  <!-- 提示模式的规则卡：四条优先级（带这一局各犯几次）+ 七种块各找什么台阶。开着时方块停住 -->
+  <div class="sheet" id="hintSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>堆叠规则</h3></div>
+      <p class="pr-tip">高手不是每块都在想，是每种块来了都有默认去处：先找和它底面一样的台阶。推荐的落点里九成以上就是这么来的。</p>
+      <div class="hr-body" id="hintRulesBody"></div>
+      <button class="pr-b hr-switch" id="hintHideSw" type="button"></button>
+      <button class="pbtn sheet-done" id="hintDone">接着放</button>
     </div>
   </div>
   <!-- 每日练习面板：三段的状态和成绩 + 最近 7 天。开着时方块停住 -->
@@ -326,7 +339,7 @@
 
 </div>
 
-<script src="tetris.js?v=fe099261"></script>
+<script src="tetris.js?v=9845c978"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

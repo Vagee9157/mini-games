@@ -1404,6 +1404,7 @@ function startPractice(){
 // 一来普通局打到一半去练习的那一局就被跳过了，二来「切模式」不该顺手替你按「开始」。
 function exitPractice(){
   closePrSheet();
+  closeHintSheet();
   drillEnd();
   practice = false;
   hintMode = false; hintMove = null; hintBase = null;
@@ -1465,7 +1466,8 @@ function syncModeSwitch(){
 let hintMode = false;
 let hintMove = null;        // { x, y, rot, type, cells, why }
 let hintBase = null;        // 出块那一刻的盘面，落下后拿它评你放的位置
-let hintStats = { same: 0, total: 0, holes: 0 };
+// same = 和推荐一模一样；good = 和推荐一样好（含 same）；rules = 四条规则各犯了几次
+let hintStats = { same: 0, good: 0, total: 0, holes: 0, rules: [0, 0, 0, 0] };
 const HINT_WELL = COLS - 1;
 const HINT_DANGER = 13;     // 九列里最高的到这个高度就切保命（可见区 20 行）
 // 权重是让机器人只照着推荐放、跑出来调的（不涨灰线，每局 400~600 块）：
@@ -1573,41 +1575,124 @@ function lineValue(lines, danger){
   return lines * (danger ? HW.burnDanger : HW.burn);
 }
 
-// 当前块 × 下一块，两层全试，挑最终盘面分最高的
+// ── 读表面：每块的「默认去处」──
+// 一块的底面在每一列各有一个最低格。它能严丝合缝地落下（底下一格空都不留），当且仅当
+// 表面在这几列的高低和底面正好咬合。实测推荐的落点里 92% 都是这种贴合 —— 所以
+// 「每块来了，先找和它底面一样的台阶」就是提示模式背后那条主规则，把它直接告诉人。
+function bottomPattern(type, rot){
+  const low = {};
+  for (const [cx, cy] of cellsOf(type, rot)) low[cx] = Math.max(low[cx] ?? -99, cy);
+  const xs = Object.keys(low).map(Number).sort((a, b) => a - b);
+  const m = Math.max(...xs.map(x => low[x]));
+  return xs.map(x => m - low[x]);        // 表面要的相对高度，0 = 这几列里最低的那列
+}
+const PAT_NAME = {
+  '0': '竖插深缝', '00': '两列平', '10': '左高一格', '01': '右高一格', '20': '左高两格', '02': '右高两格',
+  '000': '三列平', '001': '平平高', '100': '高平平', '101': '中间凹一格', '0000': '四列平',
+  '110': '左两列高一格', '011': '右两列高一格',
+};
+function patGlyph(p){ return p.map(v => v <= 0 ? '▁' : v === 1 ? '▄' : '█').join(''); }
+// 显示用：▁▄█ 在手机字体里是一条下划线加个小块，台阶高低看不出来 —— 换成几根小柱子。
+// 原字符留在一个看不见的 <b> 里，复制、读屏、测试读 textContent 都还拿得到。
+// 只处理我们自己拼的文字（块名、规则名、数字），照样先转义再插。
+const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escHtml(t){ return String(t).replace(/[&<>"']/g, c => HTML_ESC[c]); }
+function stepsHTML(text){
+  return escHtml(text).replace(/[▁▄█]+/g, g => '<span class="stp"><b>' + g + '</b>'
+    + [...g].map(ch => '<s class="h' + '▁▄█'.indexOf(ch) + '"></s>').join('') + '</span>');
+}
+// 每种块不重样的贴合形状（S/Z/I 转两下就回原样，O 只有一种）
+const PIECE_FITS = {};
+function pieceFits(type){
+  if (PIECE_FITS[type]) return PIECE_FITS[type];
+  const out = [], seen = new Set();
+  for (const rot of (type === 'O' ? [0] : [0, 1, 2, 3])){
+    const pat = bottomPattern(type, rot), key = pat.join('');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ rot, pat, key, glyph: patGlyph(pat), name: PAT_NAME[key] || patGlyph(pat),
+               orient: type === 'O' ? '' : pat.length >= 3 ? '横' : '竖' });
+  }
+  return (PIECE_FITS[type] = out);
+}
+function fitFor(type, rot){ const k = bottomPattern(type, rot).join(''); return pieceFits(type).find(f => f.key === k); }
+// 这一手底下空了几格（0 = 贴合）。空着的格子会被这块盖住，就是洞
+function fitGaps(b, cells){
+  const low = {};
+  for (const [x, y] of cells) low[x] = Math.max(low[x] ?? -99, y);
+  let gaps = 0;
+  for (const x in low){
+    let top = TOTAL_ROWS;
+    for (let y = 0; y < TOTAL_ROWS; y++) if (b[y][x]){ top = y; break; }
+    gaps += Math.max(0, top - 1 - low[x]);
+  }
+  return gaps;
+}
+function inWell(cells){ return cells.some(c => c[0] === HINT_WELL); }
+function pitCount(f){
+  let n = 0;
+  for (let i = 0; i < f.field.length; i++){
+    const l = i > 0 ? f.field[i - 1] : 99, r = i + 1 < f.field.length ? f.field[i + 1] : 99;
+    if (Math.min(l, r) - f.field[i] >= 3) n++;
+  }
+  return n;
+}
+
+// 一手的分：放下之后，再给下一块挑最好的落点，看最终盘面
+function hintEval(b0, cells, nextType, danger){
+  const r1 = simPlace(b0, cells);
+  let score = -Infinity;
+  if (nextType){
+    for (const n of simDrops(r1.b, nextType)){
+      const r2 = simPlace(r1.b, n.cells);
+      const v = simScore(r2.b) + lineValue(r1.lines, danger) + lineValue(r2.lines, danger);
+      if (v > score) score = v;
+    }
+  }
+  if (score === -Infinity) score = simScore(r1.b) + lineValue(r1.lines, danger);
+  return { score, lines: r1.lines, b: r1.b };
+}
+
+// 当前块 × 下一块，两层全试，挑最终盘面分最高的。每个落点的分都留着，判「这也行」要用
 function hintBest(b0, type, nextType){
   const danger = simFeatures(b0).maxH >= HINT_DANGER;
   let best = null;
   const all = simDrops(b0, type);
   for (const m of all){
-    const r1 = simPlace(b0, m.cells);
-    let score = -Infinity;
-    if (nextType){
-      for (const n of simDrops(r1.b, nextType)){
-        const r2 = simPlace(r1.b, n.cells);
-        const v = simScore(r2.b) + lineValue(r1.lines, danger) + lineValue(r2.lines, danger);
-        if (v > score) score = v;
-      }
-    }
-    if (score === -Infinity) score = simScore(r1.b) + lineValue(r1.lines, danger);
-    if (!best || score > best.score) best = Object.assign({ score, lines: r1.lines }, m);
+    const e = hintEval(b0, m.cells, nextType, danger);
+    m.score = e.score; m.lines = e.lines; m.gaps = fitGaps(b0, m.cells);
+    if (!best || e.score > best.score) best = Object.assign({}, m);
   }
   return best ? { best, all, danger } : null;
 }
 
-// 一句话理由，最多两条，按重要性排
+// 推荐的理由：先说规则（找哪种台阶），再说为什么是这一处
 function hintWhy(b0, best, all, danger){
-  const f0 = simFeatures(b0), r1 = simPlace(b0, best.cells), f1 = simFeatures(r1.b);
-  const why = [];
-  if (r1.lines === 4) why.push('四消');
-  else if (r1.lines) why.push('消 ' + r1.lines + ' 行' + (danger ? '，先保命' : ''));
-  const makers = all.filter(m => simFeatures(simPlace(b0, m.cells).b).holes > f0.holes).length;
-  if (f1.holes <= f0.holes && makers * 2 >= all.length) why.push('不造洞');
-  if (f1.bump < f0.bump) why.push('补平台阶');
-  if (f1.accept.O && f1.accept.S && f1.accept.Z && !(f0.accept.O && f0.accept.S && f0.accept.Z))
-    why.push('O/S/Z 都有地方放了');
-  if (!danger && best.type !== 'I' && !best.cells.some(c => c[0] === HINT_WELL)
-      && f1.minH - f1.h[HINT_WELL] >= 2) why.push('井留着');
-  return why.slice(0, 2).join(' · ') || '放这里最稳';
+  const fit = fitFor(best.type, best.rot);
+  const shape = fit ? fit.glyph + ' ' + fit.name : '';
+  if (danger && best.lines) return '先保命 · 消 ' + best.lines + ' 行';
+  if (best.type === 'I' && best.cells.every(c => c[0] === HINT_WELL))
+    return best.lines === 4 ? '进井 · 四消' : best.lines ? '进井 · 消 ' + best.lines + ' 行' : '进井 · 等四消';
+  const fits = all.filter(m => m.gaps === 0);
+  if (!fits.length || best.gaps > 0) return '没处贴合 · 选洞最少的';
+  const key = cs => cs.map(c => c.join(',')).sort().join(';');
+  const others = fits.filter(m => key(m.cells) !== key(best.cells)).sort((a, b) => b.score - a.score);
+  if (!others.length) return shape + ' · 只有这一处贴合';
+  const alt = others[0];
+  const fb = simFeatures(simPlace(b0, best.cells).b), fa = simFeatures(simPlace(b0, alt.cells).b);
+  let why;
+  if (best.lines > alt.lines) why = '顺手消 ' + best.lines + ' 行';
+  else if (!danger && inWell(alt.cells) && !inWell(best.cells)) why = '别处会堵井';
+  else if (pitCount(fa) > pitCount(fb)) why = '别处会挖出深坑';
+  else if (fb.accept.O && fb.accept.S && fb.accept.Z && !(fa.accept.O && fa.accept.S && fa.accept.Z)) why = 'O/S/Z 都还有地方';
+  else if (fb.bump < fa.bump) why = '放完更平';
+  else why = '放完更低';
+  return shape + ' · ' + why;
+}
+// 「先自己找」时不给位置，只给这块该找哪几种台阶
+function pieceHintText(type){
+  if (type === 'I') return 'I 找　井　或　▁▁▁▁';
+  return type + ' 找　' + pieceFits(type).map(f => f.glyph).join('　或　');
 }
 
 function hintCompute(){
@@ -1615,28 +1700,102 @@ function hintCompute(){
   const p = game.piece;
   if (!hintMode || !p || game.over) return syncHint();
   const b0 = simBoard();
-  const r = hintBest(b0, p.type, game.queue[0]);
+  const next = game.queue[0];
+  const r = hintBest(b0, p.type, next);
   if (r){
-    hintMove = Object.assign({}, r.best, { why: hintWhy(b0, r.best, r.all, r.danger) });
+    hintMove = Object.assign({}, r.best, { why: hintWhy(b0, r.best, r.all, r.danger), next, danger: r.danger,
+                                           anyFit: r.all.some(m => m.gaps === 0) });
     hintBase = b0;
   }
   needsDraw = true;
   syncHint();
 }
 
-// 你放下之后：和推荐一样就记一笔；差得多才说一句，不唠叨
+// 「这也行」的容差：分差在这之内、洞也不比推荐多，就算放对了。
+// 很多时候有两三处一样好，原来只认绿框那一格，放了另一处也算错 —— 学的人会以为自己判断错了。
+// 取值是量出来的：机器人在容差内的落点里随机挑，3 局 × 400 块 ——
+//   容差 0  造洞 3.4%  四消占比 67%（只走推荐）
+//   容差 3  造洞 2.7%  四消占比 72%  ← 在波动范围内，约 19% 的块有不止一处可选
+//   容差 6  造洞 3.3%  四消占比 61%  ← 开始掉
+//   容差 25 造洞 3.6%  四消占比 55%
+// 所以 3：「这也行」得是真的一样好，不是差不多就行。test_hint 里锁着这条。
+const HINT_TOL = 3;
+// 四条规则，按优先级。判错时只说排最前的那条
+const HINT_RULES = [
+  { n: '①', t: '不留洞', d: '先找和这块底面一样的台阶，严丝合缝放下去' },
+  { n: '②', t: '表面要平', d: '几处都贴合时，挑放完最平、O/S/Z 都还有地方放的；别挖只有 I 能填的深坑' },
+  { n: '③', t: '井留给 I', d: '最右一列别塞别的块，等 I 来打四消' },
+  { n: '④', t: '堆高先保命', d: '堆到上半截了，能消就消，井也可以先填' },
+];
+let hintReveal = null;      // 「先自己找」时，放下之后把推荐亮一下 { cells, until }
+
+// 你放下之后：和推荐一样好就算对；不对就说违反了哪一条
 function hintJudge(p){
   if (!hintMode || !hintMove || !hintBase || p.type !== hintMove.type) return;
+  hintReveal = null;          // 上一块亮着的推荐作废，不然连着放两块会叠在一起
   const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
   const key = cs => cs.map(c => c.join(',')).sort().join(';');
+  const rec = hintMove, b0 = hintBase;
   hintStats.total++;
-  if (key(cells) === key(hintMove.cells)){ hintStats.same++; syncHint(); return; }
-  const h0 = simFeatures(hintBase).holes;
-  const mine = simPlace(hintBase, cells), rec = simPlace(hintBase, hintMove.cells);
-  const hm = simFeatures(mine.b).holes, hr = simFeatures(rec.b).holes;
-  hintStats.holes = (hintStats.holes || 0) + Math.max(0, hm - h0);
-  if (hm > hr) showToast('这一块造了 ' + (hm - h0) + ' 个洞 —— 绿框那里不会', 1800);
-  else if (simScore(mine.b) < simScore(rec.b) - 40) showToast('绿框那里更平', 1300);
+  const h0 = simFeatures(b0).holes;
+  const mine = hintEval(b0, cells, rec.next, rec.danger);
+  const fm = simFeatures(mine.b), fr = simFeatures(simPlace(b0, rec.cells).b);
+  hintStats.holes = (hintStats.holes || 0) + Math.max(0, fm.holes - h0);
+  const exact = key(cells) === key(rec.cells);
+  const good = exact || (rec.score - mine.score <= HINT_TOL && fm.holes <= fr.holes);
+  if (exact) hintStats.same++;
+  if (good) hintStats.good++;
+  // 放偏了，或者藏着推荐自己找的时候，放完把推荐亮一下对照
+  if (!exact && (hintHidden() || !good)){
+    // 消了行的话，盘面往下塌，亮出来的格子跟着挪
+    const full = [];
+    const nb = b0.map(r => r.slice());
+    for (const [x, y] of cells) if (y >= 0) nb[y][x] = true;
+    for (let y = 0; y < TOTAL_ROWS; y++) if (nb[y].every(Boolean)) full.push(y);
+    const shown = rec.cells.filter(([, y]) => !full.includes(y))
+                           .map(([x, y]) => [x, y + full.filter(r => r > y).length]);
+    hintReveal = { cells: shown, until: performance.now() + 1400 };
+    setTimeout(() => { needsDraw = true; }, 1450);
+  }
+  if (good){
+    if (!exact) showToast(hintHidden() ? '✓ 这也行' : '这也行 ✓　和绿框一样好', 900);
+    else if (hintHidden()) showToast('✓ 和推荐一样', 700);
+    syncHint();
+    return;
+  }
+  // 违反了哪一条：按优先级找第一条。提示只写「编号 + 一句话」，规则名在规则卡里 ——
+  // 带上规则名在手机上会折成三行压在盘面上
+  let r, msg;
+  const gaps = fitGaps(b0, cells);
+  if (fm.holes > fr.holes){
+    r = 0;
+    msg = gaps > 0 && rec.anyFit ? '留了 ' + gaps + ' 个洞，有能贴合的地方'
+                                 : '这一块造了 ' + (fm.holes - h0) + ' 个洞';
+  } else if (rec.danger && rec.lines > 0 && mine.lines === 0){
+    r = 3; msg = '堆高了，先消行';
+  } else if (!rec.danger && p.type !== 'I' && inWell(cells) && !inWell(rec.cells)){
+    r = 2; msg = '堵了井，最右列留给 I';
+  } else {
+    r = 1;
+    msg = pitCount(fm) > pitCount(fr) ? '挖出了只有 I 能填的深坑'
+        : !(fm.accept.O && fm.accept.S && fm.accept.Z) && (fr.accept.O && fr.accept.S && fr.accept.Z) ? '放完 O/S/Z 有块没地方放了'
+        : fm.bump > fr.bump ? '台阶变陡了' : '推荐那里放完更低更平';
+  }
+  hintStats.rules[r]++;
+  showToast(HINT_RULES[r].n + ' ' + msg, 2200);
+  syncHint();
+}
+
+// 「先自己找」：推荐不先给，放完再亮。每日练习的堆叠段强制这样 —— 跟着绿框放，
+// 一致率永远是 100%，量不出你自己会不会
+const HINT_HIDE_KEY = nsKey('hint.hide.v1');
+let hintHide = false;
+try { hintHide = localStorage.getItem(HINT_HIDE_KEY) === '1'; } catch { /* 读不到就默认显示 */ }
+function hintHidden(){ return hintHide || !!(drill && drill.stage === 'stack'); }
+function toggleHintHide(){
+  hintHide = !hintHide;
+  try { localStorage.setItem(HINT_HIDE_KEY, hintHide ? '1' : '0'); } catch { /* 存不了就算了 */ }
+  needsDraw = true;
   syncHint();
 }
 
@@ -1645,29 +1804,80 @@ function syncHint(){
   if (drill) syncDrill();      // 每日练习的堆叠段：推荐理由写在它自己的细栏里
   if (!hintMode) return;
   const w = $('hintWhy');
-  if (w) w.textContent = hintMove ? '推荐　' + hintMove.why : '';
+  if (w) w.innerHTML = stepsHTML(!hintMove ? '' : hintHidden() ? pieceHintText(hintMove.type) : '推荐　' + hintMove.why);
   const sc = $('hintScore');
-  if (sc) sc.textContent = '跟推荐一致 ' + hintStats.same + '/' + hintStats.total;
+  if (sc) sc.textContent = '对 ' + hintStats.good + '/' + hintStats.total;
+  const hb = $('hintHide');
+  if (hb){ hb.textContent = hintHide ? '看推荐' : '先自己找'; hb.classList.toggle('on', hintHide); }
+  const rs = $('hintSheet');
+  if (rs && !rs.hidden) renderHintSheet();
 }
 
 // 盘面上的绿框。你的落点虚影正好对上推荐时，绿框填实，告诉你「对了」
 const HINT_COLOR = '#5ee08a';
-function drawHint(c, ghostCells){
-  if (!hintMode || !hintMove || !game.piece || game.over) return;
-  const key = cs => cs.map(v => v.join(',')).sort().join(';');
-  const match = ghostCells && key(ghostCells) === key(hintMove.cells);
+function hintBox(c, cells, solid, alpha){
   c.save();
+  c.globalAlpha = alpha;
   c.strokeStyle = HINT_COLOR;
   c.lineWidth = Math.max(2, CELL * .09);
-  if (!match) c.setLineDash([CELL * .22, CELL * .14]);
-  for (const [x, y] of hintMove.cells){
+  if (!solid) c.setLineDash([CELL * .22, CELL * .14]);
+  for (const [x, y] of cells){
     if (y < BUFFER) continue;
     const px = x * CELL + 2, py = (y - BUFFER) * CELL + 2, d = CELL - 4;
-    if (match){ c.globalAlpha = .28; c.fillStyle = HINT_COLOR; roundRect(c, px, py, d, d, CELL * .16); c.fill(); c.globalAlpha = 1; }
+    if (solid){ c.globalAlpha = alpha * .28; c.fillStyle = HINT_COLOR; roundRect(c, px, py, d, d, CELL * .16); c.fill(); c.globalAlpha = alpha; }
     roundRect(c, px, py, d, d, CELL * .16);
     c.stroke();
   }
   c.restore();
+}
+function drawHint(c, ghostCells){
+  if (!hintMode || !hintMove || !game.piece || game.over || hintHidden()) return;
+  const key = cs => cs.map(v => v.join(',')).sort().join(';');
+  hintBox(c, hintMove.cells, !!ghostCells && key(ghostCells) === key(hintMove.cells), 1);
+}
+// 放完之后亮一下推荐（只在没对上、或者藏着推荐的时候）
+function drawHintReveal(c){
+  if (!hintMode || !hintReveal || game.over) return;
+  if (performance.now() > hintReveal.until){ hintReveal = null; return; }
+  hintBox(c, hintReveal.cells, false, .75);
+}
+
+// 规则卡：四条优先级（带你这一局各犯了几次）+ 七种块各自找什么台阶
+function renderHintSheet(){
+  const body = $('hintRulesBody');
+  if (!body) return;
+  const worst = hintStats.rules.indexOf(Math.max(...hintStats.rules));
+  let h = '<span class="sheet-lb">放之前按顺序问自己</span>';
+  HINT_RULES.forEach((r, i) => {
+    const n = hintStats.rules[i];
+    h += '<div class="hr-rule' + (n && i === worst ? ' worst' : '') + '"><b>' + r.n + ' ' + r.t + '</b><span>' + r.d + '</span>'
+       + '<em>' + (n ? '这次犯了 ' + n + ' 次' + (i === worst ? ' · 最该盯的' : '') : '这次没犯') + '</em></div>';
+  });
+  h += '<span class="sheet-lb">每种块找什么台阶（▁ 低 ▄ 高一格 █ 高两格）</span><div class="hr-fits">';
+  for (const t of TYPES){
+    const fits = t === 'I' ? [{ glyph: '井', name: '竖着进井打四消' }, ...pieceFits('I').filter(f => f.pat.length === 4)]
+                           : pieceFits(t);
+    h += '<div class="hr-fit"><b style="color:' + colorOf(t) + '">' + t + '</b><span>'
+       + fits.map(f => '<i>' + stepsHTML(f.glyph) + '</i>' + escHtml((f.orient ? f.orient + ' ' : '') + f.name)).join('<br>') + '</span></div>';
+  }
+  h += '</div>';
+  body.innerHTML = h;
+  const tg = $('hintHideSw');
+  if (tg) tg.textContent = hintHide ? '现在：先自己找，放完再看推荐 —— 点这里改回直接看' : '现在：直接看推荐 —— 点这里改成先自己找';
+}
+function openHintSheet(){
+  const sh = $('hintSheet');
+  if (!hintMode || !sh) return;
+  renderHintSheet();
+  sh.hidden = false;
+  game.frozen = true;
+}
+function closeHintSheet(){
+  const sh = $('hintSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  game.frozen = false;
+  resumeLoop();
 }
 
 // 进提示模式：和进练习一样，普通局打到一半先存一份
@@ -1678,7 +1888,8 @@ function startHint(){
   practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
   demoRunning = false; undoStack.length = 0;
   hintMode = true;
-  hintStats = { same: 0, total: 0, holes: 0 };
+  hintStats = { same: 0, good: 0, total: 0, holes: 0, rules: [0, 0, 0, 0] };
+  hintReveal = null;
   restart();                 // 里面 spawn 时会算第一块的推荐
   game.noGarbage = true;
   syncPractice(); syncHint();
@@ -1691,7 +1902,7 @@ function startHint(){
 // 能跨天比的数，按北京时间归日存下来（每天每项只留最好的那次）：
 //   ① T 槽热身：5 道**随机生成**的 T 旋双消题。盘面每次都不同，练的是「认出槽」
 //      而不是背按键。每道题生成后用 BFS 验过「只用顺时针能打出来」
-//   ② 堆叠：提示模式放 100 块，看跟推荐的一致率、造了几个洞
+//   ② 堆叠：提示模式放 100 块（推荐藏着，放完才亮），看放对几成、造了几个洞、最常犯哪条规则
 //   ③ 40 行冲刺：标准计时赛。看用时、每秒几块（PPS）、每块按几下键（KPP），
 //      和「多余按键」—— 同一个落点，按的次数比最少按法多的块数
 // 隔离和练习/提示一样（assisted）：不涨灰线、不写最高分、不存档。等级也不涨，
@@ -1706,7 +1917,7 @@ const DRILL_NAME = { warm: '① T 槽热身', stack: '② 堆叠', sprint: '③ 
 const DRILL_SHORT = { warm: '热身', stack: '堆叠', sprint: '冲刺' };
 const DRILL_DESC = {
   warm: DRILL_WARM_N + ' 道随机 T 旋双消题，看一次过几道',
-  stack: '照推荐的思路放 ' + DRILL_STACK_N + ' 块，看一致率和洞',
+  stack: '自己找位置放 ' + DRILL_STACK_N + ' 块，放完对照推荐，看放对几成、最常犯哪条',
   sprint: '消 ' + DRILL_SPRINT_LINES + ' 行计时，看用时、PPS、多余按键',
 };
 
@@ -1896,7 +2107,7 @@ function drillBegin(stage){
   drill.ms = 0; drill.clock = false;
   hintMode = stage === 'stack';
   hintMove = null; hintBase = null;
-  hintStats = { same: 0, total: 0, holes: 0 };
+  hintStats = { same: 0, good: 0, total: 0, holes: 0, rules: [0, 0, 0, 0] };
   restart();
   game.noGarbage = true;
   if (stage === 'warm'){
@@ -1942,6 +2153,11 @@ function drillPause(ms, fn){
   setTimeout(() => { if (drill === d) fn(); }, ms);
 }
 
+// 堆叠段的成绩。same 字段存的是「放对」（和推荐一样好就算）—— 字段名沿用，历史表和比较逻辑不用改
+function drillStackRes(dead){
+  return { same: hintStats.good, exact: hintStats.same, total: hintStats.total, holes: hintStats.holes || 0,
+           rules: hintStats.rules.slice(), dead };
+}
 function drillOnSpawn(){
   if (!drill || drill.stage !== 'sprint' || !game.piece) return;
   drill.pk = { keys: 0, soft: false };
@@ -1978,7 +2194,7 @@ function drillOnLock(p, n, spin){
   }
   if (drill.stage === 'stack'){
     if (game.pieces >= DRILL_STACK_N)
-      drillPause(600, () => drillFinish('stack', { same: hintStats.same, total: hintStats.total, holes: hintStats.holes || 0, dead: false }));
+      drillPause(600, () => drillFinish('stack', drillStackRes(false)));
     syncDrill();
     return;
   }
@@ -2003,7 +2219,7 @@ function drillTopOut(){
   game.piece = null;
   if (drill.stage === 'warm'){ drill.tries++; drillPause(900, drillWarmLoad); return true; }
   if (drill.stage === 'stack'){
-    drillPause(600, () => drillFinish('stack', { same: hintStats.same, total: hintStats.total, holes: hintStats.holes || 0, dead: true }));
+    drillPause(600, () => drillFinish('stack', drillStackRes(true)));
     return true;
   }
   drillPause(600, () => drillFinish('sprint', {
@@ -2054,11 +2270,20 @@ function fmtMs(ms){
 function drillResText(stage, r){
   if (!r) return '';
   if (stage === 'warm') return (r.first | 0) + '/' + (r.n | 0) + ' 一次过 · 每题 ' + (r.ms / 1000 / Math.max(1, r.n | 0)).toFixed(1) + ' 秒';
-  if (stage === 'stack') return '一致 ' + Math.round(100 * r.same / Math.max(1, r.total)) + '% · 洞 ' + (r.holes | 0)
+  if (stage === 'stack') return '放对 ' + Math.round(100 * r.same / Math.max(1, r.total)) + '% · 洞 ' + (r.holes | 0)
+                                + drillWorstRule(r)
                                 + (r.dead ? ' · 中途堆满' : '');
   if (!r.done) return '没打完（' + (r.lines | 0) + ' 行）';
   return fmtMs(r.ms) + ' · PPS ' + (r.pieces / (r.ms / 1000)).toFixed(2)
          + ' · 每块 ' + (r.keys / Math.max(1, r.pieces)).toFixed(1) + ' 键 · 多余 ' + (r.faults | 0);
+}
+// 最常犯的那条规则（没有记录或一次没犯就不说）
+function drillWorstRule(r){
+  if (!r || !Array.isArray(r.rules)) return '';
+  const m = Math.max(...r.rules.map(v => v | 0));
+  if (!m) return '';
+  const i = r.rules.findIndex(v => (v | 0) === m);
+  return HINT_RULES[i] ? ' · 最常犯 ' + HINT_RULES[i].n + HINT_RULES[i].t : '';
 }
 // 和上次（今天之前最近一次）比
 function drillDelta(stage, r){
@@ -2072,7 +2297,7 @@ function drillDelta(stage, r){
   }
   if (stage === 'stack'){
     const d = Math.round(100 * r.same / Math.max(1, r.total)) - Math.round(100 * q.same / Math.max(1, q.total));
-    return '一致率比 ' + md + (d >= 0 ? ' +' : ' ') + d + '%';
+    return '放对比 ' + md + (d >= 0 ? ' +' : ' ') + d + '%';
   }
   const d = (r.first | 0) - (q.first | 0);
   return d ? '一次过比 ' + md + (d > 0 ? ' 多 ' : ' 少 ') + Math.abs(d) + ' 道' : '一次过和 ' + md + ' 一样';
@@ -2095,7 +2320,7 @@ function renderDrSheet(){
   const days = Object.keys(all.days).filter(k => DAY_RE.test(k)).sort().slice(-7).reverse();
   if (days.length){
     h += '<span class="sheet-lb">最近 ' + days.length + ' 天（每天取最好的一次）</span>'
-       + '<table class="dr-hist"><tr><th>日期</th><th>T 槽</th><th>一致</th><th>40 行</th><th>PPS</th><th>多余</th></tr>';
+       + '<table class="dr-hist"><tr><th>日期</th><th>T 槽</th><th>堆叠</th><th>40 行</th><th>PPS</th><th>多余</th></tr>';
     for (const k of days){
       const d = all.days[k] || {};
       const w = d.warm, st = d.stack, sp = d.sprint;
@@ -2150,8 +2375,9 @@ function syncDrill(){
     a = '热身 ' + Math.min(drill.wi + 1, DRILL_WARM_N) + '/' + DRILL_WARM_N + '　T 旋双消';
     b = fmtMs(drill.ms);
   } else if (drill.stage === 'stack'){
-    a = hintMove ? '推荐　' + hintMove.why : DRILL_NAME.stack;
-    b = Math.min(game.pieces, DRILL_STACK_N) + '/' + DRILL_STACK_N;
+    // 堆叠段推荐是藏着的：细栏只说这块该找哪几种台阶
+    a = hintMove ? pieceHintText(hintMove.type) : DRILL_NAME.stack;
+    b = '对 ' + hintStats.good + ' · ' + Math.min(game.pieces, DRILL_STACK_N) + '/' + DRILL_STACK_N;
   } else if (drill.stage === 'sprint'){
     a = '冲刺 ' + Math.min(game.lines, DRILL_SPRINT_LINES) + '/' + DRILL_SPRINT_LINES + ' 行';
     b = fmtMs(drill.ms);
@@ -2159,7 +2385,7 @@ function syncDrill(){
     const nx = drillPending();
     a = nx ? '下一段　' + DRILL_NAME[nx] : '今天练完了';
   }
-  if (lb) lb.textContent = a;
+  if (lb) lb.innerHTML = stepsHTML(a);
   if (st) st.textContent = b;
 }
 // 计时：只在这一段真正在打的时候走（面板开着、暂停、题间停顿都不算）
@@ -3292,6 +3518,7 @@ function draw(){
     }
   }
 
+  drawHintReveal(ctx);
   // 落点虚影 + 当前方块
   const p = game.piece;
   if (p && !game.over){
@@ -7002,7 +7229,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -7021,6 +7248,7 @@ window.addEventListener('keydown', (e) => {
       // 练习弹层把 game.frozen 置上了，直接 hidden 的话方块永远不再掉
       else if (sheet.id === 'prSheet') closePrSheet();
       else if (sheet.id === 'drSheet') closeDrSheet();
+      else if (sheet.id === 'hintSheet') closeHintSheet();
       else sheet.hidden = true;
     }
     return;
@@ -7546,6 +7774,14 @@ function init(){
   on('prReset', () => { if (practiceLevel) practiceLoad(practiceLevel.k); closePrSheet(); });
   on('prFree',  () => { startPractice(); closePrSheet(); });
   on('prExit',  () => exitPractice());
+  // ── 提示模式：先自己找 / 规则卡 ──
+  on('hintHide',  () => toggleHintHide());
+  on('hintRules', () => openHintSheet());
+  on('hintWhy',   () => openHintSheet());
+  on('hintDone',  () => closeHintSheet());
+  on('hintHideSw', () => { toggleHintHide(); renderHintSheet(); });
+  const hsh = $('hintSheet');
+  if (hsh) hsh.addEventListener('click', (e) => { if (e.target === hsh) closeHintSheet(); });
   // ── 每日练习 ──
   on('prDaily', () => startDrill());
   on('dailyBtn', () => startDrill());
@@ -7753,6 +7989,9 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  hintEval, fitGaps, pieceFits, bottomPattern, pieceHintText, HINT_TOL, HINT_RULES, toggleHintHide, hintHidden,
+  openHintSheet, closeHintSheet, get hintReveal(){ return hintReveal; },
+  set hintHide(v){ hintHide = !!v; },
   LEVELS, LEVEL_BY, startPractice, exitPractice, practiceLoad, practicePick, practiceUndo, practiceCheck, detectTSpin,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },

@@ -89,6 +89,110 @@ JS = r"""() => {
   msw.querySelector('[data-m="hint"]').click();
   msw.querySelector('[data-m="practice"]').click();
   ok(T.practice && !T.hintMode && !document.body.classList.contains('hinting'), '提示直接切练习：只剩练习');
+
+  // ════════ 按规则说话的提示 ════════
+  T.toggleHintHide && T.hintHidden() && T.toggleHintHide();   // 先确保是「直接看推荐」
+  msw.querySelector('[data-m="hint"]').click();
+  const R2 = T.TOTAL_ROWS;
+  const clear = () => { for (let y = 0; y < R2; y++) T.game.board[y].fill(null); };
+  // heights：每列高度（从底往上实心，无洞）
+  const setH = hs => { clear(); hs.forEach((h, x) => { for (let k = 0; k < h; k++) T.game.board[R2 - 1 - k][x] = 'X'; }); };
+  const give = t => { T.game.piece = null; T.game.queue.unshift(t); T.game.mods.unshift(null); T.spawnNext(); };
+  const toastNow = () => document.getElementById('toast').textContent;
+  const place = (rot, x) => { const p = T.game.piece; p.rot = rot; p.x = x; p.y = 0; T.hardDrop(); settle(); };
+
+  // 贴合形状是从块的底面算出来的，不是手写的表
+  const keys = t => T.pieceFits(t).map(f => f.key).join(' ');
+  ok(keys('S') === '001 10' && keys('Z') === '100 01' && keys('O') === '00' && keys('I') === '0000 0',
+     `S/Z/O/I 的贴合形状（S ${keys('S')}，Z ${keys('Z')}）`);
+  ok(T.pieceFits('T').length === 4 && T.pieceFits('T').some(f => f.key === '101'), `T 四种，含尖朝下塞凹口（${keys('T')}）`);
+  // 贴合 = 底下一格不空
+  const B = (hs) => { const b = Array.from({ length: R2 }, () => new Array(10).fill(false));
+    hs.forEach((h, x) => { for (let k = 0; k < h; k++) b[R2 - 1 - k][x] = true; }); return b; };
+  const sFlat = (b, x) => T.simDrops(b, 'S').find(d => d.rot === 0 && Math.min(...d.cells.map(c => c[0])) === x);
+  ok(T.fitGaps(B([2, 2, 3, 0, 0, 0, 0, 0, 0, 0]), sFlat(B([2, 2, 3, 0, 0, 0, 0, 0, 0, 0]), 0).cells) === 0,
+     'S 横放在「平平高」上：贴合（底下 0 格空）');
+  ok(T.fitGaps(B([2, 2, 2, 0, 0, 0, 0, 0, 0, 0]), sFlat(B([2, 2, 2, 0, 0, 0, 0, 0, 0, 0]), 0).cells) === 1,
+     'S 横放在平地上：底下空 1 格');
+
+  // 推荐理由先说规则：找哪种台阶（符号 + 名字），再说为什么是这一处
+  setH([4, 4, 5, 6, 6, 6, 6, 6, 6, 0]);
+  give('S');
+  const hm2 = T.hintMove;
+  const fit2 = T.pieceFits('S').find(f => f.key === T.bottomPattern('S', hm2.rot).join(''));
+  ok(hm2.gaps === 0 && hm2.why.startsWith(fit2.glyph + ' ' + fit2.name),
+     `理由以台阶形状开头（「${hm2.why}」）`);
+
+  // 照推荐放：放对 +1、一模一样 +1
+  let s0 = Object.assign({}, T.hintStats);
+  place(hm2.rot, hm2.x);
+  ok(T.hintStats.good === s0.good + 1 && T.hintStats.same === s0.same + 1, '照推荐放：放对、一模一样各 +1');
+
+  // 一样好的另一处：算放对、不算一模一样，并且说「这也行」
+  let found = null;
+  for (const t of 'OTSZJL'){
+    setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); give(t);
+    const b0 = T.simBoard(), r = T.hintBest(b0, t, T.game.queue[0]);
+    const hb = T.simFeatures(T.simPlace(b0, r.best.cells).b).holes;
+    const k = cs => cs.map(c => c.join(',')).sort().join(';');
+    const alt = r.all.find(m => k(m.cells) !== k(r.best.cells) && r.best.score - m.score <= T.HINT_TOL
+                              && T.simFeatures(T.simPlace(b0, m.cells).b).holes <= hb);
+    if (alt){ found = alt; break; }
+  }
+  ok(!!found, '平地上能找到一处「和推荐一样好」的落点');
+  if (found){
+    s0 = Object.assign({}, T.hintStats);
+    place(found.rot, found.x);
+    ok(T.hintStats.good === s0.good + 1 && T.hintStats.same === s0.same, `放另一处一样好的：算放对，不算一模一样（${T.hintStats.good}/${T.hintStats.same}）`);
+    ok(/这也行/.test(toastNow()), `说一句「这也行」（「${toastNow()}」）`);
+  }
+
+  // ① 有贴合的地方却留了洞
+  setH([4, 4, 5, 6, 6, 6, 6, 6, 6, 0]); give('S');
+  s0 = JSON.parse(JSON.stringify(T.hintStats));
+  place(0, 4);                                   // S 横放在平地上（第 4~6 列），底下空一格
+  ok(T.hintStats.rules[0] === s0.rules[0] + 1 && /^①/.test(toastNow()), `留洞判 ①（「${toastNow()}」）`);
+  ok(T.hintStats.good === s0.good, '判错的不算放对');
+  ok(!!T.hintReveal && T.hintReveal.cells.length > 0, '放错了把推荐亮一下对照');
+
+  // ③ 非 I 塞进井：L 竖放「左高两格」正好贴合在第 8、9 列，不留洞，但堵了井
+  setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); give('L');
+  const lw = T.simDrops(T.simBoard(), 'L').find(d => d.rot === 3 && d.cells.every(c => c[0] >= 8) && d.cells.some(c => c[0] === 9));
+  s0 = JSON.parse(JSON.stringify(T.hintStats));
+  const recWell = T.hintMove.cells.some(c => c[0] === 9);
+  place(lw.rot, lw.x);
+  ok(!recWell && T.hintStats.rules[2] === s0.rules[2] + 1 && /^③/.test(toastNow()), `堵井判 ③（「${toastNow()}」）`);
+
+  // ④ 堆高了能消不消：九列堆到 13 格、最右一列空着，I 进井就能消
+  setH([13, 13, 13, 13, 13, 13, 13, 13, 13, 0]); give('I');
+  const recLines = T.hintMove.lines;
+  s0 = JSON.parse(JSON.stringify(T.hintStats));
+  place(0, 0);                                    // I 横放在左边顶上，不消行
+  ok(recLines > 0 && T.hintStats.rules[3] === s0.rules[3] + 1 && /^④/.test(toastNow()),
+     `堆高了不消判 ④（推荐消 ${recLines} 行；「${toastNow()}」）`);
+
+  // ── 先自己找 ──
+  T.toggleHintHide();
+  ok(T.hintHidden() && localStorage.getItem('tetris.hint.hide.v1') === '1', '「先自己找」打开并记住');
+  setH([4, 4, 5, 6, 6, 6, 6, 6, 6, 0]); give('S');
+  ok(/^S 找/.test(document.getElementById('hintWhy').textContent) && !/推荐/.test(document.getElementById('hintWhy').textContent),
+     `藏着的时候只说找哪种台阶（「${document.getElementById('hintWhy').textContent}」）`);
+  const hmh = T.hintMove;
+  place(hmh.rot, hmh.x);
+  ok(!T.hintReveal || T.hintReveal.until < performance.now() + 1, '放得和推荐一模一样就不用再亮');
+  setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]);
+  if (found){ give(found.type); place(found.rot, found.x); ok(!!T.hintReveal, '放了另一处一样好的：亮一下推荐给你对照'); }
+  T.toggleHintHide();
+  ok(!T.hintHidden(), '再点一下改回直接看');
+
+  // ── 规则卡 ──
+  T.openHintSheet();
+  const hs = document.getElementById('hintSheet'), hb2 = document.getElementById('hintRulesBody');
+  ok(!hs.hidden && T.game.frozen, '规则卡打开，方块停住');
+  ok(hb2.querySelectorAll('.hr-rule').length === 4 && hb2.querySelectorAll('.hr-fit').length === 7, '四条规则 + 七种块');
+  ok(!!hb2.querySelector('.hr-rule.worst'), `标出最常犯的那条（${(hb2.querySelector('.hr-rule.worst b') || {}).textContent}）`);
+  T.closeHintSheet();
+  ok(hs.hidden && !T.game.frozen, '关掉接着放');
   return L;
 }"""
 
@@ -102,6 +206,13 @@ QUALITY = r"""(arg) => {
     if (T.game.over) break;
     const p = T.game.piece, b0 = T.simBoard(), h0 = T.simFeatures(b0).holes;
     let m = T.hintMove;
+    if (policy === 'tol'){
+      // 「这也行」的那些落点里随机挑：容差要是放宽了，这一路的质量会先掉
+      const r = T.hintBest(b0, p.type, T.game.queue[0]);
+      const hb = T.simFeatures(T.simPlace(b0, r.best.cells).b).holes;
+      const okm = r.all.filter(c => r.best.score - c.score <= T.HINT_TOL && T.simFeatures(T.simPlace(b0, c.cells).b).holes <= hb);
+      m = okm[(i * 7 + seed) % okm.length];
+    }
     if (policy === 'lowest'){
       const all = T.simDrops(b0, p.type);
       m = all.reduce((a, c) => { const ta = Math.min(...a.cells.map(v=>v[1])), tc = Math.min(...c.cells.map(v=>v[1]));
@@ -140,6 +251,11 @@ with sync_playwright() as p:
                  f"种子{seed} 四消占消行至少一半（{int(share*100)}%）")
         r.append(('PASS ' if n['over'] or n['holes'] > h['holes'] * 3 else 'FAIL ') +
                  f"种子{seed} 对照组「哪里最低放哪里」明显更差（{'堆死于第 ' + str(n['placed']) + ' 块' if n['over'] else '造洞 ' + str(n['holes'])}）")
+    for seed in (77, 88):
+        t = pg.evaluate(QUALITY, {'policy': 'tol', 'seed': seed, 'N': 400})
+        share = t['tetris'] * 4 / max(1, t['lines'])
+        r.append(('PASS ' if not t['over'] and t['holes'] <= 400 * .05 and share >= .5 else 'FAIL ') +
+                 f"种子{seed} 在「这也行」的落点里随便挑：不死、造洞 {t['holes']} 次、四消占 {int(share*100)}%")
     r.append(('PASS ' if tot_holes <= tot_placed * .05 else 'FAIL ') +
              f"两局合计造洞不超过 5%（{tot_holes}/{tot_placed} = {tot_holes*100/max(1,tot_placed):.1f}%）")
     print(f"== 标准版 ==  JS错误 {len(errs)}")

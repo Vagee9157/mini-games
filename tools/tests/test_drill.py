@@ -84,7 +84,9 @@ JS = r"""async () => {
   ok(T.hintMode && T.drill.stage === 'stack', '堆叠段借用提示模式');
   ok(getComputedStyle($('hintBar')).display === 'none' && getComputedStyle($('drBar')).display !== 'none',
      '只挂每日练习那一条细栏，提示细栏收起');
-  ok(/推荐/.test($('drLabel').textContent), `细栏写着推荐理由（「${$('drLabel').textContent}」）`);
+  ok(T.hintHidden() && /^[IOTSZJL] 找/.test($('drLabel').textContent),
+     `推荐藏着，细栏只说这块找哪种台阶（「${$('drLabel').textContent}」）`);
+  ok(T.hintMove && !T.hintReveal, '出块时不亮推荐');
   for (let i = 0; i < T.DRILL_STACK_N && T.drill && T.drill.stage === 'stack'; i++){
     const hm = T.hintMove, p = T.game.piece;
     if (!hm || !p) break;
@@ -94,8 +96,9 @@ JS = r"""async () => {
   ok(T.game.level === 1, `堆叠段不升级（${T.game.lines} 行仍是 ${T.game.level} 级）`);
   await sleep(800);
   const st = T.drill && T.drill.done.stack;
-  ok(!!st && st.total === T.DRILL_STACK_N && st.same === T.DRILL_STACK_N && st.holes === 0 && !st.dead,
-     `照推荐放 100 块：一致 ${st && st.same}/${st && st.total}、洞 ${st && st.holes}`);
+  ok(!!st && st.total === T.DRILL_STACK_N && st.same === T.DRILL_STACK_N && st.exact === T.DRILL_STACK_N
+     && st.rules.every(v => v === 0) && !st.dead,
+     `照推荐放 100 块：放对 ${st && st.same}/${st && st.total}、规则一条没犯（${st && st.rules}）、洞 ${st && st.holes}`);
   ok(!T.hintMode && !document.body.classList.contains('hinting'), '堆叠完退出提示模式');
 
   // ── ③ 冲刺：按键计数和多余按键 ──
@@ -164,7 +167,7 @@ JS = r"""async () => {
   T.drill.done.stack = T.drillReadAll().days[T.bjDay()].stack;
   T.drillSkip();      // 让面板重画
   const txt = $('drBody').textContent;
-  ok(/比 01\/01 快/.test(txt) && /一致率比 01\/01 \+/.test(txt), `和上次比的那句（${(txt.match(/比 01\/01[^·]*?秒/) || [''])[0]}）`);
+  ok(/比 01\/01 快/.test(txt) && /放对比 01\/01 \+/.test(txt), `和上次比的那句（${(txt.match(/比 01\/01[^·]*?秒/) || [''])[0]}）`);
   // 坏数据不炸
   localStorage.setItem(T.DRILL_KEY, '{"days":{"<img>":{"sprint":1}}}');
   let threw = false; try { T.drillSkip(); T.startDrill(); } catch { threw = true; }
