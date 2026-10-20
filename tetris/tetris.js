@@ -6752,7 +6752,8 @@ function stepOnce(dt){
     if (introLeft <= 0) endRushIntro();
     return 'normal';
   }
-  drillStep(dt);
+  // 判断放在调用处：普通局每帧连这一次函数调用都不付（实测它是普通局里唯一被采样到的新功能函数）
+  if (drill) drillStep(dt);
 
   stepParticles(dt);
   stepTrails(dt);
