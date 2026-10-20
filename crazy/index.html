@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=a49a7119">
+<link rel="stylesheet" href="../tetris/tetris.css?v=9a6a665b">
 </head>
 <body>
 <div class="topline"></div>
@@ -82,6 +82,7 @@
             <button class="pbtn" id="startBtn">开始</button>
             <!-- 练习：不涨灰线、不记成绩、能撤销能指定出块。
                  疯狂版用不上（它的分数靠机制叠，练手型没意义），bump.py 会把它删掉。 -->
+            <!-- 每日练习：热身 + 堆叠 + 40 行冲刺，约 10 分钟，按天存成绩看进步 -->
           </div>
 
           <div data-when="pause">
@@ -250,7 +251,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=96c0ec12"></script>
+<script src="../tetris/tetris.js?v=8175b5e5"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

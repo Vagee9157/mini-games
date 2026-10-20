@@ -863,6 +863,7 @@ function spawn(type, mod){
   if (collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
   // 提示模式：每块一出生就算推荐（当前块 × 1 个 NEXT）
   if (hintMode) hintCompute();
+  if (drill) drillOnSpawn();
 
   // IHS 优先于 IRS：按住暂存键就先换块，否则按住旋转键就先转好
   if (!armPre) return;
@@ -949,6 +950,7 @@ function hardDrop(){
 function holdPiece(){
   if (!game.piece || game.holdUsed) return;
   if (hintMode){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
+  if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
   if (game.hold){
@@ -994,6 +996,7 @@ function touchGround(fromAction){
 //   ② 不写任何记录（最高分、累计、今日、狂欢局保底计数全部跳过）
 //   ③ 不存档（练习盘面续回来没有意义，而且会污染「接着上次玩」）
 let practice = false;
+let drill = null;            // 每日练习进行中的状态（见「每日练习」一节）；null = 没在练
 let practiceLevel = null;    // 当前这一关（LEVELS 里的对象）；null = 自由练习
 let practiceStep = 0;        // 多步关卡做到第几步了
 let practiceDone = false;
@@ -1385,6 +1388,7 @@ function startPractice(){
   // 普通局打到一半切过来：先存一份。练习期间 clearSave/saveGame 都是空操作，
   // 这份存档会原样留到切回普通模式，开局面板上「接着上次玩」就能接上。
   if (!assisted() && game.started && !game.over) saveGame(true);
+  drillEnd();
   hintMode = false; hintMove = null;
   syncHint();                // 摘掉 body.hinting —— 不摘的话绿色提示细栏会一直挂在练习界面上
   practice = true;
@@ -1400,6 +1404,7 @@ function startPractice(){
 // 一来普通局打到一半去练习的那一局就被跳过了，二来「切模式」不该顺手替你按「开始」。
 function exitPractice(){
   closePrSheet();
+  drillEnd();
   practice = false;
   hintMode = false; hintMove = null; hintBase = null;
   // restart 不碰 noGarbage（那是 game 对象上的字段，newGame 才铺），
@@ -1435,7 +1440,8 @@ function syncResume(){
 function syncModeSwitch(){
   for (const b of document.querySelectorAll('#modeSw [data-m]')){
     const m = b.dataset.m;
-    const on = m === 'practice' ? practice : m === 'hint' ? hintMode : !practice && !hintMode;
+    // 每日练习挂在「练习」下面（它的堆叠段借用了提示模式，但不算提示）
+    const on = m === 'practice' ? practice || !!drill : m === 'hint' ? hintMode && !drill : !assisted();
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
@@ -1459,7 +1465,7 @@ function syncModeSwitch(){
 let hintMode = false;
 let hintMove = null;        // { x, y, rot, type, cells, why }
 let hintBase = null;        // 出块那一刻的盘面，落下后拿它评你放的位置
-let hintStats = { same: 0, total: 0 };
+let hintStats = { same: 0, total: 0, holes: 0 };
 const HINT_WELL = COLS - 1;
 const HINT_DANGER = 13;     // 九列里最高的到这个高度就切保命（可见区 20 行）
 // 权重是让机器人只照着推荐放、跑出来调的（不涨灰线，每局 400~600 块）：
@@ -1476,7 +1482,7 @@ const HW = {
   tetris: 120, burn: -6, burnDanger: 30,
 };
 
-function assisted(){ return practice || hintMode; }
+function assisted(){ return practice || hintMode || !!drill; }
 
 function simBoard(){ return game.board.map(r => r.map(c => !!c)); }
 function simFits(b, type, x, y, rot){
@@ -1628,6 +1634,7 @@ function hintJudge(p){
   const h0 = simFeatures(hintBase).holes;
   const mine = simPlace(hintBase, cells), rec = simPlace(hintBase, hintMove.cells);
   const hm = simFeatures(mine.b).holes, hr = simFeatures(rec.b).holes;
+  hintStats.holes = (hintStats.holes || 0) + Math.max(0, hm - h0);
   if (hm > hr) showToast('这一块造了 ' + (hm - h0) + ' 个洞 —— 绿框那里不会', 1800);
   else if (simScore(mine.b) < simScore(rec.b) - 40) showToast('绿框那里更平', 1300);
   syncHint();
@@ -1635,6 +1642,7 @@ function hintJudge(p){
 
 function syncHint(){
   document.body.classList.toggle('hinting', hintMode);
+  if (drill) syncDrill();      // 每日练习的堆叠段：推荐理由写在它自己的细栏里
   if (!hintMode) return;
   const w = $('hintWhy');
   if (w) w.textContent = hintMove ? '推荐　' + hintMove.why : '';
@@ -1666,13 +1674,500 @@ function drawHint(c, ghostCells){
 function startHint(){
   if (!assisted() && game.started && !game.over) saveGame(true);
   closePrSheet();
+  drillEnd();
   practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
   demoRunning = false; undoStack.length = 0;
   hintMode = true;
-  hintStats = { same: 0, total: 0 };
+  hintStats = { same: 0, total: 0, holes: 0 };
   restart();                 // 里面 spawn 时会算第一块的推荐
   game.noGarbage = true;
   syncPractice(); syncHint();
+}
+
+// ───────────────────────── 每日练习 ─────────────────────────
+//
+// 练习关是固定盘面，练几遍就背下来了；提示模式和普通局又都不留记录 ——
+// 天天练，有没有变强自己说不出来。每日练习把三段串成十分钟左右，每段出一个
+// 能跨天比的数，按北京时间归日存下来（每天每项只留最好的那次）：
+//   ① T 槽热身：5 道**随机生成**的 T 旋双消题。盘面每次都不同，练的是「认出槽」
+//      而不是背按键。每道题生成后用 BFS 验过「只用顺时针能打出来」
+//   ② 堆叠：提示模式放 100 块，看跟推荐的一致率、造了几个洞
+//   ③ 40 行冲刺：标准计时赛。看用时、每秒几块（PPS）、每块按几下键（KPP），
+//      和「多余按键」—— 同一个落点，按的次数比最少按法多的块数
+// 隔离和练习/提示一样（assisted）：不涨灰线、不写最高分、不存档。等级也不涨，
+// 三段的难度每天一致，数字才能横着比。
+const DRILL_KEY = nsKey('drill.v1');
+const DRILL_WARM_N = 5;
+const DRILL_STACK_N = 100;
+const DRILL_SPRINT_LINES = 40;
+const DRILL_DAYS_KEPT = 60;
+const DRILL_STAGES = ['warm', 'stack', 'sprint'];
+const DRILL_NAME = { warm: '① T 槽热身', stack: '② 堆叠', sprint: '③ 40 行冲刺' };
+const DRILL_SHORT = { warm: '热身', stack: '堆叠', sprint: '冲刺' };
+const DRILL_DESC = {
+  warm: DRILL_WARM_N + ' 道随机 T 旋双消题，看一次过几道',
+  stack: '照推荐的思路放 ' + DRILL_STACK_N + ' 块，看一致率和洞',
+  sprint: '消 ' + DRILL_SPRINT_LINES + ' 行计时，看用时、PPS、多余按键',
+};
+
+// ── 存取 ── 坏数据一律当没有，日期键和数字都过一遍校验再用
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function drillReadAll(){
+  try {
+    const d = JSON.parse(localStorage.getItem(DRILL_KEY) || 'null');
+    if (d && typeof d === 'object' && d.days && typeof d.days === 'object') return d;
+  } catch { /* 坏数据当没有 */ }
+  return { v: 1, days: {} };
+}
+// a 比 b 好吗。b 不存在就算好
+function drillBetter(stage, a, b){
+  if (!b) return true;
+  if (stage === 'warm') return a.first > b.first || (a.first === b.first && a.ms < b.ms);
+  if (stage === 'stack'){
+    if (!!a.dead !== !!b.dead) return !a.dead;
+    const ra = a.same / Math.max(1, a.total), rb = b.same / Math.max(1, b.total);
+    return ra > rb || (ra === rb && a.holes < b.holes);
+  }
+  if (!!a.done !== !!b.done) return !!a.done;
+  return a.done ? a.ms < b.ms : a.lines > b.lines;
+}
+function drillSave(stage, res){
+  const all = drillReadAll(), day = bjDay();
+  const d = all.days[day] || (all.days[day] = {});
+  if (drillBetter(stage, res, d[stage])) d[stage] = res;
+  const keep = Object.keys(all.days).filter(k => DAY_RE.test(k)).sort().slice(-DRILL_DAYS_KEPT);
+  const days = {};
+  for (const k of keep) days[k] = all.days[k];
+  try { localStorage.setItem(DRILL_KEY, JSON.stringify({ v: 1, days })); } catch { /* 存不了就算了 */ }
+}
+// 今天之前、最近一次有这一项的记录 —— 「比上次」拿它比
+function drillPrev(stage){
+  const all = drillReadAll(), today = bjDay();
+  const ks = Object.keys(all.days).filter(k => DAY_RE.test(k) && k < today && all.days[k][stage]).sort();
+  return ks.length ? { day: ks[ks.length - 1], r: all.days[ks[ks.length - 1]][stage] } : null;
+}
+
+// ── 模拟：从出生点能走到哪些锁定位置 ──
+// 动作只有 左 / 右 / 下一格 / 顺时针（带踢墙），和手机上的按键一致。
+function simTSpin(b, x, y, rot, lastRot, kick){
+  if (!lastRot) return null;
+  return tspinKind((X, Y) => X < 0 || X >= COLS || Y >= TOTAL_ROWS || (Y >= 0 && b[Y][X]), x, y, rot, kick);
+}
+function simReach(b, type){
+  // acts 是走到这里的按键串（parseActs 的写法），测试拿它在真盘面上回放
+  const start = { x: PIECES[type].spawnX, y: 0, rot: 0, lr: false, k: -1, acts: '' };
+  if (!simFits(b, type, start.x, start.y, start.rot)) return [];
+  const seen = new Set(), q = [start], out = [];
+  const key = s => s.x + ',' + s.y + ',' + s.rot + ',' + (s.lr ? 1 : 0);
+  const push = s => { const k = key(s); if (!seen.has(k)){ seen.add(k); q.push(s); } };
+  seen.add(key(start));
+  for (let qi = 0; qi < q.length; qi++){
+    const s = q[qi];
+    if (simFits(b, type, s.x, s.y + 1, s.rot)) push({ x: s.x, y: s.y + 1, rot: s.rot, lr: false, k: -1, acts: s.acts + 'd' });
+    else {
+      const cells = cellsOf(type, s.rot).map(([cx, cy]) => [s.x + cx, s.y + cy]);
+      out.push({ x: s.x, y: s.y, rot: s.rot, cells, acts: s.acts,
+                 spin: type === 'T' ? simTSpin(b, s.x, s.y, s.rot, s.lr, s.k) : null,
+                 lines: simPlace(b, cells).lines });
+    }
+    for (const dx of [-1, 1])
+      if (simFits(b, type, s.x + dx, s.y, s.rot)) push({ x: s.x + dx, y: s.y, rot: s.rot, lr: false, k: -1, acts: s.acts + (dx < 0 ? 'L' : 'R') });
+    if (type === 'O') continue;
+    const to = (s.rot + 1) & 3;
+    const table = (type === 'I' ? KICKS.I : KICKS.JLSTZ)[s.rot + '>' + to];
+    for (let i = 0; i < table.length; i++){
+      const [kx, ky] = table[i];
+      if (simFits(b, type, s.x + kx, s.y + ky, to)){ push({ x: s.x + kx, y: s.y + ky, rot: to, lr: true, k: i, acts: s.acts + 'C' }); break; }
+    }
+  }
+  return out;
+}
+
+// ── 随机 T 槽题 ──
+// 标准 T 旋双消的槽：最底一行只空槽口那一格，上一行空三格，再上面一侧有屋檐。
+// 屋檐朝左朝右、槽在哪一列、两边堆多高、底下垫几行灰线，全随机。
+// 生成后用 simReach 验一遍：只用顺时针、能打出 T 旋双消，才算一道题。
+function drillGenPuzzle(rand){
+  const rnd = rand || Math.random;
+  const ri = n => (rnd() * n) | 0;
+  for (let t = 0; t < 400; t++){
+    const b = Array.from({ length: TOTAL_ROWS }, () => new Array(COLS).fill(false));
+    const R = TOTAL_ROWS - 1;
+    const g = ri(3);
+    for (let i = 0; i < g; i++){
+      const hole = ri(COLS);
+      for (let x = 0; x < COLS; x++) b[R - i][x] = x !== hole;
+    }
+    const B = R - g;
+    const c = 1 + ri(COLS - 2);
+    const s = rnd() < .5 ? 1 : -1;            // 屋檐在哪一侧
+    const roof = 1 + ri(2);                   // 屋檐厚度
+    for (let x = 0; x < COLS; x++){
+      if (x !== c) b[B][x] = true;
+      if (Math.abs(x - c) > 1) b[B - 1][x] = true;
+    }
+    for (let k = 0; k < roof; k++) b[B - 2 - k][c + s] = true;
+    for (let x = 0; x < COLS; x++){
+      const d = x - c;
+      if (Math.abs(d) <= 1) continue;
+      const roofSide = Math.sign(d) === s;
+      // 紧挨屋檐那一列至少和屋檐一样高，屋檐才是「接着」的
+      const extra = roofSide ? (Math.abs(d) === 2 ? roof + ri(2) : ri(4)) : ri(3);
+      for (let k = 0; k < extra; k++) b[B - 2 - k][x] = true;
+    }
+    if (!simReach(b, 'T').some(L => L.spin === 'tspin' && L.lines === 2)) continue;
+    let top = 0;
+    while (top < TOTAL_ROWS && !b[top].some(Boolean)) top++;
+    return { rows: b.slice(top).map(r => r.map(v => v ? '#' : '.').join('')), c, s };
+  }
+  return null;
+}
+
+// ── 多余按键 ──
+// 从出生点出发，「点一下左/右、按住到墙、顺时针（键盘再加逆时针）、落底」
+// 最少几下能落到同一组格子。用了软降的块不算（那是滑入/旋入，没有可比的最少按法）。
+function finesseMin(b, type, cells, ccw){
+  const want = cells.map(c => c.join(',')).sort().join(';');
+  const start = { x: PIECES[type].spawnX, y: 0, rot: 0 };
+  if (!simFits(b, type, start.x, start.y, start.rot)) return null;
+  const seen = new Set([start.x + ',' + start.y + ',' + start.rot]);
+  let layer = [start];
+  for (let d = 0; d < 12 && layer.length; d++){
+    const next = [];
+    for (const s of layer){
+      let y = s.y;
+      while (simFits(b, type, s.x, y + 1, s.rot)) y++;
+      const k = cellsOf(type, s.rot).map(([cx, cy]) => (s.x + cx) + ',' + (y + cy)).sort().join(';');
+      if (k === want) return d + 1;
+      const add = (x, yy, rot) => {
+        const kk = x + ',' + yy + ',' + rot;
+        if (!seen.has(kk)){ seen.add(kk); next.push({ x, y: yy, rot }); }
+      };
+      for (const dx of [-1, 1]){
+        if (!simFits(b, type, s.x + dx, s.y, s.rot)) continue;
+        add(s.x + dx, s.y, s.rot);
+        let x = s.x + dx;
+        while (simFits(b, type, x + dx, s.y, s.rot)) x += dx;
+        add(x, s.y, s.rot);
+      }
+      if (type === 'O') continue;
+      for (const dir of ccw ? [1, -1] : [1]){
+        const to = (s.rot + dir + 4) & 3;
+        const table = (type === 'I' ? KICKS.I : KICKS.JLSTZ)[s.rot + '>' + to];
+        for (const [kx, ky] of table)
+          if (simFits(b, type, s.x + kx, s.y + ky, to)){ add(s.x + kx, s.y + ky, to); break; }
+      }
+    }
+    layer = next;
+  }
+  return null;
+}
+
+// ── 流程 ──
+function drillNew(){
+  return { stage: null, done: {}, skipped: {}, ms: 0, clock: false,
+           puz: null, wi: 0, tries: 0, first: 0, warmMs: 0,
+           keys: 0, pieces: 0, faults: 0, kb: false,
+           pk: { keys: 0, soft: false }, spawnB: null, statAt: -1 };
+}
+function drillPending(){
+  if (!drill) return null;
+  return DRILL_STAGES.find(s => !drill.done[s] && !drill.skipped[s]) || null;
+}
+
+function startDrill(){
+  if (CRAZY) return;
+  if (!assisted() && game.started && !game.over) saveGame(true);
+  closePrSheet();
+  practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
+  demoRunning = false; undoStack.length = 0;
+  hintMode = false; hintMove = null; hintBase = null;
+  drill = drillNew();
+  restart();
+  game.noGarbage = true;
+  game.piece = null;                 // 开场停在面板上，盘面空着
+  syncPractice(); syncHint(); syncDrill();
+  openDrSheet();
+}
+
+function drillBegin(stage){
+  if (!drill) return;
+  drill.stage = stage;
+  drill.ms = 0; drill.clock = false;
+  hintMode = stage === 'stack';
+  hintMove = null; hintBase = null;
+  hintStats = { same: 0, total: 0, holes: 0 };
+  restart();
+  game.noGarbage = true;
+  if (stage === 'warm'){
+    drill.wi = 0; drill.first = 0; drill.warmMs = 0;
+    drillWarmNext();
+  } else if (stage === 'sprint'){
+    drill.keys = 0; drill.pieces = 0; drill.faults = 0;
+    drill.clock = true;
+  }
+  syncHint(); syncPractice(); syncDrill();
+}
+
+function drillWarmNext(){
+  drill.puz = drillGenPuzzle();
+  drill.tries = 0;
+  drill.ms = 0;
+  drillWarmLoad();
+}
+function drillWarmLoad(){
+  const rows = drill.puz ? drill.puz.rows : [];
+  for (let y = 0; y < TOTAL_ROWS; y++) game.board[y].fill(null);
+  rows.forEach((row, i) => {
+    const y = TOTAL_ROWS - rows.length + i;
+    for (let x = 0; x < COLS; x++) game.board[y][x] = row[x] === '#' ? 'X' : null;
+  });
+  game.combo = -1; game.b2b = false;
+  game.hold = null; game.holdUsed = false;
+  // 题目只出 T。队列也全塞 T —— 锁定后到重摆之间那一瞬会先出一块，别露出随机块。
+  // 塞 6 个：出生拿走一个还剩 5，fillQueue 就不会往队尾补 bag 里的随机块
+  game.queue = new Array(6).fill('T'); game.mods = new Array(6).fill(null);
+  clearing = null; game.over = false; softDropping = false;
+  game.piece = null; spawnNext();
+  drill.clock = true;
+  staticDirty = true; previewDirty = true; needsDraw = true;
+  game.frozen = false;
+  syncHud(); syncDrill(); resumeLoop();
+}
+// 题与题之间停一下：先冻住，看清这一下的结果再换
+function drillPause(ms, fn){
+  game.frozen = true;
+  drill.clock = false;
+  const d = drill;
+  setTimeout(() => { if (drill === d) fn(); }, ms);
+}
+
+function drillOnSpawn(){
+  if (!drill || drill.stage !== 'sprint' || !game.piece) return;
+  drill.pk = { keys: 0, soft: false };
+  drill.spawnB = simBoard();
+}
+// 每次按键（屏幕键和键盘都走这里）。只有冲刺段要数
+function drillKey(soft, kb){
+  if (!drill || drill.stage !== 'sprint' || !game.piece) return;
+  drill.keys++; drill.pk.keys++;
+  if (soft) drill.pk.soft = true;
+  if (kb) drill.kb = true;
+}
+
+function drillOnLock(p, n, spin){
+  if (!drill || !drill.stage) return;
+  if (drill.stage === 'warm'){
+    if (spin === 'tspin' && n === 2){
+      if (!drill.tries) drill.first++;
+      drill.warmMs += drill.ms;
+      drill.wi++;
+      showToast(drill.tries ? '✓ 做到了（第 ' + (drill.tries + 1) + ' 次）' : '✓ 一次过', 1100);
+      if (drill.wi >= DRILL_WARM_N)
+        drillPause(1000, () => drillFinish('warm', { first: drill.first, n: DRILL_WARM_N, ms: Math.round(drill.warmMs) }));
+      else drillPause(900, drillWarmNext);
+    } else {
+      drill.tries++;
+      showToast('这一下是' + clearName(n, spin, false) + '，要的是 T 旋双消 —— 同一题再来'
+                + (drill.tries >= 2 ? '。T 竖着送到槽口没屋檐那边，落到底再按变换转进去' : ''),
+                drill.tries >= 2 ? 3600 : 1800);
+      drillPause(drill.tries >= 2 ? 1600 : 900, drillWarmLoad);
+    }
+    syncDrill();
+    return;
+  }
+  if (drill.stage === 'stack'){
+    if (game.pieces >= DRILL_STACK_N)
+      drillPause(600, () => drillFinish('stack', { same: hintStats.same, total: hintStats.total, holes: hintStats.holes || 0, dead: false }));
+    syncDrill();
+    return;
+  }
+  // 冲刺
+  drill.pieces++;
+  if (!drill.pk.soft && drill.spawnB){
+    const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
+    const m = finesseMin(drill.spawnB, p.type, cells, drill.kb);
+    if (m !== null && drill.pk.keys > m) drill.faults++;
+  }
+  if (game.lines >= DRILL_SPRINT_LINES){
+    const ms = Math.round(drill.ms);
+    drillPause(700, () => drillFinish('sprint', {
+      done: true, ms, lines: game.lines, pieces: drill.pieces, keys: drill.keys, faults: drill.faults }));
+  }
+  syncDrill();
+}
+
+// 顶出局：不进结算页，算这一段的结果（热身就是这题没做到，重摆）
+function drillTopOut(){
+  if (!drill || !drill.stage) return false;
+  game.piece = null;
+  if (drill.stage === 'warm'){ drill.tries++; drillPause(900, drillWarmLoad); return true; }
+  if (drill.stage === 'stack'){
+    drillPause(600, () => drillFinish('stack', { same: hintStats.same, total: hintStats.total, holes: hintStats.holes || 0, dead: true }));
+    return true;
+  }
+  drillPause(600, () => drillFinish('sprint', {
+    done: false, ms: Math.round(drill.ms), lines: game.lines, pieces: drill.pieces, keys: drill.keys, faults: drill.faults }));
+  return true;
+}
+
+function drillFinish(stage, res){
+  if (!drill) return;
+  drill.done[stage] = res;
+  drill.stage = null; drill.clock = false;
+  hintMode = false; hintMove = null; hintBase = null;
+  drillSave(stage, res);
+  sfx('level', 1.1);
+  syncHint(); syncDrill();
+  openDrSheet();
+}
+
+// 跳过 / 重来 / 结束
+function drillSkip(){
+  const s = drillPending();
+  if (!drill || !s) return;
+  drill.skipped[s] = true;
+  renderDrSheet();
+}
+function drillRedo(){
+  if (!drill) return;
+  const s = drill.stage || drillPending();
+  if (s){ closeDrSheet(true); drillBegin(s); }
+}
+function drillEnd(){
+  drill = null;
+  const sh = $('drSheet');
+  if (sh) sh.hidden = true;
+  syncDrill();
+}
+function drillExit(){
+  drillEnd();
+  game.frozen = false;
+  exitPractice();
+}
+
+// ── 显示 ──
+function fmtMs(ms){
+  const t = Math.max(0, ms) / 1000, m = Math.floor(t / 60), s = t - m * 60;
+  return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+}
+function drillResText(stage, r){
+  if (!r) return '';
+  if (stage === 'warm') return (r.first | 0) + '/' + (r.n | 0) + ' 一次过 · 每题 ' + (r.ms / 1000 / Math.max(1, r.n | 0)).toFixed(1) + ' 秒';
+  if (stage === 'stack') return '一致 ' + Math.round(100 * r.same / Math.max(1, r.total)) + '% · 洞 ' + (r.holes | 0)
+                                + (r.dead ? ' · 中途堆满' : '');
+  if (!r.done) return '没打完（' + (r.lines | 0) + ' 行）';
+  return fmtMs(r.ms) + ' · PPS ' + (r.pieces / (r.ms / 1000)).toFixed(2)
+         + ' · 每块 ' + (r.keys / Math.max(1, r.pieces)).toFixed(1) + ' 键 · 多余 ' + (r.faults | 0);
+}
+// 和上次（今天之前最近一次）比
+function drillDelta(stage, r){
+  const p = drillPrev(stage);
+  if (!p || !r) return '';
+  const q = p.r, md = p.day.slice(5).replace('-', '/');
+  if (stage === 'sprint'){
+    if (!r.done || !q.done) return '';
+    const d = (q.ms - r.ms) / 1000;
+    return d >= 0 ? '比 ' + md + ' 快 ' + d.toFixed(1) + ' 秒' : '比 ' + md + ' 慢 ' + (-d).toFixed(1) + ' 秒';
+  }
+  if (stage === 'stack'){
+    const d = Math.round(100 * r.same / Math.max(1, r.total)) - Math.round(100 * q.same / Math.max(1, q.total));
+    return '一致率比 ' + md + (d >= 0 ? ' +' : ' ') + d + '%';
+  }
+  const d = (r.first | 0) - (q.first | 0);
+  return d ? '一次过比 ' + md + (d > 0 ? ' 多 ' : ' 少 ') + Math.abs(d) + ' 道' : '一次过和 ' + md + ' 一样';
+}
+function renderDrSheet(){
+  const body = $('drBody');
+  if (!body || !drill) return;
+  const nx = drillPending();
+  let h = '';
+  for (const s of DRILL_STAGES){
+    const r = drill.done[s];
+    const cls = r ? 'done' : drill.skipped[s] ? 'skip' : s === nx ? 'now' : '';
+    const delta = r ? drillDelta(s, r) : '';
+    h += '<div class="dr-st ' + cls + '"><b>' + DRILL_NAME[s] + (r ? '　✓' : drill.skipped[s] ? '　跳过' : '') + '</b>'
+       + '<span>' + (r ? drillResText(s, r) : DRILL_DESC[s]) + '</span>'
+       + (delta ? '<em>' + delta + '</em>' : '') + '</div>';
+  }
+  // 最近 7 天：每天每项取最好
+  const all = drillReadAll();
+  const days = Object.keys(all.days).filter(k => DAY_RE.test(k)).sort().slice(-7).reverse();
+  if (days.length){
+    h += '<span class="sheet-lb">最近 ' + days.length + ' 天（每天取最好的一次）</span>'
+       + '<table class="dr-hist"><tr><th>日期</th><th>T 槽</th><th>一致</th><th>40 行</th><th>PPS</th><th>多余</th></tr>';
+    for (const k of days){
+      const d = all.days[k] || {};
+      const w = d.warm, st = d.stack, sp = d.sprint;
+      h += '<tr><td>' + k.slice(5).replace('-', '/') + '</td>'
+         + '<td>' + (w ? (w.first | 0) + '/' + (w.n | 0) : '—') + '</td>'
+         + '<td>' + (st ? Math.round(100 * st.same / Math.max(1, st.total)) + '%' : '—') + '</td>'
+         + '<td>' + (sp && sp.done ? fmtMs(sp.ms) : '—') + '</td>'
+         + '<td>' + (sp && sp.done ? (sp.pieces / (sp.ms / 1000)).toFixed(2) : '—') + '</td>'
+         + '<td>' + (sp && sp.done ? (sp.faults | 0) : '—') + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  body.innerHTML = h;
+  const go = $('drGo');
+  // 按钮字少：.pbtn 是等宽字 + 字距，「开始 ① T 槽热身」会被撑得稀稀拉拉
+  if (go) go.textContent = drill.stage ? '接着练' : nx ? '开始' + DRILL_SHORT[nx] : '练完了 · 回普通局';
+  const sk = $('drSkip');
+  if (sk) sk.disabled = !!drill.stage || !nx;
+}
+function openDrSheet(){
+  const sh = $('drSheet');
+  if (!drill || !sh) return;
+  renderDrSheet();
+  sh.hidden = false;
+  game.frozen = true;
+}
+// begin = true：马上要开下一段，不用恢复循环
+function closeDrSheet(begin){
+  const sh = $('drSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  if (begin) return;
+  if (drill && drill.stage){ game.frozen = false; resumeLoop(); }
+}
+function drillGo(){
+  if (!drill) return;
+  if (drill.stage){ closeDrSheet(); return; }
+  const nx = drillPending();
+  if (!nx){ drillExit(); return; }
+  closeDrSheet(true);
+  drillBegin(nx);
+}
+
+function syncDrill(){
+  document.body.classList.toggle('drilling', !!drill);
+  syncModeSwitch();
+  if (!drill) return;
+  const lb = $('drLabel'), st = $('drStat');
+  let a = '', b = '';
+  if (drill.stage === 'warm'){
+    // 细栏在 SE 上只有一百来像素给文字，只写最要紧的
+    a = '热身 ' + Math.min(drill.wi + 1, DRILL_WARM_N) + '/' + DRILL_WARM_N + '　T 旋双消';
+    b = fmtMs(drill.ms);
+  } else if (drill.stage === 'stack'){
+    a = hintMove ? '推荐　' + hintMove.why : DRILL_NAME.stack;
+    b = Math.min(game.pieces, DRILL_STACK_N) + '/' + DRILL_STACK_N;
+  } else if (drill.stage === 'sprint'){
+    a = '冲刺 ' + Math.min(game.lines, DRILL_SPRINT_LINES) + '/' + DRILL_SPRINT_LINES + ' 行';
+    b = fmtMs(drill.ms);
+  } else {
+    const nx = drillPending();
+    a = nx ? '下一段　' + DRILL_NAME[nx] : '今天练完了';
+  }
+  if (lb) lb.textContent = a;
+  if (st) st.textContent = b;
+}
+// 计时：只在这一段真正在打的时候走（面板开着、暂停、题间停顿都不算）
+function drillStep(dt){
+  if (!drill || !drill.clock || !drill.stage) return;
+  drill.ms += dt;
+  const tenth = (drill.ms / 100) | 0;
+  if (tenth !== drill.statAt){ drill.statAt = tenth; const st = $('drStat'); if (st && drill.stage !== 'stack') st.textContent = fmtMs(drill.ms); }
 }
 
 // ───────────────────────── 锁定与消行 ─────────────────────────
@@ -1681,17 +2176,20 @@ function startHint(){
 function detectTSpin(){
   const p = game.piece;
   if (!p || p.type !== 'T' || !game.lastWasRot) return null;
-  const cx = p.x + 1, cy = p.y + 1;
-  const corner = (x, y) =>
-    x < 0 || x >= COLS || y >= TOTAL_ROWS || (y >= 0 && !!game.board[y][x]);
+  return tspinKind((x, y) => x < 0 || x >= COLS || y >= TOTAL_ROWS || (y >= 0 && !!game.board[y][x]),
+                   p.x, p.y, p.rot, game.lastRotKick);
+}
+// 三角判定本体。corner(x, y) 说这一格挡不挡；每日练习的出题验证拿模拟盘面也走这里
+function tspinKind(corner, x, y, rot, kick){
+  const cx = x + 1, cy = y + 1;
   // 四个角，前两个是 T 朝向那一侧的「正面角」
-  const front = [[[-1,-1],[1,-1]], [[1,-1],[1,1]], [[1,1],[-1,1]], [[-1,1],[-1,-1]]][p.rot & 3];
-  const back  = [[[-1,1],[1,1]],  [[-1,-1],[-1,1]], [[-1,-1],[1,-1]], [[1,-1],[1,1]]][p.rot & 3];
+  const front = [[[-1,-1],[1,-1]], [[1,-1],[1,1]], [[1,1],[-1,1]], [[-1,1],[-1,-1]]][rot & 3];
+  const back  = [[[-1,1],[1,1]],  [[-1,-1],[-1,1]], [[-1,-1],[1,-1]], [[1,-1],[1,1]]][rot & 3];
   const f = front.filter(([dx,dy]) => corner(cx+dx, cy+dy)).length;
   const b = back .filter(([dx,dy]) => corner(cx+dx, cy+dy)).length;
   if (f + b < 3) return null;
   // 正面两角都被挡 = 实打实的 T-spin；否则算 mini（踢墙踢到底那次除外）
-  if (f === 2 || game.lastRotKick === 4) return 'tspin';
+  if (f === 2 || kick === 4) return 'tspin';
   return 'mini';
 }
 
@@ -1748,6 +2246,7 @@ function lockPiece(){
   lastLockY = p.y + 1;               // 空转 T-spin 没有消除行，飘字落在 T 的中心
   scoreFor(full.length, spin, perfect);
   practiceCheck(full.length, spin, perfect);
+  drillOnLock(p, full.length, spin);
   crazyOnClear(full.length, spin, perfect);
 
   if (full.length){
@@ -2266,7 +2765,8 @@ function scoreFor(n, spin, perfect){
     // 速度在 gravityFor 里 clamp、倍率在 levelMult 里 clamp、
     // 只有灰线在满级之后继续被它推快，所以再强的人也一定会撞墙。
     const newLevel = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
-    if (newLevel > game.level){ game.level = newLevel; flashLevel(); syncEdge(); }
+    // 每日练习不升级：三段每天同一个速度，数字才能跨天比
+    if (newLevel > game.level && !drill){ game.level = newLevel; flashLevel(); syncEdge(); }
   }
   // toast 只留"够得上事件"的：常态的连击/B2B 交给常驻徽章，
   // 否则同一件事会有飘字 + 徽章 + toast 三个通道同时喊。
@@ -2366,6 +2866,8 @@ function endGame(why){
   // 死亡路径天然单次（调用点后面都 return），但「收手」是个用户能连点的按钮 ——
   // 连点两下就是 addTotal / countRush / plays++ 各跑两遍。
   if (game.over) return;
+  // 每日练习里顶出局不进结算页：算这一段的结果（热身就是这题重摆）
+  if (drill && drillTopOut()) return;
   game.over = true;
   // FEVER 的视觉不能留到结算页 —— crazyReset 要等重开才跑，中间这段
   // 背景条纹会一直在动
@@ -6250,6 +6752,7 @@ function stepOnce(dt){
     if (introLeft <= 0) endRushIntro();
     return 'normal';
   }
+  drillStep(dt);
 
   stepParticles(dt);
   stepTrails(dt);
@@ -6482,7 +6985,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -6500,17 +7003,19 @@ window.addEventListener('keydown', (e) => {
       if (sheet.id === 'styleSheet') toggleStylePanel(false);
       // 练习弹层把 game.frozen 置上了，直接 hidden 的话方块永远不再掉
       else if (sheet.id === 'prSheet') closePrSheet();
+      else if (sheet.id === 'drSheet') closeDrSheet();
       else sheet.hidden = true;
     }
     return;
   }
   if (demoRunning) return;
-  if (act === 'restart'){ restart(); return; }
+  if (act === 'restart'){ if (drill) drillRedo(); else restart(); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
   if (act === 'fullscreen'){ toggleGameMode(); return; }
   if (!game.started || game.over || game.paused) return;
   if (e.repeat && act !== 'soft') return;
+  if (!e.repeat) drillKey(act === 'soft', true);
   switch (act){
     case 'left':  press('left'); break;
     case 'right': press('right'); break;
@@ -6542,6 +7047,7 @@ function btnHardDrop(){
   const now = performance.now();
   if (now - lastBtnDrop < DROP_GUARD_MS) return;
   lastBtnDrop = now;
+  drillKey(false, false);
   hardDrop();
 }
 
@@ -6568,6 +7074,8 @@ function bindButtons(){
       // 演示放着的时候手指一碰就会把路径带偏，先挡掉
       if (!game.started || game.over || game.paused || demoRunning) return;
       el.classList.add('active');
+      // 每日练习冲刺段数按键（落底在 btnHardDrop 里数，连点被挡掉的那下不算）
+      if (id !== 'btnDrop' && id !== 'nextSlot') drillKey(id === 'btnSoft', false);
       down();
     };
     const end = (e) => {
@@ -6980,8 +7488,9 @@ function init(){
       if (!b) return;
       const m = b.dataset.m;
       if (m === 'practice' && !practice){ startPractice(); openPrSheet(); }
-      else if (m === 'hint' && !hintMode) startHint();
-      else if (m === 'normal' && (practice || hintMode)) exitPractice();
+      else if (m === 'practice' && drill){ startPractice(); openPrSheet(); }
+      else if (m === 'hint' && (!hintMode || drill)) startHint();
+      else if (m === 'normal' && assisted()) exitPractice();
     });
     syncModeSwitch();
   }
@@ -7020,6 +7529,16 @@ function init(){
   on('prReset', () => { if (practiceLevel) practiceLoad(practiceLevel.k); closePrSheet(); });
   on('prFree',  () => { startPractice(); closePrSheet(); });
   on('prExit',  () => exitPractice());
+  // ── 每日练习 ──
+  on('prDaily', () => startDrill());
+  on('dailyBtn', () => startDrill());
+  on('drGo',    () => drillGo());
+  on('drSkip',  () => drillSkip());
+  on('drExit',  () => drillExit());
+  on('drMenu',  () => openDrSheet());
+  on('drRedo',  () => drillRedo());
+  const dsh = $('drSheet');
+  if (dsh) dsh.addEventListener('click', (e) => { if (e.target === dsh) closeDrSheet(); });
   const psh = $('prSheet');
   if (psh) psh.addEventListener('click', (e) => { if (e.target === psh) closePrSheet(); });
   $('againBtn').addEventListener('click', () => restart());
@@ -7054,7 +7573,7 @@ function init(){
   $('rankSheet').addEventListener('click', (e) => { if (e.target === $('rankSheet')) closeRank(); });
   $('resumeBtn').addEventListener('click', togglePause);
   $('pauseBtn').addEventListener('click', togglePause);
-  $('restartBtn').addEventListener('click', () => restart());
+  $('restartBtn').addEventListener('click', () => { if (drill) drillRedo(); else restart(); });
   // 收手：走正常的 endGame 路径，分数全额计入。它不是 buff ——
   // 收手拿到的就是当前分数，继续打只会更高，所以没有刷分动机。
   const sb = $('stopBtn');
@@ -7214,6 +7733,9 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   CLEAR_DRAW_MS, DROP_GUARD_MS,
+  startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
+  drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
+  get drill(){ return drill; },
   LEVELS, LEVEL_BY, startPractice, exitPractice, practiceLoad, practicePick, practiceUndo, practiceCheck, detectTSpin,
   get practice(){ return practice; }, get practiceDone(){ return practiceDone; },
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },

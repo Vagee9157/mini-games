@@ -1,0 +1,225 @@
+"""每日练习：随机 T 槽题可解、三段流程、计数口径、按天存档、隔离
+
+热身题用 simReach 给出的按键串在真盘面上回放（doAct），不是直接把块摆到终点 ——
+摆过去的话「只用顺时针能不能转进去」根本没被验证。
+"""
+import os, http.server, socketserver, threading, functools, sys
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.chdir(ROOT)
+H=functools.partial(http.server.SimpleHTTPRequestHandler, directory=ROOT); H.log_message=lambda *a,**k:None
+socketserver.TCPServer.allow_reuse_address=True
+srv=socketserver.TCPServer(("127.0.0.1",0),H); srv.RequestHandlerClass.log_message=lambda *a,**k:None
+port=srv.server_address[1]; threading.Thread(target=srv.serve_forever,daemon=True).start()
+from playwright.sync_api import sync_playwright
+
+JS = r"""async () => {
+  const T = __tetris, L = [];
+  const ok = (c, m) => L.push((c ? 'PASS ' : 'FAIL ') + m);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const $ = id => document.getElementById(id);
+  const settle = () => { let g = 0; while ((T.clearing || !T.game.piece) && !T.game.over && !T.game.frozen && g++ < 400) T.step(16); };
+  const tsd = () => T.simReach(T.simBoard(), 'T').find(l => l.spin === 'tspin' && l.lines === 2);
+  const play = acts => { for (const a of T.parseActs(acts + 'H')) T.doAct(a); };
+
+  // ── 出题：200 道，道道可解、必须转、不重样 ──
+  const seen = new Set(); let bad = 0, straight = 0, sides = new Set(), cols = new Set();
+  for (let i = 0; i < 200; i++){
+    const pz = T.drillGenPuzzle();
+    if (!pz){ bad++; continue; }
+    seen.add(pz.rows.join('/')); sides.add(pz.s); cols.add(pz.c);
+    const b = Array.from({ length: T.TOTAL_ROWS }, () => new Array(10).fill(false));
+    pz.rows.forEach((r, k) => { for (let x = 0; x < 10; x++) b[T.TOTAL_ROWS - pz.rows.length + k][x] = r[x] === '#'; });
+    if (!T.simReach(b, 'T').some(l => l.spin === 'tspin' && l.lines === 2)) bad++;
+    // 不转、直接从顶上落，任何位置都消不了两行 —— 题目必须靠 T 旋
+    if (T.simDrops(b, 'T').some(d => T.simPlace(b, d.cells).lines >= 2)) straight++;
+  }
+  ok(bad === 0, `200 道题都能只用顺时针打出 T 旋双消（不行的 ${bad}）`);
+  ok(straight === 0, `没有一道能不转直接落出两行（${straight}）`);
+  ok(seen.size >= 180, `200 道里不重样的 ${seen.size} 道`);
+  ok(sides.size === 2 && cols.size >= 7, `屋檐左右都有、槽口分布在 ${cols.size} 列`);
+
+  // ── 先开一局普通局 —— 练完要能接着玩、纪录不能动 ──
+  localStorage.removeItem(T.DRILL_KEY);
+  $('startBtn').click(); T.game.noGarbage = true;
+  for (let i = 0; i < 4; i++){ T.hardDrop(); settle(); }
+  const best0 = T.readBest(), nScore = T.game.score;
+
+  // ── 入口 ──
+  ok(!!$('dailyBtn') && !!$('prDaily'), '开局面板和练习面板都有「每日练习」入口');
+  $('modeSw').querySelector('[data-m="practice"]').click();
+  $('prDaily').click();
+  ok(!!T.drill && !$('drSheet').hidden && T.game.frozen, '点进去先停在面板上');
+  ok(document.body.classList.contains('drilling'), 'body 挂上 drilling');
+  ok($('modeSw').querySelector('[data-m="practice"]').classList.contains('on'), '顶栏高亮在「练习」');
+  ok(/热身/.test($('drGo').textContent), `按钮写着下一段（「${$('drGo').textContent}」）`);
+  ok(!!T.readSave() && T.readSave().score === nScore, '普通局打到一半进来，存档留着');
+
+  // ── ① 热身 ──
+  $('drGo').click();
+  ok(T.drill.stage === 'warm' && $('drSheet').hidden && !T.game.frozen, '开始热身');
+  ok(T.game.piece && T.game.piece.type === 'T' && T.game.queue.every(t => t === 'T'), '题目只出 T');
+  T.holdPiece();
+  ok(T.game.hold === null, '热身不能暂存');
+  // 第一题故意失手：不转直接落
+  const rows0 = JSON.stringify(T.game.board);
+  T.hardDrop();
+  ok(T.drill.tries === 1 && T.game.frozen, '没打出来：记一次，先停一下');
+  await sleep(1000);
+  ok(JSON.stringify(T.game.board) === rows0 && T.game.piece.type === 'T', '同一题重摆');
+  for (let i = 0; i < T.DRILL_WARM_N; i++){
+    const m = tsd();
+    if (!m){ ok(false, `第 ${i + 1} 题找不到解`); break; }
+    await sleep(60);                  // 让计时走一点
+    play(m.acts);
+    ok(i === T.DRILL_WARM_N - 1 || (T.drill.wi === i + 1), `第 ${i + 1} 题照解法回放打出 T 旋双消（${m.acts}H）`);
+    await sleep(1100);
+  }
+  const w = T.drill && T.drill.done.warm;
+  ok(!!w && w.first === T.DRILL_WARM_N - 1 && w.n === T.DRILL_WARM_N, `热身成绩：一次过 ${w && w.first}/${w && w.n}（第一题失手过一次）`);
+  ok(!!w && w.ms > 0, `计时有走（${w && w.ms}ms）`);
+  ok(!$('drSheet').hidden && /堆叠/.test($('drGo').textContent), '热身完回面板，下一段是堆叠');
+
+  // ── ② 堆叠 ──
+  $('drGo').click();
+  ok(T.hintMode && T.drill.stage === 'stack', '堆叠段借用提示模式');
+  ok(getComputedStyle($('hintBar')).display === 'none' && getComputedStyle($('drBar')).display !== 'none',
+     '只挂每日练习那一条细栏，提示细栏收起');
+  ok(/推荐/.test($('drLabel').textContent), `细栏写着推荐理由（「${$('drLabel').textContent}」）`);
+  for (let i = 0; i < T.DRILL_STACK_N && T.drill && T.drill.stage === 'stack'; i++){
+    const hm = T.hintMove, p = T.game.piece;
+    if (!hm || !p) break;
+    p.rot = hm.rot; p.x = hm.x; p.y = 0;
+    T.hardDrop(); settle();
+  }
+  ok(T.game.level === 1, `堆叠段不升级（${T.game.lines} 行仍是 ${T.game.level} 级）`);
+  await sleep(800);
+  const st = T.drill && T.drill.done.stack;
+  ok(!!st && st.total === T.DRILL_STACK_N && st.same === T.DRILL_STACK_N && st.holes === 0 && !st.dead,
+     `照推荐放 100 块：一致 ${st && st.same}/${st && st.total}、洞 ${st && st.holes}`);
+  ok(!T.hintMode && !document.body.classList.contains('hinting'), '堆叠完退出提示模式');
+
+  // ── ③ 冲刺：按键计数和多余按键 ──
+  $('drGo').click();
+  ok(T.drill.stage === 'sprint' && T.drill.clock, '冲刺开始计时');
+  for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
+  const ev = (id, t) => $(id).dispatchEvent(new MouseEvent(t, { bubbles: true }));
+  const tap = id => { ev(id, 'mousedown'); ev(id, 'mouseup'); };
+  // 干净的一块：直接落底 = 1 键，最少也是 1 键
+  T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext();
+  await sleep(200); tap('btnDrop'); settle();
+  ok(T.drill.keys === 1 && T.drill.faults === 0, `直接落底：1 键、不算多余（${T.drill.keys} 键 / 多余 ${T.drill.faults}）`);
+  // 绕一下：右、左、落底 = 3 键，同一个落点最少 1 键 → 多余一次
+  T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext();
+  await sleep(200); tap('btnRight'); tap('btnLeft'); tap('btnDrop'); settle();
+  ok(T.drill.keys === 4 && T.drill.faults === 1, `右左落底：累计 4 键、多余 1（${T.drill.keys} / ${T.drill.faults}）`);
+  // 转四下回原样再落：多余
+  T.game.piece = null; T.game.queue.unshift('T'); T.game.mods.unshift(null); T.spawnNext();
+  await sleep(200); for (let i = 0; i < 4; i++) tap('btnCw'); tap('btnDrop'); settle();
+  ok(T.drill.faults === 2, `转一圈再落：多余 +1（${T.drill.faults}）`);
+  // 最少按法：J 竖着靠左墙 = 转一下 + 按住左（一次）+ 落底；用 3 键不算多余
+  T.game.piece = null; T.game.queue.unshift('J'); T.game.mods.unshift(null); T.spawnNext();
+  await sleep(200);
+  tap('btnCw'); ev('btnLeft', 'mousedown'); await sleep(600); ev('btnLeft', 'mouseup'); tap('btnDrop'); settle();
+  ok(T.drill.faults === 2, `转一下 + 按住左到墙 + 落底：不算多余（${T.drill.faults}）`);
+  // 连点落底被挡掉的那下不数
+  const k0 = T.drill.keys;
+  T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext();
+  await sleep(200); tap('btnDrop'); await sleep(40); tap('btnDrop'); settle();
+  ok(T.drill.keys === k0 + 1, `连点落底只数 1 键（+${T.drill.keys - k0}）`);
+  // 打到 40 行收尾（行数直接拨到线上，靠下一块锁定触发）
+  T.game.lines = T.DRILL_SPRINT_LINES;
+  await sleep(250); tap('btnDrop'); settle();
+  ok(T.game.level === 1, '冲刺段不升级');
+  await sleep(900);
+  const sp = T.drill && T.drill.done.sprint;
+  ok(!!sp && sp.done && sp.ms > 0 && sp.pieces === 6, `冲刺成绩：${sp && T.fmtMs(sp.ms)}、${sp && sp.pieces} 块、${sp && sp.keys} 键、多余 ${sp && sp.faults}`);
+  ok(/练完了/.test($('drGo').textContent) && $('drSkip').disabled, '三段都完：按钮变「练完了」');
+
+  // ── 存档 ──
+  const all = T.drillReadAll(), today = all.days[T.bjDay()];
+  ok(!!today && !!today.warm && !!today.stack && !!today.sprint, '今天三项都存下来了');
+  ok($('drBody').querySelector('.dr-hist') && /\d+\/\d+/.test($('drBody').querySelector('.dr-hist').textContent), '面板里有最近几天的表');
+  // 同一天再来一次更差的：留最好的
+  T.drillSave('sprint', { done: true, ms: sp.ms + 5000, lines: 40, pieces: 6, keys: 9, faults: 3 });
+  ok(T.drillReadAll().days[T.bjDay()].sprint.ms === sp.ms, '同一天更慢的那次不覆盖');
+  T.drillSave('sprint', { done: true, ms: Math.max(1, sp.ms - 1), lines: 40, pieces: 6, keys: 9, faults: 3 });
+  ok(T.drillReadAll().days[T.bjDay()].sprint.ms === Math.max(1, sp.ms - 1), '更快的那次覆盖');
+
+  // ── 隔离 ──
+  ok(T.readBest() === best0, '每日练习不写最高分');
+  ok(!!T.readSave() && T.readSave().score === nScore, '练完普通局存档还在');
+  $('drGo').click();
+  ok(!T.drill && !document.body.classList.contains('drilling') && $('overlay').classList.contains('show'),
+     '练完点按钮回开局面板');
+  ok(document.getElementById('overlay').classList.contains('has-save'), '「接着上次玩」还在');
+
+  // ── 跟上次比 ──
+  const d = JSON.parse(localStorage.getItem(T.DRILL_KEY));
+  d.days['2000-01-01'] = { sprint: { done: true, ms: 999999, lines: 40, pieces: 100, keys: 300, faults: 20 },
+                           stack: { same: 10, total: 100, holes: 9, dead: false }, warm: { first: 0, n: 5, ms: 90000 } };
+  localStorage.setItem(T.DRILL_KEY, JSON.stringify(d));
+  T.startDrill();
+  T.drillSave('sprint', T.drillReadAll().days[T.bjDay()].sprint);
+  T.drill.done.sprint = T.drillReadAll().days[T.bjDay()].sprint;
+  T.drill.done.stack = T.drillReadAll().days[T.bjDay()].stack;
+  T.drillSkip();      // 让面板重画
+  const txt = $('drBody').textContent;
+  ok(/比 01\/01 快/.test(txt) && /一致率比 01\/01 \+/.test(txt), `和上次比的那句（${(txt.match(/比 01\/01[^·]*?秒/) || [''])[0]}）`);
+  // 坏数据不炸
+  localStorage.setItem(T.DRILL_KEY, '{"days":{"<img>":{"sprint":1}}}');
+  let threw = false; try { T.drillSkip(); T.startDrill(); } catch { threw = true; }
+  ok(!threw && !$('drBody').innerHTML.includes('<img'), '存档里的脏键不进页面、不报错');
+
+  // ── 切模式 ──
+  $('modeSw').querySelector('[data-m="hint"]').click();
+  ok(!T.drill && T.hintMode && $('drSheet').hidden && !T.game.frozen, '每日练习里点「提示」：直接切过去');
+  T.startDrill(); $('drGo').click();
+  $('modeSw').querySelector('[data-m="normal"]').click();
+  ok(!T.drill && !T.hintMode && !T.game.started, '点「普通」：回开局面板');
+  T.startDrill(); $('drGo').click();
+  T.drill.ms = 5000; $('restartBtn').click();
+  ok(T.drill.stage === 'warm' && T.drill.ms === 0, '顶栏「重开」= 这一段重来');
+  return L;
+}"""
+
+fails = 0
+with sync_playwright() as p:
+    b = p.chromium.launch()
+    pg = b.new_page(**p.devices['iPhone 13']); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
+    pg.goto(f"http://127.0.0.1:{port}/tetris/index.html"); pg.wait_for_function("() => !!window.__tetris")
+    r = pg.evaluate(JS)
+    if errs: r.append('FAIL 页面报错：' + '; '.join(errs))
+    print('每日练习')
+    for l in r:
+        print('  ', l)
+        if l.startswith('FAIL'): fails += 1
+    # 最矮的 SE：7 天的表撑满之后，主按钮仍在屏幕里（钉在面板底边）
+    for w, h in [(320, 568), (375, 667)]:
+        d = dict(p.devices['iPhone 13']); d['viewport'] = {'width': w, 'height': h}
+        q = b.new_page(**d); q.route("**fonts.googleapis.com/**", lambda r: r.abort())
+        q.goto(f"http://127.0.0.1:{port}/tetris/index.html"); q.wait_for_function("() => !!window.__tetris")
+        q.evaluate("""() => { const T = __tetris, days = {};
+          for (let i = 1; i <= 7; i++){ const k = new Date(Date.now() + 8*3600e3 - i*864e5).toISOString().slice(0,10);
+            days[k] = { warm:{first:2,n:5,ms:50000}, stack:{same:60,total:100,holes:4}, sprint:{done:true,ms:180000,lines:40,pieces:100,keys:330,faults:15} }; }
+          localStorage.setItem(T.DRILL_KEY, JSON.stringify({ v:1, days })); T.startDrill(); }""")
+        q.wait_for_timeout(450)          # 面板有 .22s 的上滑动画，滑完再量
+        g = q.evaluate("""() => {
+          const r = document.getElementById('drGo').getBoundingClientRect();
+          return [Math.round(r.top), Math.round(r.bottom), innerHeight,
+                  document.querySelectorAll('#drBody .dr-hist tr').length]; }""")
+        okk = g[1] <= g[2] and g[0] >= 0 and g[3] == 8
+        print('  ', ('PASS ' if okk else 'FAIL ') + f'{w}×{h} 面板主按钮在屏幕里（{g[0]}~{g[1]} / {g[2]}，表 {g[3]-1} 行）')
+        if not okk: fails += 1
+        q.close()
+    # 疯狂版没有这些
+    pg.goto(f"http://127.0.0.1:{port}/crazy/index.html"); pg.wait_for_function("() => !!window.__tetris")
+    c = pg.evaluate("""() => { __tetris.startDrill();
+      return [!document.getElementById('dailyBtn'), !document.getElementById('drBar'), !__tetris.drill]; }""")
+    for okk, m in zip(c, ['疯狂版没有入口', '疯狂版没有细栏', '疯狂版 startDrill 不生效']):
+        print('  ', ('PASS ' if okk else 'FAIL ') + m)
+        if not okk: fails += 1
+    b.close()
+srv.shutdown(); srv.server_close()
+sys.exit(1 if fails else 0)

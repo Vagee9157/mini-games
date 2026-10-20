@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=a49a7119">
+<link rel="stylesheet" href="tetris.css?v=9a6a665b">
 </head>
 <body>
 <div class="topline"></div>
@@ -95,6 +95,8 @@
             <!-- 练习：不涨灰线、不记成绩、能撤销能指定出块。
                  疯狂版用不上（它的分数靠机制叠，练手型没意义），bump.py 会把它删掉。 -->
             <button class="pbtn ghost" id="practiceBtn" data-std-only>练习　学 T-spin</button>
+            <!-- 每日练习：热身 + 堆叠 + 40 行冲刺，约 10 分钟，按天存成绩看进步 -->
+            <button class="pbtn ghost" id="dailyBtn" data-std-only>每日练习</button>
           </div>
 
           <div data-when="pause">
@@ -223,6 +225,14 @@
       <b class="hint-why" id="hintWhy"></b>
       <span class="hint-score" id="hintScore"></span>
     </div>
+    <!-- 每日练习细栏：这一段在练什么 + 计时/进度。堆叠段的推荐理由也写在这里，
+         提示细栏那时候收起来 —— 两条一起挂盘面要少两行 -->
+    <div class="drbar" id="drBar">
+      <b class="pr-goal" id="drLabel"></b>
+      <span class="dr-stat" id="drStat"></span>
+      <button class="pr-s" id="drRedo" type="button">重来</button>
+      <button class="pr-s pr-menu" id="drMenu" type="button">进度</button>
+    </div>
     <!-- std-only:end -->
 
     <div class="pads">
@@ -245,6 +255,7 @@
   <div class="sheet" id="prSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>练习</h3></div>
+      <button class="pbtn dr-entry" id="prDaily" type="button">每日练习　热身 · 堆叠 · 40 行冲刺</button>
       <p class="pr-tip" id="prTip"></p>
       <div class="pr-levels" id="prLevels"></div>
       <span class="sheet-lb">指定下一块</span>
@@ -255,6 +266,18 @@
         <button class="pr-b" id="prExit" type="button">退出练习</button>
       </div>
       <button class="pbtn sheet-done" id="prDone">开始练</button>
+    </div>
+  </div>
+  <!-- 每日练习面板：三段的状态和成绩 + 最近 7 天。开着时方块停住 -->
+  <div class="sheet" id="drSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>每日练习</h3></div>
+      <div class="dr-body" id="drBody"></div>
+      <div class="pr-row">
+        <button class="pr-b" id="drSkip" type="button">跳过这段</button>
+        <button class="pr-b" id="drExit" type="button">结束</button>
+      </div>
+      <button class="pbtn sheet-done" id="drGo">开始</button>
     </div>
   </div>
   <!-- std-only:end -->
@@ -303,7 +326,7 @@
 
 </div>
 
-<script src="tetris.js?v=96c0ec12"></script>
+<script src="tetris.js?v=8175b5e5"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
