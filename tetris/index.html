@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=780d89a5">
+<link rel="stylesheet" href="tetris.css?v=f5cfb1e2">
 </head>
 <body>
 <div class="topline"></div>
@@ -37,6 +37,7 @@
       <div class="modesw" id="modeSw" role="group" aria-label="模式">
         <button type="button" data-m="normal">普通</button>
         <button type="button" data-m="practice">练习</button>
+        <button type="button" data-m="hint">提示</button>
       </div>
       <!-- std-only:end -->
       <h1>俄罗斯方块<em>TETRIS</em></h1>
@@ -215,6 +216,11 @@
       <button class="pr-s" id="prDemo" type="button">演示</button>
       <button class="pr-s pr-menu" id="prMenu" type="button">关卡</button>
     </div>
+    <!-- 堆叠提示细栏：推荐的理由 + 跟推荐一致了几块。只有 body.hinting 时显示 -->
+    <div class="hintbar" id="hintBar">
+      <b class="hint-why" id="hintWhy"></b>
+      <span class="hint-score" id="hintScore"></span>
+    </div>
     <!-- std-only:end -->
 
     <div class="pads">
@@ -295,7 +301,7 @@
 
 </div>
 
-<script src="tetris.js?v=69edd636"></script>
+<script src="tetris.js?v=82c4e4dc"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

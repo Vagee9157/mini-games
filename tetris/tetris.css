@@ -805,7 +805,7 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 }
 .modesw button{
   font: inherit; font-size: 12px; line-height: 1;
-  padding: 6px 9px; border: 0; border-radius: 8px;
+  padding: 6px 8px; border: 0; border-radius: 8px;
   background: none; color: var(--ink-soft); cursor: pointer;
 }
 .modesw button.on{
@@ -1602,6 +1602,29 @@ body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }
    「合集」两个字收起来只留箭头，开关再紧一点。 */
 @media (max-width: 360px){
   .bar:has(.modesw) .back span{ display: none; }
-  .modesw button{ font-size: 11px; padding: 6px 7px; }
-  .bar:has(.modesw){ gap: 6px; }
+  /* 三格开关（普通 练习 提示）之后 320 宽又排不下了，再收一档 */
+  .modesw button{ font-size: 11px; padding: 6px 6px; }
+  .bar:has(.modesw){ gap: 4px; }
+}
+
+/* ── 堆叠提示模式 ──
+   细栏和练习那条同一个位置、同一个高度（一行），盘面只让出这一行。 */
+.hintbar{ display: none; }
+body.hinting .hintbar{
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 34px;
+}
+.hint-why{
+  flex: 1; min-width: 0;
+  font-size: 13px; color: #5ee08a;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hint-score{ flex: none; font-size: 11.5px; opacity: .65; font-variant-numeric: tabular-nums; }
+/* 没有 HOLD：框压暗，告诉你这个模式不用它 */
+body.hinting .slot.hold{ opacity: .3; }
+body.hinting .modesw{ border-color: rgba(94,224,138,.5); }
+body.hinting .modesw button.on{
+  background: linear-gradient(180deg, rgba(94,224,138,.22), rgba(94,224,138,.08));
+  color: #5ee08a;
 }

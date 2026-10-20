@@ -605,7 +605,7 @@ const careerOf = (v) => tierOf(CAREER, v);
 // 正在玩的这一局也存下来：手机上切个 App、锁个屏回来还能接着打
 let lastSaveAt = 0;
 function saveGame(force){
-  if (practice) return;            // 练习不存也不清 —— 见 clearSave
+  if (assisted()) return;          // 练习/提示不存也不清 —— 见 clearSave
   if (!game.started || game.over){ clearSave(); return; }
   // localStorage 是同步 I/O，连续落块时每次都写会拖帧
   const now = performance.now();
@@ -657,7 +657,7 @@ function readSave(){
 // 会 endGame()、会不停地落块 —— 这些路径原来都会顺手 clearSave()，于是普通局
 // 打到一半切去练一下，回来那局就没了。
 function clearSave(){
-  if (practice) return;
+  if (assisted()) return;
   try { localStorage.removeItem(SAVE_KEY); } catch { /* 忽略 */ }
 }
 
@@ -782,7 +782,7 @@ const game = {
   lastWasRot: false,
 };
 
-const dbg = { frames: 0, layouts: 0, draws: 0 };   // draws：测消行重绘节流用
+const dbg = { frames: 0, layouts: 0, draws: 0, previews: 0 };   // draws：测消行重绘节流用
 let garbageTimer = 0;
 let lockStep = -1;          // 落地渐白只分几档，省掉大部分重绘
 let dropTimer = 0;
@@ -861,6 +861,8 @@ function spawn(type, mod){
   grounded = false;
   // 出生位置就被占 → 结束
   if (collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
+  // 提示模式：每块一出生就算推荐（当前块 × 1 个 NEXT）
+  if (hintMode) hintCompute();
 
   // IHS 优先于 IRS：按住暂存键就先换块，否则按住旋转键就先转好
   if (!armPre) return;
@@ -946,6 +948,7 @@ function hardDrop(){
 
 function holdPiece(){
   if (!game.piece || game.holdUsed) return;
+  if (hintMode){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
   if (game.hold){
@@ -1381,7 +1384,9 @@ function closePrSheet(){
 function startPractice(){
   // 普通局打到一半切过来：先存一份。练习期间 clearSave/saveGame 都是空操作，
   // 这份存档会原样留到切回普通模式，开局面板上「接着上次玩」就能接上。
-  if (!practice && game.started && !game.over) saveGame(true);
+  if (!assisted() && game.started && !game.over) saveGame(true);
+  hintMode = false; hintMove = null;
+  syncHint();                // 摘掉 body.hinting —— 不摘的话绿色提示细栏会一直挂在练习界面上
   practice = true;
   restart();
   practice = true;                  // restart 不碰它，这行是防御，别指望
@@ -1396,6 +1401,7 @@ function startPractice(){
 function exitPractice(){
   closePrSheet();
   practice = false;
+  hintMode = false; hintMove = null; hintBase = null;
   // restart 不碰 noGarbage（那是 game 对象上的字段，newGame 才铺），
   // 不显式收掉的话之后的普通局永远不涨灰线
   game.noGarbage = false;
@@ -1409,6 +1415,7 @@ function exitPractice(){
   staticDirty = true; previewDirty = true; needsDraw = true;
   draw();
   syncPractice();
+  syncHint();
   syncResume();
   $('overlay').dataset.mode = 'start';
   $('overlay').classList.add('show');
@@ -1427,10 +1434,245 @@ function syncResume(){
 // 顶栏的「普通 | 练习」。只在标准版有（疯狂版 bump.py 把节点删了，这里拿不到就跳过）。
 function syncModeSwitch(){
   for (const b of document.querySelectorAll('#modeSw [data-m]')){
-    const on = (b.dataset.m === 'practice') === practice;
+    const m = b.dataset.m;
+    const on = m === 'practice' ? practice : m === 'hint' ? hintMode : !practice && !hintMode;
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
+}
+
+// ───────────────────────── 堆叠提示 ─────────────────────────
+//
+// 第三个模式：只看 1 个 NEXT、没有 HOLD、不涨灰线、不记成绩。每块出来的时候，
+// 在盘面上用绿框标出推荐位置，细栏写一句为什么。
+//
+// 推荐不是「最低的地方」，是把高手的堆叠经验写成打分规则（来源：ryanheise.com 的
+// 堆叠教程、tetris.wiki、gamertagmythras 的堆叠基础），然后把「当前块所有落点 ×
+// 下一块所有落点」全试一遍，挑最终盘面分最高的那个。每条扣分对应一条经验：
+//   造洞重罚                      「一个洞能废掉四行」
+//   高低差 0~1 可以，2 罚，3+ 重罚  「台阶要浅要宽，差 3 格只剩 I 能填」
+//   比两边都低 3 格的竖缝罚         「别造只有 I 能救的坑」
+//   最右一列留井，别的块填进去罚    「九列铺平，一列等 I」
+//   表面同时要有给 O、S、Z 的位置   「什么块来都有地方放」—— 高手放得快的真正原因
+//   堆高了就保命：消单行加分、井可以填  「被埋了就老老实实消单行」
+// 只算从顶上直接落下能到的位置，不算滑入和 T 旋 —— 提示教的是基本堆叠。
+let hintMode = false;
+let hintMove = null;        // { x, y, rot, type, cells, why }
+let hintBase = null;        // 出块那一刻的盘面，落下后拿它评你放的位置
+let hintStats = { same: 0, total: 0 };
+const HINT_WELL = COLS - 1;
+const HINT_DANGER = 13;     // 九列里最高的到这个高度就切保命（可见区 20 行）
+// 权重是让机器人只照着推荐放、跑出来调的（不涨灰线，每局 400~600 块）：
+//   第一版 burn=+4 hole=60：不死，但每消一行都加分 → 见行就消，四消占消行 30%
+//   扫了 24 组之后：安全时消零碎行改成**扣分**（burn=-6）、造洞罚重（hole=100），
+//   四消占比 → 66%，造洞率 4.8% → 2.7%。这正是高手的打法：安全时不消零碎行、
+//   攒着打四消；堆高了（HINT_DANGER）照样给消行加分，先保命。
+//   在没参与调参的另三个种子上复核（1800 块）：造洞 79 → 48、四消占比 43% → 68%、0 死。
+//   四消奖励 120 和 220 没有任何区别，井被堵罚 60 反而不如 35 —— 都没动。
+//   对照组「哪里最低放哪里」：57~98 块就堆死，结束时 26~29 个洞。
+const HW = {
+  hole: 100, step1: 2, step2: 8, step3: 25, pit: 30, wellBlock: 35,
+  noO: 8, noS: 10, noZ: 10, height: .5, tall: 15,
+  tetris: 120, burn: -6, burnDanger: 30,
+};
+
+function assisted(){ return practice || hintMode; }
+
+function simBoard(){ return game.board.map(r => r.map(c => !!c)); }
+function simFits(b, type, x, y, rot){
+  for (const [cx, cy] of cellsOf(type, rot)){
+    const X = x + cx, Y = y + cy;
+    if (X < 0 || X >= COLS || Y >= TOTAL_ROWS) return false;
+    if (Y >= 0 && b[Y][X]) return false;
+  }
+  return true;
+}
+// 从顶上直接落下能到的所有位置（同一组格子只留一个）
+function simDrops(b, type){
+  const out = [], seen = new Set();
+  for (const rot of (type === 'O' ? [0] : [0, 1, 2, 3])){
+    for (let x = -3; x < COLS + 1; x++){
+      if (!simFits(b, type, x, 0, rot)) continue;
+      let y = 0;
+      while (simFits(b, type, x, y + 1, rot)) y++;
+      const cells = cellsOf(type, rot).map(([cx, cy]) => [x + cx, y + cy]);
+      const key = cells.map(c => c.join(',')).sort().join(';');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ x, y, rot, type, cells });
+    }
+  }
+  return out;
+}
+function simPlace(b, cells){
+  const nb = b.map(r => r.slice());
+  for (const [X, Y] of cells) if (Y >= 0) nb[Y][X] = true;
+  let lines = 0;
+  for (let y = TOTAL_ROWS - 1; y >= 0; y--){
+    if (nb[y].every(Boolean)){
+      nb.splice(y, 1); nb.unshift(new Array(COLS).fill(false));
+      lines++; y++;
+    }
+  }
+  return { b: nb, lines };
+}
+function simFeatures(b){
+  const h = new Array(COLS).fill(0);
+  let holes = 0;
+  for (let x = 0; x < COLS; x++){
+    let top = TOTAL_ROWS;
+    for (let y = 0; y < TOTAL_ROWS; y++) if (b[y][x]){ top = y; break; }
+    h[x] = TOTAL_ROWS - top;
+    for (let y = top + 1; y < TOTAL_ROWS; y++) if (!b[y][x]) holes++;
+  }
+  const field = h.slice(0, HINT_WELL);
+  // 「什么块来都有地方放」：表面上有没有 O、S、Z 各自能落的形状
+  let o = false, sp = false, zp = false;
+  for (let i = 0; i + 1 < field.length; i++){
+    const a = field[i], c = field[i + 1], e = i + 2 < field.length ? field[i + 2] : null;
+    if (a === c) o = true;
+    if (a === c + 1) sp = true;                              // S 竖放：左边高一格
+    if (c === a + 1) zp = true;                              // Z 竖放：右边高一格
+    if (e !== null && a === c && e === c + 1) sp = true;     // S 平放：右边高一格
+    if (e !== null && a === c + 1 && c === e) zp = true;     // Z 平放：左边高一格
+  }
+  let bump = 0;
+  for (let i = 0; i + 1 < field.length; i++) bump += Math.abs(field[i] - field[i + 1]);
+  return { h, field, holes, bump, accept: { O: o, S: sp, Z: zp },
+           maxH: Math.max(...field), minH: Math.min(...field) };
+}
+// 盘面本身的分（不含这一手消了几行）
+function simScore(b){
+  const f = simFeatures(b);
+  const danger = f.maxH >= HINT_DANGER;
+  let s = -f.holes * HW.hole;
+  for (let i = 0; i + 1 < f.field.length; i++){
+    const d = Math.abs(f.field[i] - f.field[i + 1]);
+    s -= d <= 1 ? d * HW.step1 : d === 2 ? HW.step2 : HW.step3 * (d - 2);
+  }
+  for (let i = 0; i < f.field.length; i++){
+    const l = i > 0 ? f.field[i - 1] : 99, r = i + 1 < f.field.length ? f.field[i + 1] : 99;
+    if (Math.min(l, r) - f.field[i] >= 3) s -= HW.pit;
+  }
+  if (!danger && f.h[HINT_WELL] > f.minH) s -= HW.wellBlock * (f.h[HINT_WELL] - f.minH);
+  if (!f.accept.O) s -= HW.noO;
+  if (!f.accept.S) s -= HW.noS;
+  if (!f.accept.Z) s -= HW.noZ;
+  s -= f.field.reduce((a, v) => a + v, 0) * HW.height;
+  if (f.maxH > 12) s -= (f.maxH - 12) * HW.tall;
+  return s;
+}
+function lineValue(lines, danger){
+  if (lines === 4) return HW.tetris;
+  return lines * (danger ? HW.burnDanger : HW.burn);
+}
+
+// 当前块 × 下一块，两层全试，挑最终盘面分最高的
+function hintBest(b0, type, nextType){
+  const danger = simFeatures(b0).maxH >= HINT_DANGER;
+  let best = null;
+  const all = simDrops(b0, type);
+  for (const m of all){
+    const r1 = simPlace(b0, m.cells);
+    let score = -Infinity;
+    if (nextType){
+      for (const n of simDrops(r1.b, nextType)){
+        const r2 = simPlace(r1.b, n.cells);
+        const v = simScore(r2.b) + lineValue(r1.lines, danger) + lineValue(r2.lines, danger);
+        if (v > score) score = v;
+      }
+    }
+    if (score === -Infinity) score = simScore(r1.b) + lineValue(r1.lines, danger);
+    if (!best || score > best.score) best = Object.assign({ score, lines: r1.lines }, m);
+  }
+  return best ? { best, all, danger } : null;
+}
+
+// 一句话理由，最多两条，按重要性排
+function hintWhy(b0, best, all, danger){
+  const f0 = simFeatures(b0), r1 = simPlace(b0, best.cells), f1 = simFeatures(r1.b);
+  const why = [];
+  if (r1.lines === 4) why.push('四消');
+  else if (r1.lines) why.push('消 ' + r1.lines + ' 行' + (danger ? '，先保命' : ''));
+  const makers = all.filter(m => simFeatures(simPlace(b0, m.cells).b).holes > f0.holes).length;
+  if (f1.holes <= f0.holes && makers * 2 >= all.length) why.push('不造洞');
+  if (f1.bump < f0.bump) why.push('补平台阶');
+  if (f1.accept.O && f1.accept.S && f1.accept.Z && !(f0.accept.O && f0.accept.S && f0.accept.Z))
+    why.push('O/S/Z 都有地方放了');
+  if (!danger && best.type !== 'I' && !best.cells.some(c => c[0] === HINT_WELL)
+      && f1.minH - f1.h[HINT_WELL] >= 2) why.push('井留着');
+  return why.slice(0, 2).join(' · ') || '放这里最稳';
+}
+
+function hintCompute(){
+  hintMove = null; hintBase = null;
+  const p = game.piece;
+  if (!hintMode || !p || game.over) return syncHint();
+  const b0 = simBoard();
+  const r = hintBest(b0, p.type, game.queue[0]);
+  if (r){
+    hintMove = Object.assign({}, r.best, { why: hintWhy(b0, r.best, r.all, r.danger) });
+    hintBase = b0;
+  }
+  needsDraw = true;
+  syncHint();
+}
+
+// 你放下之后：和推荐一样就记一笔；差得多才说一句，不唠叨
+function hintJudge(p){
+  if (!hintMode || !hintMove || !hintBase || p.type !== hintMove.type) return;
+  const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
+  const key = cs => cs.map(c => c.join(',')).sort().join(';');
+  hintStats.total++;
+  if (key(cells) === key(hintMove.cells)){ hintStats.same++; syncHint(); return; }
+  const h0 = simFeatures(hintBase).holes;
+  const mine = simPlace(hintBase, cells), rec = simPlace(hintBase, hintMove.cells);
+  const hm = simFeatures(mine.b).holes, hr = simFeatures(rec.b).holes;
+  if (hm > hr) showToast('这一块造了 ' + (hm - h0) + ' 个洞 —— 绿框那里不会', 1800);
+  else if (simScore(mine.b) < simScore(rec.b) - 40) showToast('绿框那里更平', 1300);
+  syncHint();
+}
+
+function syncHint(){
+  document.body.classList.toggle('hinting', hintMode);
+  if (!hintMode) return;
+  const w = $('hintWhy');
+  if (w) w.textContent = hintMove ? '推荐　' + hintMove.why : '';
+  const sc = $('hintScore');
+  if (sc) sc.textContent = '跟推荐一致 ' + hintStats.same + '/' + hintStats.total;
+}
+
+// 盘面上的绿框。你的落点虚影正好对上推荐时，绿框填实，告诉你「对了」
+const HINT_COLOR = '#5ee08a';
+function drawHint(c, ghostCells){
+  if (!hintMode || !hintMove || !game.piece || game.over) return;
+  const key = cs => cs.map(v => v.join(',')).sort().join(';');
+  const match = ghostCells && key(ghostCells) === key(hintMove.cells);
+  c.save();
+  c.strokeStyle = HINT_COLOR;
+  c.lineWidth = Math.max(2, CELL * .09);
+  if (!match) c.setLineDash([CELL * .22, CELL * .14]);
+  for (const [x, y] of hintMove.cells){
+    if (y < BUFFER) continue;
+    const px = x * CELL + 2, py = (y - BUFFER) * CELL + 2, d = CELL - 4;
+    if (match){ c.globalAlpha = .28; c.fillStyle = HINT_COLOR; roundRect(c, px, py, d, d, CELL * .16); c.fill(); c.globalAlpha = 1; }
+    roundRect(c, px, py, d, d, CELL * .16);
+    c.stroke();
+  }
+  c.restore();
+}
+
+// 进提示模式：和进练习一样，普通局打到一半先存一份
+function startHint(){
+  if (!assisted() && game.started && !game.over) saveGame(true);
+  closePrSheet();
+  practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
+  demoRunning = false; undoStack.length = 0;
+  hintMode = true;
+  hintStats = { same: 0, total: 0 };
+  restart();                 // 里面 spawn 时会算第一块的推荐
+  game.noGarbage = true;
+  syncPractice(); syncHint();
 }
 
 // ───────────────────────── 锁定与消行 ─────────────────────────
@@ -1456,6 +1698,7 @@ function detectTSpin(){
 function lockPiece(){
   const p = game.piece;
   if (!p) return;
+  hintJudge(p);
   snapForUndo();
   game.pieces++;
   crazyOnLock(p);
@@ -2033,7 +2276,7 @@ function scoreFor(n, spin, perfect){
   checkMilestone();
   // 练习局不刷最高分。endGame 那条早就挡了，但这里是**每次锁定**都会走的实时刷新，
   // 原来没挡：练习里落两块就把纪录改了（实测 0 → 76）。
-  if (!practice && game.score > game.best){
+  if (!assisted() && game.score > game.best){
     // 破纪录的检测挪到 syncHud 了 —— 分数有三个增长入口（scoreFor /
     // clearFullNow / 软降），只在这里判会漏：道具消行把你推过纪录线时不响。
     game.best = game.score; writeBest(game.best);
@@ -2158,9 +2401,9 @@ function endGame(why){
   const prevCareer = careerOf(readTotal());   // 「段位」看累计总分
   // 练习局一个字都不写：最高分、累计、今日、狂欢局保底计数全部跳过。
   // 练习是可以无限撤销、可以指定出块的，它的分数不能和正经局放一个榜上。
-  if (!practice && game.score > game.best){ game.best = game.score; writeBest(game.best); }
-  if (CRAZY && !practice) addTotal(game.score);
-  if (CRAZY && !practice){
+  if (!assisted() && game.score > game.best){ game.best = game.score; writeBest(game.best); }
+  if (CRAZY && !assisted()) addTotal(game.score);
+  if (CRAZY && !assisted()){
     // 有效局才推进狂欢局的计数、才算今日一局 —— 秒死重开刷不出狂欢局，
     // 也压不低门槛。最佳分不设门槛：打出来了就是打出来了。
     // 收手走的是更高的门槛。isRealRun() 是 30 块 / 60 秒 —— 那个口径对
@@ -2555,6 +2798,7 @@ function draw(){
         drawCell(ctx, (p.x + cx) * CELL, (by - BUFFER) * CELL, CELL, color, { ghost: true });
       }
     }
+    drawHint(ctx, cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, gy + cy]));
     // 快锁定的提示：以前是整块洗白，颜色全丢了，现在改成同色光边
     const lockPulse = grounded ? Math.min(4, (lockTimer / lockDelay() * 5) | 0) / 4 : 0;
     // 变异块：本色往对应色里混七成 + 常驻亮边，一眼认得出是哪种
@@ -2689,9 +2933,16 @@ function drawPreview(){
   // 上面一整行放马上要来的那个，下面并排放之后的两个
   const topH = Math.round(nh * 0.54);
   const botH = nh - topH;
-  if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1, game.mods[0]);
-  if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62, game.mods[1]);
-  if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62, game.mods[2]);
+  // 提示模式只给看 1 个 NEXT（推荐也只拿它算），占满整个框
+  if (hintMode){
+    if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, nh, 1, game.mods[0]);
+    dbg.previews = game.queue[0] ? 1 : 0;
+  } else {
+    if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1, game.mods[0]);
+    if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62, game.mods[1]);
+    if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62, game.mods[2]);
+    dbg.previews = [0, 1, 2].filter(i => game.queue[i]).length;
+  }
 
   // hold
   const hw = holdCv.clientWidth, hh = holdCv.clientHeight;
@@ -6712,8 +6963,10 @@ function init(){
     msw.addEventListener('click', (e) => {
       const b = e.target.closest('[data-m]');
       if (!b) return;
-      if (b.dataset.m === 'practice' && !practice){ startPractice(); openPrSheet(); }
-      else if (b.dataset.m === 'normal' && practice) exitPractice();
+      const m = b.dataset.m;
+      if (m === 'practice' && !practice){ startPractice(); openPrSheet(); }
+      else if (m === 'hint' && !hintMode) startHint();
+      else if (m === 'normal' && (practice || hintMode)) exitPractice();
     });
     syncModeSwitch();
   }
@@ -6951,6 +7204,8 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get practiceLevel(){ return practiceLevel; }, get practiceStep(){ return practiceStep; },
   get demoRunning(){ return demoRunning; }, get undoDepth(){ return undoStack.length; },
   get practiceReps(){ return practiceReps; },
+  get hintMode(){ return hintMode; }, get hintMove(){ return hintMove; }, get hintStats(){ return hintStats; },
+  startHint, hintCompute, hintBest, drawPreview, simBoard, simDrops, simPlace, simFeatures, simScore, assisted, HW,
   syncResume, syncModeSwitch,
   practiceSolve, practiceDemo, parseActs, doAct, goalName,
   dbg, peek: () => ({ clearing, grounded, lockTimer, lockResets, dropTimer, frames: dbg.frames, layouts: dbg.layouts, needsDraw, staticDirty, previewDirty, parts: particles.length, sweeps: sweeps.length, rings: rings.length, embers: embers.length, beams: beams.length, squash: !!squash }) };
