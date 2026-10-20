@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=f5cfb1e2">
+<link rel="stylesheet" href="tetris.css?v=a49a7119">
 </head>
 <body>
 <div class="topline"></div>
@@ -75,9 +75,11 @@
           <div data-when="start">
             <h2>俄罗斯<span class="neon">方块</span></h2>
             <p>
-              下面五个键：<b>左移 · 右移 · 软降 · 落底 · 变换</b>，点右边 HOLD 框暂存。<br>
-              软降是按住加速、<b>落地不锁死</b>；落底是一按到底、立刻锁死。T 旋要用软降。<br>
-              手机建议先点右上角<b>「游戏模式」</b>，横过来也能玩。
+              下面四个键：<b>左移 · 右移 · 落底 · 变换</b>，点右边 HOLD 框暂存。<br>
+              <!-- std-only:start -->
+              变换上面是<b>软降</b>：按住加速、<b>落地不锁死</b>；落底是一按到底、立刻锁死。T 旋要用软降。<br>
+              <!-- std-only:end -->
+              加到主屏幕再从图标打开，就是全屏。
             </p>
             <!-- 称号牌 + 今日最佳，都只在疯狂版填（syncRank 开头 !CRAZY 早退） -->
             <button class="rankchip" id="rankChip" type="button" hidden>

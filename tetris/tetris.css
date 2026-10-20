@@ -2,6 +2,17 @@
    三套布局：桌面（侧栏）/ 手机竖屏（按键在下）/ 手机横屏（按键分到左右拇指）。 */
 
 html, body{ height: 100%; overflow: hidden; overscroll-behavior: none; }
+/* clip 而不是只靠 hidden：hidden 的容器手指滚不动，但 focus()、点击之类会把它程序性地
+   滚下去。实测 375×812 上 body 内容比屏幕高 78px，点一下「开始」顶栏就被顶出屏幕。
+   clip 不产生滚动容器，没有东西可滚。不支持 clip 的老浏览器退回上一行的 hidden。 */
+html, body{ overflow: clip; }
+/* hidden 属性一律要赢。好几个元素 HTML 里带着 hidden，却被各自的 display 规则盖掉了：
+   标准版的「?」、「未入段」、「玩法说明」、结算页的称号 —— 都本该只在疯狂版出现，
+   点开是疯狂版的规则。之前只修了「?」那一个（.tbtn[hidden]），这里一次兜住全部。 */
+[hidden]{ display: none !important; }
+/* 顶上那条 2px 彩线浮在最上面、不占位置。原来它在 .game（正好一屏高）上面单独占一行，
+   整页比屏幕高 2px，游戏最底部被裁掉 2px。只在这里覆盖，shared.css 别的游戏还在用 */
+.topline{ position: fixed; top: 0; left: 0; right: 0; z-index: 30; pointer-events: none; }
 body{
   /* iOS 上手指长按不要弹出选择/放大镜 */
   -webkit-touch-callout: none;
@@ -11,6 +22,10 @@ body{
 
 .game{
   height: 100dvh;
+  /* 超出整屏的东西直接裁掉、也不计入可滚动区域。盘面背后 FEVER 的斜条纹层
+     （.shaker::before，inset -40%）在标准版里透明度是 0，但照样占位置，
+     往下伸出 78px，是 body 能被滚动的来源 */
+  overflow: clip;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -792,9 +807,7 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
   height: 30px;
 }
 .tbtn-sq svg{ width: 17px; height: 17px; }
-/* hidden 属性要赢过上面的 display —— 原来 .tbtn-sq{display:inline-flex} 把它盖掉了，
-   标准版顶栏的「?」本该藏着却一直显示，点开是疯狂版的规则（变异块、金块……）。 */
-.tbtn[hidden]{ display: none; }
+/* hidden 属性的兜底挪到了文件开头的全局 [hidden] 规则 */
 
 /* 顶栏模式切换：普通 | 练习 */
 .modesw{
@@ -907,7 +920,9 @@ body.practising .modesw{ border-color: rgba(127,227,255,.5); }
   .pads{ gap: 8px; }
   .pad{ gap: 5px; }
   .k{ min-height: 50px; }
-  .slot.next canvas{ width: 98px; }
+  /* 原来写死 98px —— 第一版右栏更宽时定的；右栏缩到 64px 之后，375 宽的手机上
+     NEXT 一直溢出框外 34px（SE 2/3、mini、X/11 Pro 都是 375） */
+  .slot.next canvas{ width: 100%; }
   .stat b{ --stat-fs: 12.5px; }
   .tbtn{ font-size: 10px; padding: 5px 7px; }
   /* 多了玩法按钮之后，375 及以下顶栏排不下（实测内容 369px、条只有 365px）。
