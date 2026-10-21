@@ -1,6 +1,6 @@
 """消行打击感（标准版）：1~4 行、T 旋、B2B、连击的力度一级比一级重
 
-锁这几条：力度随行数 / 连击单调变大；震屏幅度跟着力度；两行起才有冲击波；
+锁这几条：力度随行数 / 连击单调变大；震屏幅度跟着力度；两行起才有往上漫的柔光（原来那两道硬线删了）；
 三行起才有外框一闪；第 2 连起弹「N 连」；疯狂版还是原来那套；系统「减弱动态效果」时不震屏。
 """
 import os, http.server, socketserver, threading, functools, sys
@@ -31,7 +31,7 @@ CLEAR = r"""([n, combo]) => {
   T.hardDrop();
   return { lines: T.game.lines - lines0, hit: T.lastHit, sh: parseFloat(sh.style.getPropertyValue('--sh')) || 0,
            shook: sh.classList.contains('hit'), oldShake: sh.classList.contains('shake') || sh.classList.contains('shake-big'),
-           wave: T.waves ? T.waves.length : -1, glow: !!hb && hb.classList.contains('on'),
+           soft: T.glows.length, wave: T.waves === undefined ? 0 : T.waves.length, glow: !!hb && hb.classList.contains('on'),
            combo: document.querySelectorAll('#fx .pop.combo').length - pops0,
            comboText: (document.querySelector('#fx .pop.combo:last-child b') || {}).textContent || '' };
 }"""
@@ -60,18 +60,19 @@ with sync_playwright() as p:
     ok(all(r[n]['lines'] == n for n in r), '（摆的盘面正好消 1~4 行）')
     ok(all(r[n]['shook'] for n in r) and [r[n]['sh'] for n in (1, 2, 3, 4)] == sorted(r[n]['sh'] for n in (1, 2, 3, 4)) and r[1]['sh'] < r[4]['sh'],
        f"每种消行都震，幅度随行数变大（{[r[n]['sh'] for n in (1, 2, 3, 4)]} px）")
-    ok(r[1]['wave'] == 0 and all(r[n]['wave'] >= 1 for n in (2, 3, 4)), '两行起才有冲击波')
+    ok(all(r[n]['wave'] == 0 for n in r), '不再画冲击波那两道硬线')
+    ok(r[1]['soft'] == 0 and all(r[n]['soft'] >= 1 for n in (2, 3, 4)), '两行起才有往上漫的柔光')
     ok(not r[1]['glow'] and not r[2]['glow'] and r[3]['glow'] and r[4]['glow'], '三行起外框一闪')
     ok(all(r[n]['combo'] == 0 for n in r), '没连击不弹连击数')
     c = pg.evaluate(CLEAR, [1, 3])
-    ok(c['combo'] == 1 and c['comboText'] == '5 连' and c['wave'] >= 1 and c['glow'] and c['sh'] > r[1]['sh'],
-       f"第 5 连的单消：弹「{c['comboText']}」、有冲击波和外框、震得比普通单消重（{c['sh']}px）")
+    ok(c['combo'] == 1 and c['comboText'] == '5 连' and c['soft'] >= 1 and c['glow'] and c['sh'] > r[1]['sh'],
+       f"第 5 连的单消：弹「{c['comboText']}」、有柔光和外框、震得比普通单消重（{c['sh']}px）")
     if errs: L.append('FAIL 页面报错：' + '; '.join(errs))
     # 疯狂版：原来那套（双消小震、四消大震，不走 hitFx）
     pg.goto(f"http://127.0.0.1:{port}/crazy/index.html"); pg.wait_for_function("() => !!window.__tetris")
     pg.evaluate("() => { document.getElementById('startBtn').click(); __tetris.ups.length = 0; }")
     cz = pg.evaluate(CLEAR, [2, -1])
-    ok(cz['oldShake'] and not cz['shook'] and cz['wave'] == 0, '疯狂版还是原来那套震屏，没有冲击波')
+    ok(cz['oldShake'] and not cz['shook'] and cz['soft'] == 0, '疯狂版还是原来那套（没有柔光）')
     b.close()
     # 减弱动态效果：不震屏
     b = p.chromium.launch()

@@ -4366,7 +4366,7 @@ function draw(){
     }
   }
   if (CRAZY && embers.length) drawEmbers();
-  if (sweeps.length || rings.length || waves.length) drawFx();
+  if (sweeps.length || rings.length || glows.length) drawFx();
   if (CRAZY && wallCol >= 0){
     // 封锁列：斜纹一片，和「这里不能放」这件事对得上
     ctx.save();
@@ -4544,7 +4544,7 @@ function burstLand(p){
 // 原来 1~3 行几乎一个样：单消不震，双消三消同一档小震，连击只升个音。
 // 现在先算「这一下有多重」，所有反馈都按它加码：
 //   行数为主（1/2/3/4 行 = 1/2/3.2/5），T 旋 +1.5、mini +.5，B2B +1，连击每连 +.5（封顶 +4），全消拉满
-// 跟着它走的：震屏幅度、消除行闪光的颜色和亮度、冲击波（两行起）、碎块多少和速度、
+// 跟着它走的：震屏幅度、消除行闪光的颜色和亮度、往上扩散的柔光（两行起）、碎块多少和速度、
 // 棋盘外框一闪（三行起 / 连击）、连击计数、震动、低音重击（三行起）。
 // 全部只在消行那零点几秒里画；不加长消行停顿，规则和节奏一点不变。疯狂版走它原来那套。
 function hitPower(n, spin, perfect, combo, b2b){
@@ -4563,9 +4563,12 @@ function hitColor(n, spin, combo){
   return ['#ffffff', '#dff6ff', '#7fe3ff', '#c9a6ff', '#ffd166'][Math.min(4, n)];
 }
 const REDUCED_MOTION = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
-let waves = [];     // 冲击波 { top, bottom, color, p, t }
-let lastHit = 0;    // 这一次消行的打击力度（lockPiece 拿它定碎块多少、闪光多亮）
-const WAVE_MS = 380;
+let lastHit = 0;
+// 往上扩散的柔光 { y（消除带上沿，像素）, h（消除带高）, color, p, t }。
+// 原来是两道往上下推开的硬线 + 中间一层底色：消行几乎总在底部，往下那道一出来就被切掉，
+// 只剩一条横线和一个框，看着像显示出错（用户嫌难看）。现在整片都是渐变，上沿完全透明，没有线也没有框
+let glows = [];
+const GLOW_MS = 420;    // 这一次消行的打击力度（lockPiece 拿它定碎块多少、闪光多亮）
 function hitFx(n, spin, perfect, b2b){
   const combo = Math.max(0, game.combo);
   const p = hitPower(n, spin, perfect, combo, b2b);
@@ -4579,10 +4582,13 @@ function hitFx(n, spin, perfect, b2b){
     void el.offsetWidth;
     el.classList.add('hit');
   }
-  // 冲击波：两行起，从消掉那几行往上下推开两道光
+  // 柔光：两行起 / T 旋 / 3 连起
   if ((n >= 2 || combo >= 2 || spin) && lastClearRows.length){
     const top = Math.max(BUFFER, Math.min(...lastClearRows)), bottom = Math.max(...lastClearRows);
-    if (bottom >= BUFFER){ waves.push({ top, bottom, color, p, t: 0 }); while (waves.length > 2) waves.shift(); }
+    if (bottom >= BUFFER){
+      glows.push({ y: (top - BUFFER) * CELL, h: (bottom - top + 1) * CELL, color, p, t: 0 });
+      while (glows.length > 2) glows.shift();
+    }
   }
   // 外框一闪：三行起或连击
   const hb = $('boardHit');
@@ -4682,9 +4688,9 @@ function stepFx(dt){
     if ((sweeps[i].t += dt) > SWEEP_MS) sweeps.splice(i, 1);
   for (let i = rings.length - 1; i >= 0; i--)
     if ((rings[i].t += dt) > RING_MS) rings.splice(i, 1);
-  for (let i = waves.length - 1; i >= 0; i--)
-    if ((waves[i].t += dt) > WAVE_MS) waves.splice(i, 1);
-  if (sweeps.length || rings.length || waves.length) needsDraw = true;
+  for (let i = glows.length - 1; i >= 0; i--)
+    if ((glows[i].t += dt) > GLOW_MS) glows.splice(i, 1);
+  if (sweeps.length || rings.length || glows.length) needsDraw = true;
 }
 
 function drawFx(){
@@ -4704,21 +4710,21 @@ function drawFx(){
     ctx.fillRect(headX - bandW, top, bandW, h);
     ctx.restore();
   }
-  // 冲击波：两道横线从消除带的上下沿往外推，越推越淡越细
-  for (const w of waves){
-    const k = w.t / WAVE_MS, e = 1 - (1 - k) * (1 - k);
-    const dist = CELL * (1 + w.p * 1.1) * e;
-    const yTop = (w.top - BUFFER) * CELL - dist, yBot = (w.bottom - BUFFER + 1) * CELL + dist;
-    // 第一版 .05+.022p 太细，双消那道几乎看不见，和单消拉不开
-    const lw = Math.max(2, CELL * (.1 + w.p * .03) * (1 - k * .7));
+  // 柔光：从消除带往上漫开一片渐变，越往上越淡、最上沿完全透明；力度越大漫得越高越亮。
+  // 消除带本身也蒙一层，往下不画（底下就是盘底，画了也会被切成一条边）
+  for (const g of glows){
+    const k = g.t / GLOW_MS, e = 1 - (1 - k) * (1 - k);
+    const rise = CELL * (2 + g.p * 1.5) * (.35 + .65 * e);
+    const a = (.32 + g.p * .045) * (1 - k);
+    const y0 = g.y - rise, y1 = g.y + g.h;
+    const grd = ctx.createLinearGradient(0, y0, 0, y1);
+    grd.addColorStop(0, rgba(g.color, 0));
+    grd.addColorStop(.55, rgba(g.color, a * .55));
+    grd.addColorStop(1, rgba(g.color, a));
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = (1 - k) * .95;
-    ctx.fillStyle = w.color;
-    ctx.fillRect(0, yTop - lw / 2, W, lw);
-    ctx.fillRect(0, yBot - lw / 2, W, lw);
-    ctx.globalAlpha = (1 - k) * .16;
-    ctx.fillRect(0, yTop, W, Math.max(0, yBot - yTop));
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, Math.max(0, y0), W, y1 - Math.max(0, y0));
     ctx.restore();
   }
   for (const r of rings){
@@ -8073,7 +8079,7 @@ function canNap(){
   const p = game.piece;
   if (!p || clearing || grounded) return false;                  // 落地后在等锁定（还有锁定闪光）
   if (held.left || held.right || softDropping) return false;     // 按住横移 / 软降
-  if (needsDraw || particles.length || trails.length || squash || sweeps.length || rings.length || waves.length) return false;
+  if (needsDraw || particles.length || trails.length || squash || sweeps.length || rings.length || glows.length) return false;
   return true;
 }
 function loopNap(){
@@ -9028,7 +9034,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
-  hitPower, hitColor, get waves(){ return waves; }, get lastHit(){ return lastHit; },
+  hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
   get napping(){ return !!napTimer; }, wakeLoop, NAP_MAX,
   openRestartSheet, closeRestartSheet, restartPick,
   HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },
