@@ -8026,11 +8026,7 @@ const CLEAR_DRAW_MS = 12;
 function tick(now){
   rafId = requestAnimationFrame(tick);
   dbg.frames++;
-  // 睡醒的那一帧：睡了多久就补多久。不放宽的话「睡 250ms + 等下一帧」常常超过 250 的上限，
-  // 超出的十几毫秒每次被砍掉 —— 实测方块因此每格晚 17~50ms（掉得慢了 4~5%）
-  const cap = napWoke ? MAX_CATCHUP + NAP_MAX : MAX_CATCHUP;
-  napWoke = false;
-  const dt = Math.min(now - lastFrame, cap);
+  const dt = Math.min(now - lastFrame, MAX_CATCHUP);
   lastFrame = now;
 
   const r = step(dt);
@@ -8055,55 +8051,12 @@ function tick(now){
     needsDraw = false;
     drawNow = false;
   }
-  loopNap();
 }
 
-// ── 没事做的时候让循环睡一会儿 ──
-// 方块在半空里慢慢掉、你没按键、没有特效在播：画布一秒只变一次（掉一格），
-// 但原来循环照样一秒醒 60 次 —— 每醒一次浏览器就要走一遍出帧流程（实测不按键
-// 5 秒里画布只重画 5 次，提交画面却是 301 次），手机还会一直开着高刷，费电、发热，
-// 热了降频才是真正掉帧的来源。
-// 现在：这种时候睡到「下一次该掉格」为止，最多睡 NAP_MAX；一按键立刻叫醒（wakeLoop），
-// 响应和原来一样是下一帧。规则不变 —— 醒来时 dt 是真实经过的时间，step 照样按 100ms 切片补算。
-// 只在标准版的普通局 / 练习 / 提示 / 每日练习里睡：疯狂版机制多、NES 逐帧、对战机器人要按时出手，都照旧每帧跑。
-// 睡最久多少毫秒：别的计时（灰线预告、提示亮框消失）最多晚这么一点。
-// 每日练习在计时的时候按 0.1 秒刷新计时显示，那时候最多睡 NAP_CLOCK
-const NAP_MAX = 250;
-const NAP_CLOCK = 100;
-const NAP_MIN = 20;           // 剩不到这么点就别睡了，直接等下一帧
-const NAP_EARLY = 26;
-let napTimer = 0;
-let napWoke = false;          // 下一次 tick 是从睡眠里醒来的（补算上限要放宽）
-function canNap(){
-  if (CRAZY || nes || vs || demoRunning || introLeft > 0) return false;
-  if (!game.started || game.over || game.paused || game.frozen) return false;
-  const p = game.piece;
-  if (!p || clearing || grounded) return false;                  // 落地后在等锁定（还有锁定闪光）
-  if (held.left || held.right || softDropping) return false;     // 按住横移 / 软降
-  if (needsDraw || particles.length || trails.length || squash || sweeps.length || rings.length || glows.length) return false;
-  return true;
-}
-function loopNap(){
-  if (!rafId || !canNap()) return;
-  const left = gravityFor(game.level) - dropTimer;               // 离下一次掉格还有多久
-  // 提前 NAP_EARLY 醒：定时器偶尔会晚几毫秒，掐着点睡的话那一格会晚一两帧才掉（实测最多晚 36ms）。
-  // 早醒一帧半，掉格那一刻就总是落在正常逐帧跑的路径上
-  const ms = Math.min(drill && drill.clock ? NAP_CLOCK : NAP_MAX, left - NAP_EARLY);
-  if (ms < NAP_MIN) return;
-  cancelAnimationFrame(rafId);
-  rafId = 0;
-  // 醒来前再看一眼：睡着的这会儿可能已经退回开局面板 / 暂停了，那就别把循环拉起来空转
-  napTimer = setTimeout(() => {
-    napTimer = 0;
-    if (!rafId && game.started && !game.over && !game.paused && !game.frozen){ napWoke = true; rafId = requestAnimationFrame(tick); }
-  }, ms);
-}
-// 按键、切面板之类：在睡就马上叫醒。不重置 lastFrame —— 睡着的这段时间要照实算进重力里
-function wakeLoop(){
-  if (!napTimer) return;
-  clearTimeout(napTimer); napTimer = 0;
-  if (!rafId){ napWoke = true; rafId = requestAnimationFrame(tick); }
-}
+// 这里曾经有「没事做的时候让循环睡一会儿」（省电）：不按键时循环一秒只醒几次。
+// 它前后带出两个手感 bug —— 方块掉落慢了 4~5%、轻点左右滑出去 2~5 格（醒来补算时把
+// 「按住多久开始连发」的计时也一起补了）。都修好了，但用户的判断是手感比省那点电重要，
+// 整个拿掉，循环回到每帧都跑。别再加回来；要省电先想别的办法。
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -8182,7 +8135,6 @@ function topSheet(){
 }
 
 window.addEventListener('keydown', (e) => {
-  wakeLoop();
   const act = KEYMAP[e.code];
   if (!act) return;
   e.preventDefault();
@@ -8318,8 +8270,7 @@ function bindButtons(){
       // 演示放着的时候手指一碰就会把路径带偏，先挡掉
       if (!game.started || game.over || game.paused || demoRunning) return;
       el.classList.add('active');
-      wakeLoop();
-      // 每日练习冲刺段数按键（落底在 btnHardDrop 里数，连点被挡掉的那下不算）
+          // 每日练习冲刺段数按键（落底在 btnHardDrop 里数，连点被挡掉的那下不算）
       if (id !== 'btnDrop' && id !== 'nextSlot') drillKey(id === 'btnSoft', false);
       down();
     };
@@ -8507,7 +8458,6 @@ function launchedAsApp(){
 
 // 循环停过之后重新拉起来
 function resumeLoop(){
-  if (napTimer){ clearTimeout(napTimer); napTimer = 0; }
   lastFrame = performance.now();
   lastDrawAt = 0;
   if (!rafId) rafId = requestAnimationFrame(tick);
@@ -9036,7 +8986,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
-  get napping(){ return !!napTimer; }, wakeLoop, NAP_MAX,
+
   openRestartSheet, closeRestartSheet, restartPick,
   HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },
   NES_PIECES, NES_GRAVITY, NES_LINE_SCORE, NES_FRAME, NES_DAS, NES_ARR, NES_KEY, nesGravity, nesFirstLevelUp, nesTier,
