@@ -181,7 +181,9 @@ JS = r"""async () => {
   ok(!T.drill && !T.hintMode && !T.game.started, '点「普通」：回开局面板');
   T.startDrill(); $('drGo').click();
   T.drill.ms = 5000; $('restartBtn').click();
-  ok(T.drill.stage === 'warm' && T.drill.ms === 0, '顶栏「重开」= 这一段重来');
+  ok(/这一段重来/.test($('rsAgain').textContent), `重开面板的主按钮写着「${$('rsAgain').textContent}」`);
+  $('rsAgain').click();
+  ok(T.drill.stage === 'warm' && T.drill.ms === 0, '顶栏「重开」→「这一段重来」');
   return L;
 }"""
 

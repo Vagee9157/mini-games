@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=ae6825f1">
+<link rel="stylesheet" href="tetris.css?v=211fcdd0">
 </head>
 <body>
 <div class="topline"></div>
@@ -335,6 +335,27 @@
   </div>
   <!-- std-only:end -->
 
+  <!-- 右上角「重开」：先问一下。选了才重开，点关闭 / 点外面就接着打这一局 -->
+  <div class="sheet" id="restartSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>重新开始？</h3></div>
+      <p class="pr-tip">选一个就从头开始；点「关闭」接着打这一局。</p>
+      <button class="pbtn rs-main" id="rsAgain" type="button">重新开始</button>
+      <!-- std-only:start -->
+      <span class="sheet-lb">或者换个玩法</span>
+      <div class="rs-modes" id="rsModes">
+        <button class="pr-b" type="button" data-rs="normal">普通</button>
+        <button class="pr-b" type="button" data-rs="vs">对战机器人</button>
+        <button class="pr-b" type="button" data-rs="nes">经典 NES</button>
+        <button class="pr-b" type="button" data-rs="practice">练习</button>
+        <button class="pr-b" type="button" data-rs="hint">提示</button>
+        <button class="pr-b" type="button" data-rs="drill">每日练习</button>
+      </div>
+      <!-- std-only:end -->
+      <button class="pbtn ghost rs-close" id="rsClose" type="button">关闭</button>
+    </div>
+  </div>
+
   <div class="sheet" id="rankSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>称号</h3></div>
@@ -382,7 +403,7 @@
 
 </div>
 
-<script src="tetris.js?v=77a5cb0b"></script>
+<script src="tetris.js?v=c1af79d3"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

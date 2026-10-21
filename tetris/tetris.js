@@ -2809,13 +2809,13 @@ function openNesSheet(run, isBest){
   const go = $('nesGo');
   if (go) go.textContent = (run ? '再来一局 · ' : '开始 · ') + '起始 ' + nesPick + ' 级';
   sh.hidden = false;
-  if (nes && !nes.over) game.frozen = true;
+  if (game.started && !game.over) game.frozen = true;
 }
 function closeNesSheet(){
   const sh = $('nesSheet');
   if (!sh || sh.hidden) return;
   sh.hidden = true;
-  if (nes && !nes.over){ game.frozen = false; resumeLoop(); }
+  unfreezeIfIdle();
 }
 
 // ───────────────────────── 对战机器人 ─────────────────────────
@@ -3116,13 +3116,13 @@ function openVsSheet(result){
   const go = $('vsGo');
   if (go) go.textContent = (result ? '再来一局 · ' : '开打 · ') + 'Lv ' + vsPick;
   sh.hidden = false;
-  if (vs && !vs.over) game.frozen = true;
+  if (game.started && !game.over) game.frozen = true;
 }
 function closeVsSheet(){
   const sh = $('vsSheet');
   if (!sh || sh.hidden) return;
   sh.hidden = true;
-  if (vs && !vs.over){ game.frozen = false; resumeLoop(); }
+  unfreezeIfIdle();
 }
 
 // 两个机器人对打（测试和定级用，不画、不碰主盘面）。返回 A 赢没赢
@@ -8001,7 +8001,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -8022,13 +8022,14 @@ window.addEventListener('keydown', (e) => {
       else if (sheet.id === 'drSheet') closeDrSheet();
       else if (sheet.id === 'hintSheet') closeHintSheet();
       else if (sheet.id === 'nesSheet') closeNesSheet();
+      else if (sheet.id === 'restartSheet') closeRestartSheet();
       else if (sheet.id === 'vsSheet') closeVsSheet();
       else sheet.hidden = true;
     }
     return;
   }
   if (demoRunning) return;
-  if (act === 'restart'){ modeRestart(); return; }
+  if (act === 'restart'){ openRestartSheet(); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
   if (act === 'fullscreen'){ toggleGameMode(); return; }
@@ -8064,6 +8065,47 @@ function modeRestart(){
   else if (vs) startVs(vs.bot.lv);
   else if (drill) drillRedo();
   else restart();
+}
+
+// 右上角「重开」先弹这个面板：选了玩法才重开，点关闭就接着打这一局。
+// 原来一点就重开 —— 那个键就在暂停旁边，误触一下整局白打。
+function restartLabel(){
+  if (nes) return '重开 · NES 起始 ' + nes.start + ' 级';
+  if (vs) return '再来一局 · 对战 Lv ' + vs.bot.lv;
+  if (drill) return '这一段重来';
+  if (practice) return '重新开始 · 练习';
+  if (hintMode) return '重新开始 · 提示';
+  return '重新开始';
+}
+function openRestartSheet(){
+  const sh = $('restartSheet');
+  if (!sh){ modeRestart(); return; }
+  const a = $('rsAgain');
+  if (a) a.textContent = restartLabel();
+  sh.hidden = false;
+  if (game.started && !game.over) game.frozen = true;
+}
+function closeRestartSheet(){
+  const sh = $('restartSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  unfreezeIfIdle();
+}
+// 面板都关了、这局还在：接着走。从重开面板跳去选级别（对战 / NES）再关掉，也落到这里
+function unfreezeIfIdle(){
+  if (topSheet()) return;
+  if (game.started && !game.over && game.frozen){ game.frozen = false; resumeLoop(); }
+}
+function restartPick(m){
+  const sh = $('restartSheet');
+  if (sh) sh.hidden = true;
+  if (m === 'again') return modeRestart();
+  if (m === 'normal'){ if (assisted()) exitPractice(); restart(); return; }
+  if (m === 'vs') return openVsSheet();
+  if (m === 'nes') return openNesSheet();
+  if (m === 'practice'){ startPractice(); openPrSheet(); return; }
+  if (m === 'hint') return startHint();
+  if (m === 'drill') return startDrill();
 }
 
 // 落底键连点保护：两下落底挨得太近（手抖、屏幕回弹算两次），第二下会把刚出生、
@@ -8648,7 +8690,13 @@ function init(){
   $('rankSheet').addEventListener('click', (e) => { if (e.target === $('rankSheet')) closeRank(); });
   $('resumeBtn').addEventListener('click', togglePause);
   $('pauseBtn').addEventListener('click', togglePause);
-  $('restartBtn').addEventListener('click', () => modeRestart());
+  $('restartBtn').addEventListener('click', () => openRestartSheet());
+  on('rsAgain', () => restartPick('again'));
+  on('rsClose', () => closeRestartSheet());
+  const rsm = $('rsModes');
+  if (rsm) rsm.addEventListener('click', (e) => { const b = e.target.closest('[data-rs]'); if (b) restartPick(b.dataset.rs); });
+  const rsh = $('restartSheet');
+  if (rsh) rsh.addEventListener('click', (e) => { if (e.target === rsh) closeRestartSheet(); });
   // 收手：走正常的 endGame 路径，分数全额计入。它不是 buff ——
   // 收手拿到的就是当前分数，继续打只会更高，所以没有刷分动机。
   const sb = $('stopBtn');
@@ -8811,6 +8859,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  openRestartSheet, closeRestartSheet, restartPick,
   HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },
   NES_PIECES, NES_GRAVITY, NES_LINE_SCORE, NES_FRAME, NES_DAS, NES_ARR, NES_KEY, nesGravity, nesFirstLevelUp, nesTier,
   startNes, nesEnd, nesFrame, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },

@@ -72,7 +72,8 @@ JS = r"""() => {
   ok(T.readBest() === best0, '提示模式不写最高分');
 
   // 重开还在提示模式、灰线照样关着
-  document.getElementById('restartBtn').click();
+  document.getElementById('restartBtn').click();          // 先弹确认面板，点「重新开始 · 提示」
+  document.getElementById('rsAgain').click();
   ok(T.hintMode && T.game.noGarbage === true && !!T.hintMove, '提示模式里点重开：还是提示模式、没灰线、有推荐');
 
   // ── 切回普通 ──
