@@ -996,7 +996,6 @@ function holdPiece(){
   if (nes) return;                 // NES 没有暂存
   if (!game.piece){ bufferInput('X'); return; }
   if (game.holdUsed) return;
-  if (hintMode && !tsOn()){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
   if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
@@ -1182,8 +1181,9 @@ const LEVELS = [
     solution:['XCL2d15CH', 'XCL5d18H'] },
   { k:'combo', n:'连击', group:'combo', queue:['I','L','J','O','T'],
     goals:[{ combo:0 }, { combo:1 }, { combo:2 }, { combo:3 }],
-    tip:'右边是一口四格宽的井。每一块都要消掉一行，一断就从头算 —— ' +
-        '连击每多一连多拿 50 分（还要乘等级倍率），消行本身反而是小头',
+    tip:'右边是一口四格宽的井。每一块都要消掉一行，一断就从头算。' +
+        '连击每多一连多拿 50 分（乘等级倍率）—— 但四连单消加起来也比不上一次四消，还会断掉 B2B，' +
+        '它是「没机会打四消时别断节奏」的手段，不是主要得分方式',
     rows:['######....',
           '######....',
           '######....',
@@ -1753,22 +1753,13 @@ function pieceHintText(type){
   return type + ' 找　' + pieceFits(type).map(f => f.glyph).join('　或　');
 }
 
-function hintCompute(){
-  if (tsOn()) return tsCompute();
-  hintMove = null; hintBase = null;
-  const p = game.piece;
-  if (!hintMode || !p || game.over) return syncHint();
-  const b0 = simBoard();
-  const next = game.queue[0];
-  const r = hintBest(b0, p.type, next);
-  if (r){
-    hintMove = Object.assign({}, r.best, { why: hintWhy(b0, r.best, r.all, r.danger), next, danger: r.danger,
-                                           anyFit: r.all.some(m => m.gaps === 0) });
-    hintBase = b0;
-  }
-  needsDraw = true;
-  syncHint();
-}
+// 推荐落点。提示模式和 T 旋练习共用教练那套（tsCompute）。
+// 原来提示模式用的是 hintBest（留最右一列等 I 打四消）：子代理拿机器人在**开着灰线的普通局**里比过，
+// 每秒 1 块、各 8 局 —— 照原来的提示打中位 41.7 万，照教练打 58.9 万（+41%）。
+// 原因：原来那套把 T 槽屋檐下面那一格当洞扣分，等于一直在劝人别打 T 旋，而 T 旋双消每行的分
+// 是四消的三倍；它又是关着灰线调的，开了灰线四消占比从 67% 掉到 31%。
+// （对战机器人还用 hintBest —— 十个级别是拿它标定的，不能跟着改）
+function hintCompute(){ return tsCompute(); }
 
 // 「这也行」的容差：分差在这之内、洞也不比推荐多，就算放对了。
 // 很多时候有两三处一样好，原来只认绿框那一格，放了另一处也算错 —— 学的人会以为自己判断错了。
@@ -1781,68 +1772,77 @@ function hintCompute(){
 const HINT_TOL = 3;
 // 四条规则，按优先级。判错时只说排最前的那条
 const HINT_RULES = [
-  { n: '①', t: '不留洞', d: '先找和这块底面一样的台阶，严丝合缝放下去' },
+  { n: '①', t: '不留洞', d: '先找和这块底面一样的台阶，严丝合缝放下去（T 槽屋檐底下那一格是留给 T 的，不算洞）' },
   { n: '②', t: '表面要平', d: '几处都贴合时，挑放完最平、O/S/Z 都还有地方放的；别挖只有 I 能填的深坑' },
-  { n: '③', t: '井留给 I', d: '最右一列别塞别的块，等 I 来打四消' },
-  { n: '④', t: '堆高先保命', d: '堆到上半截了，能消就消，井也可以先填' },
+  { n: '③', t: '给 T 留槽', d: '每 7 块有一个 T：搭一个两行深、一边有屋檐的槽等它 —— T 旋双消每行的分是四消的三倍。槽好了别拿别的块去填，没槽时来了 T 先暂存' },
+  { n: '④', t: '堆高先保命', d: '堆到上半截了，能消就消 —— 灰线会越涨越快' },
 ];
 let hintReveal = null;      // 「先自己找」时，放下之后把推荐亮一下 { cells, until }
 
-// 你放下之后：和推荐一样好就算对；不对就说违反了哪一条
-function hintJudge(p){
-  if (tsOn()) return;              // T 旋练习在锁定之后判（要知道消了几行、是不是 T 旋）
-  if (!hintMode || !hintMove || !hintBase || p.type !== hintMove.type) return;
+// 你放下之后（锁定、消行判定之后）：和推荐一样好就算对；不对就说违反了哪一条
+function hintAdjHoles(b){ return simFeatures(b).holes - (tsBestSlot(b) ? 1 : 0); }   // 槽屋檐下那一格不算洞
+function hintSlotScore(b){ const s = tsBestSlot(b); return s ? (s.ready ? 100 : Math.max(0, 50 - s.miss * 10)) : 0; }
+function hintJudge(p, n, spin){
+  if (!hintMode || tsOn() || !tsRec || !tsBase) return;
   hintReveal = null;          // 上一块亮着的推荐作废，不然连着放两块会叠在一起
+  const rec = tsRec, b0 = tsBase;
   const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
   const key = cs => cs.map(c => c.join(',')).sort().join(';');
-  const rec = hintMove, b0 = hintBase;
   hintStats.total++;
-  const h0 = simFeatures(b0).holes;
-  const mine = hintEval(b0, cells, rec.next, rec.danger);
-  const fm = simFeatures(mine.b), fr = simFeatures(simPlace(b0, rec.cells).b);
-  hintStats.holes = (hintStats.holes || 0) + Math.max(0, fm.holes - h0);
-  const exact = key(cells) === key(rec.cells);
-  const good = exact || (rec.score - mine.score <= HINT_TOL && fm.holes <= fr.holes);
+  const h0 = hintAdjHoles(b0), mineB = simPlace(b0, cells).b, hm = hintAdjHoles(mineB);
+  hintStats.holes = (hintStats.holes || 0) + Math.max(0, hm - h0);
+  let good = false, exact = false, r = -1, msg = '';
+  if (p.type === 'T' && spin === 'tspin' && n === 2){
+    tsStats.tsd++; good = true; exact = rec.kind === 'tsd';
+    showToast('✓ T 旋双消', 1200);
+  } else if (rec.kind === 'tsd'){
+    r = 2; msg = '槽在这：' + rec.path;
+  } else if (rec.kind === 'hold'){
+    r = 2; msg = p.type === 'T' ? '还没有槽，T 先暂存' : '槽好了、暂存里有 T，先换出来';
+  } else {
+    exact = key(cells) === key(rec.cells);
+    const recB = simPlace(b0, rec.cells).b, hr = hintAdjHoles(recB);
+    const mine = tsEval(b0, cells, rec.next);
+    if (exact || (rec.score - mine <= HINT_TOL && hm <= hr)) good = true;
+    else {
+      const recLines = simPlace(b0, rec.cells).lines, myLines = simPlace(b0, cells).lines;
+      // 把搭好的槽填了放最前：填槽时屋檐下那格会变成真洞，但这时候该说的是「槽没了」，不是「留了洞」
+      if (rec.readyBefore > 0 && tsReadyCount(mineB) < rec.readyBefore){
+        r = 2; msg = '把 T 槽填了，槽留给 T';
+      } else if (hm > hr){
+        const gaps = fitGaps(b0, cells);
+        r = 0; msg = gaps > 0 ? '留了 ' + gaps + ' 个洞，有能贴合的地方' : '这一块造了 ' + (hm - h0) + ' 个洞';
+      } else if (rec.danger && recLines > 0 && myLines === 0){
+        r = 3; msg = '堆高了，先消行';
+      } else if (hintSlotScore(recB) > hintSlotScore(mineB)){
+        r = 2; msg = '推荐那里在搭 T 槽';
+      } else {
+        const fm = simFeatures(mineB), fr = simFeatures(recB);
+        r = 1;
+        msg = pitCount(fm) > pitCount(fr) ? '挖出了只有 I 能填的深坑'
+            : !(fm.accept.O && fm.accept.S && fm.accept.Z) && (fr.accept.O && fr.accept.S && fr.accept.Z) ? '放完 O/S/Z 有块没地方放了'
+            : fm.bump > fr.bump ? '台阶变陡了' : '推荐那里放完更低更平';
+      }
+    }
+  }
   if (exact) hintStats.same++;
   if (good) hintStats.good++;
   // 放偏了，或者藏着推荐自己找的时候，放完把推荐亮一下对照
-  if (!exact && (hintHidden() || !good)){
-    // 消了行的话，盘面往下塌，亮出来的格子跟着挪
+  if (rec.cells && !exact && (hintHidden() || !good)){
     const full = [];
-    const nb = b0.map(r => r.slice());
+    const nb = b0.map(row => row.slice());
     for (const [x, y] of cells) if (y >= 0) nb[y][x] = true;
     for (let y = 0; y < TOTAL_ROWS; y++) if (nb[y].every(Boolean)) full.push(y);
     const shown = rec.cells.filter(([, y]) => !full.includes(y))
-                           .map(([x, y]) => [x, y + full.filter(r => r > y).length]);
+                           .map(([x, y]) => [x, y + full.filter(rr => rr > y).length]);
     hintReveal = { cells: shown, until: performance.now() + 1400 };
     setTimeout(() => { needsDraw = true; }, 1450);
   }
-  if (good){
-    if (!exact) showToast(hintHidden() ? '✓ 这也行' : '这也行 ✓　和绿框一样好', 900);
-    else if (hintHidden()) showToast('✓ 和推荐一样', 700);
-    syncHint();
-    return;
-  }
-  // 违反了哪一条：按优先级找第一条。提示只写「编号 + 一句话」，规则名在规则卡里 ——
-  // 带上规则名在手机上会折成三行压在盘面上
-  let r, msg;
-  const gaps = fitGaps(b0, cells);
-  if (fm.holes > fr.holes){
-    r = 0;
-    msg = gaps > 0 && rec.anyFit ? '留了 ' + gaps + ' 个洞，有能贴合的地方'
-                                 : '这一块造了 ' + (fm.holes - h0) + ' 个洞';
-  } else if (rec.danger && rec.lines > 0 && mine.lines === 0){
-    r = 3; msg = '堆高了，先消行';
-  } else if (!rec.danger && p.type !== 'I' && inWell(cells) && !inWell(rec.cells)){
-    r = 2; msg = '堵了井，最右列留给 I';
-  } else {
-    r = 1;
-    msg = pitCount(fm) > pitCount(fr) ? '挖出了只有 I 能填的深坑'
-        : !(fm.accept.O && fm.accept.S && fm.accept.Z) && (fr.accept.O && fr.accept.S && fr.accept.Z) ? '放完 O/S/Z 有块没地方放了'
-        : fm.bump > fr.bump ? '台阶变陡了' : '推荐那里放完更低更平';
-  }
-  hintStats.rules[r]++;
-  showToast(HINT_RULES[r].n + ' ' + msg, 2200);
+  if (!good){
+    hintStats.rules[r]++;
+    showToast(HINT_RULES[r].n + ' ' + msg, 2200);
+  } else if (!exact && rec.kind === 'place') showToast(hintHidden() ? '✓ 这也行' : '这也行 ✓　和绿框一样好', 900);
+  else if (exact && hintHidden() && !(spin === 'tspin' && n === 2)) showToast('✓ 和推荐一样', 700);
   syncHint();
 }
 
@@ -1851,7 +1851,7 @@ function hintJudge(p){
 const HINT_HIDE_KEY = nsKey('hint.hide.v1');
 let hintHide = false;
 try { hintHide = localStorage.getItem(HINT_HIDE_KEY) === '1'; } catch { /* 读不到就默认显示 */ }
-function hintHidden(){ return hintHide || !!(drill && drill.stage === 'stack'); }
+function hintHidden(){ return !tsOn() && (hintHide || !!(drill && drill.stage === 'stack')); }
 function toggleHintHide(){
   hintHide = !hintHide;
   try { localStorage.setItem(HINT_HIDE_KEY, hintHide ? '1' : '0'); } catch { /* 存不了就算了 */ }
@@ -1868,7 +1868,7 @@ function syncHint(){
   const w = $('hintWhy');
   if (w) w.innerHTML = stepsHTML(!hintMove ? '' : hintHidden() ? pieceHintText(hintMove.type) : '推荐　' + hintMove.why);
   const sc = $('hintScore');
-  if (sc) sc.textContent = '对 ' + hintStats.good + '/' + hintStats.total;
+  if (sc) sc.textContent = '对 ' + hintStats.good + '/' + hintStats.total + (tsStats.tsd ? ' · TSD ' + tsStats.tsd : '');
   const hb = $('hintHide');
   if (hb){ hb.textContent = hintHide ? '看推荐' : '先自己找'; hb.classList.toggle('on', hintHide); }
   const rs = $('hintSheet');
@@ -1892,12 +1892,7 @@ function hintBox(c, cells, solid, alpha){
   }
   c.restore();
 }
-function drawHint(c, ghostCells){
-  if (tsOn()) return tsDraw(c, ghostCells);
-  if (!hintMode || !hintMove || !game.piece || game.over || hintHidden()) return;
-  const key = cs => cs.map(v => v.join(',')).sort().join(';');
-  hintBox(c, hintMove.cells, !!ghostCells && key(ghostCells) === key(hintMove.cells), 1);
-}
+function drawHint(c, ghostCells){ tsDraw(c, ghostCells); }
 // 放完之后亮一下推荐（只在没对上、或者藏着推荐的时候）
 function drawHintReveal(c){
   if (!hintMode || !hintReveal || game.over) return;
@@ -1960,8 +1955,10 @@ function startHint(){
   hintKind = 'stack';
   hintStats = { same: 0, good: 0, total: 0, holes: 0, rules: [0, 0, 0, 0] };
   hintReveal = null;
+  tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
   restart();                 // 里面 spawn 时会算第一块的推荐
-  game.noGarbage = true;
+  // 和普通局一样开着灰线、正常升级：你在普通局里是被灰线顶死的，原来提示模式关着灰线练，练的不是那个局面
+  game.noGarbage = false;
   syncPractice(); syncHint();
 }
 
@@ -1975,7 +1972,9 @@ function startHint(){
 // 每块出来：普通块推荐「怎么把槽搭起来」；槽好了在盘面上标出来（品红）等 T；
 // T 来了给出转进去的路径；没槽时来了 T 建议先暂存。放完马上判，说清楚差在哪。
 // 可以暂存、看 3 个 NEXT（要看 T 什么时候来），不涨灰线、不升级、不记成绩（assisted）。
-let hintKind = 'stack';           // 'stack' = 堆叠提示，'tspin' = T 旋练习
+let hintKind = 'stack';
+// 这一局用过键盘（有逆时针 Z 键）：教练给路径时也用逆时针，不再偏向左屋檐（那条只对手机屏幕有意义）
+let kbUsed = false;           // 'stack' = 堆叠提示，'tspin' = T 旋练习
 function tsOn(){ return hintMode && hintKind === 'tspin'; }
 let tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
 let tsRec = null;                 // 这一块的建议 { kind: 'tsd'|'place'|'hold', cells, rot, x, why, path, readyBefore }
@@ -2009,7 +2008,7 @@ function tsdSlots(b){
 function tsBestSlot(b){
   let best = null;
   for (const s of tsdSlots(b))
-    if (!best || s.miss < best.miss || (s.miss === best.miss && s.roof < best.roof)) best = s;
+    if (!best || s.miss < best.miss || (s.miss === best.miss && !kbUsed && s.roof < best.roof)) best = s;
   return best;
 }
 function tsReadyCount(b){ return tsdSlots(b).filter(s => s.ready).length; }
@@ -2053,7 +2052,7 @@ function tsScore(b){
   if (best){
     s += HW.hole;
     const bonus = best.ready ? TS_W.ready : best.miss <= 4 ? TS_W.part - best.miss * TS_W.step : 0;
-    s += best.roof < 0 ? bonus : bonus * .5;
+    s += best.roof < 0 || kbUsed ? bonus : bonus * .5;
   } else if (tsNotch(h) >= 0) s += TS_W.notch;
   return s;
 }
@@ -2077,13 +2076,14 @@ function tsEval(b0, cells, nextType){
 // 按键串（simReach 的 L/R/d/C）讲成人话：右 2 → 软降 → 变换
 function tsPathText(acts){
   const out = [];
-  const re = /(L+|R+|d+|C+)/g;
+  const re = /(L+|R+|d+|C+|A+)/g;
   let m;
   while ((m = re.exec(acts))){
     const g = m[1], k = g.length;
     if (g[0] === 'L') out.push('左 ' + k);
     else if (g[0] === 'R') out.push('右 ' + k);
     else if (g[0] === 'd') out.push('软降');
+    else if (g[0] === 'A') out.push(k > 1 ? '逆时针 ×' + k : '逆时针（Z）');
     else out.push(k > 1 ? '变换 ×' + k : '变换');
   }
   // 开头那段一路往下的软降是「先落到槽口附近」，说成「送下去」更好懂
@@ -2098,13 +2098,14 @@ function tsNextT(){
 function tsCompute(){
   tsRec = null; hintMove = null;
   const p = game.piece;
-  if (!tsOn() || !p || game.over) return syncHint();
+  if (!hintMode || !p || game.over) return syncHint();
   const b0 = simBoard();
   tsBase = b0;
   const readyBefore = tsReadyCount(b0);
+  const danger = simFeatures(b0).maxH >= HINT_DANGER;
   const key = cs => cs.map(c => c.join(',')).sort().join(';');
   if (p.type === 'T'){
-    const locks = simReach(b0, 'T');
+    const locks = simReach(b0, 'T', kbUsed);
     const tsd = locks.filter(l => l.spin === 'tspin' && l.lines === 2);
     if (tsd.length){
       // 挑「要按的键最少」的那条：软降是按住不放，不算次数；只数左右和变换。
@@ -2136,10 +2137,12 @@ function tsCompute(){
       else if (after && !before) why = (p.type === 'L' || p.type === 'J' || p.type === 'S' || p.type === 'Z') ? '起个槽：这块做屋檐' : '起个槽';
       else if (before && before.ready) why = '槽留着别碰 · ' + tsNextT();
       else why = hintWhy(b0, Object.assign({ score: best.v }, best), simDrops(b0, p.type).map(m => Object.assign({ score: tsEval(b0, m.cells, null), gaps: fitGaps(b0, m.cells) }, m)), false);
-      tsRec = { kind: 'place', cells: best.cells, rot: best.rot, x: best.x, readyBefore, why };
+      tsRec = { kind: 'place', cells: best.cells, rot: best.rot, x: best.x, readyBefore, why,
+                score: best.v, next, danger };
     }
   }
   if (tsRec && tsRec.cells) hintMove = { type: p.type, cells: tsRec.cells, rot: tsRec.rot, x: tsRec.x, why: tsRec.why };
+  else if (tsRec) hintMove = { type: p.type, cells: null, why: tsRec.why };   // 建议暂存：没有落点，细栏照样有话
   needsDraw = true;
   syncHint();
 }
@@ -2178,7 +2181,7 @@ function tsOnLock(p, n, spin){
 // 画：推荐落点（绿框）+ 盘面上已经搭好的槽（品红，T 的形状）
 const TS_COLOR = '#ff6bd6';
 function tsDraw(c, ghostCells){
-  if (!tsOn() || game.over) return;
+  if (!hintMode || game.over || hintHidden()) return;
   const slot = tsBase ? tsdSlots(tsBase).filter(s => s.ready)[0] : null;
   if (slot){
     const cells = [[slot.x - 1, slot.y], [slot.x, slot.y], [slot.x + 1, slot.y], [slot.x, slot.y + 1]];
@@ -2193,7 +2196,7 @@ function tsDraw(c, ghostCells){
     }
     c.restore();
   }
-  if (hintMove && game.piece){
+  if (hintMove && hintMove.cells && game.piece){
     const key = cs => cs.map(v => v.join(',')).sort().join(';');
     hintBox(c, hintMove.cells, !!ghostCells && key(ghostCells) === key(hintMove.cells), 1);
   }
@@ -2215,7 +2218,7 @@ const TS_RULES = [
   ['底下那行要补满', '槽两边都得填满，不然 T 转进去只消一行（T 旋单消）'],
   ['槽没好先暂存 T', '7 块里必有一个 T：槽没搭好就把 T 放进暂存，等槽好了再换出来'],
   ['转进去的手法', '把 T 送到槽口上方，软降到底，最后一下按变换转进去 —— 转完不能再挪，挪了就不算 T 旋'],
-  ['屋檐搭在左边', '手机只有顺时针：屋檐在左的槽，手法固定是「变换一下 → 送下去 → 到底再变换一下」，2~3 下；屋檐在右要连按六七下，容易按乱'],
+  ['手机上屋檐搭在左边', '屏幕上只有顺时针：屋檐在左的槽，手法固定是「变换一下 → 送下去 → 到底再变换一下」，2~3 下；屋檐在右要连按六七下，容易按乱。用键盘（有 Z 键逆时针）就两边都一样'],
 ];
 function tsRenderSheet(body){
   let h = '<span class="sheet-lb">要领（来自 tetris.wiki 等公开攻略的共识）</span>';
@@ -2234,6 +2237,7 @@ function tsRenderSheet(body){
 function startTspin(){
   startHint();
   hintKind = 'tspin';
+  game.noGarbage = true;            // T 旋练习专心练槽：不涨灰线
   tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
   document.body.classList.add('tspinning');
   previewDirty = true;
@@ -2310,7 +2314,8 @@ function simTSpin(b, x, y, rot, lastRot, kick){
   if (!lastRot) return null;
   return tspinKind((X, Y) => X < 0 || X >= COLS || Y >= TOTAL_ROWS || (Y >= 0 && b[Y][X]), x, y, rot, kick);
 }
-function simReach(b, type){
+// ccw：也试逆时针（键盘有 Z 键；手机屏幕上只有顺时针，默认不试）
+function simReach(b, type, ccw){
   // acts 是走到这里的按键串（parseActs 的写法），测试拿它在真盘面上回放
   const start = { x: PIECES[type].spawnX, y: 0, rot: 0, lr: false, k: -1, acts: '' };
   if (!simFits(b, type, start.x, start.y, start.rot)) return [];
@@ -2330,11 +2335,13 @@ function simReach(b, type){
     for (const dx of [-1, 1])
       if (simFits(b, type, s.x + dx, s.y, s.rot)) push({ x: s.x + dx, y: s.y, rot: s.rot, lr: false, k: -1, acts: s.acts + (dx < 0 ? 'L' : 'R') });
     if (type === 'O') continue;
-    const to = (s.rot + 1) & 3;
-    const table = (type === 'I' ? KICKS.I : KICKS.JLSTZ)[s.rot + '>' + to];
-    for (let i = 0; i < table.length; i++){
-      const [kx, ky] = table[i];
-      if (simFits(b, type, s.x + kx, s.y + ky, to)){ push({ x: s.x + kx, y: s.y + ky, rot: to, lr: true, k: i, acts: s.acts + 'C' }); break; }
+    for (const dir of ccw ? [1, -1] : [1]){
+      const to = (s.rot + dir + 4) & 3;
+      const table = (type === 'I' ? KICKS.I : KICKS.JLSTZ)[s.rot + '>' + to];
+      for (let i = 0; i < table.length; i++){
+        const [kx, ky] = table[i];
+        if (simFits(b, type, s.x + kx, s.y + ky, to)){ push({ x: s.x + kx, y: s.y + ky, rot: to, lr: true, k: i, acts: s.acts + (dir > 0 ? 'C' : 'A') }); break; }
+      }
     }
   }
   return out;
@@ -3499,7 +3506,6 @@ function tspinKind(corner, x, y, rot, kick){
 function lockPiece(){
   const p = game.piece;
   if (!p) return;
-  hintJudge(p);
   snapForUndo();
   game.pieces++;
   crazyOnLock(p);
@@ -3551,6 +3557,7 @@ function lockPiece(){
   practiceCheck(full.length, spin, perfect);
   drillOnLock(p, full.length, spin);
   if (tsOn()) tsOnLock(p, full.length, spin);
+  else if (hintMode) hintJudge(p, full.length, spin);
   if (vs) vsOnLock(full.length, spin, perfect);
   crazyOnClear(full.length, spin, perfect);
 
@@ -4776,15 +4783,11 @@ function drawPreview(){
   const topH = Math.round(nh * 0.54);
   const botH = nh - topH;
   // 提示模式只给看 1 个 NEXT（推荐也只拿它算），占满整个框
-  if (hintMode && !tsOn()){
-    if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, nh, 1, game.mods[0]);
-    dbg.previews = game.queue[0] ? 1 : 0;
-  } else {
-    if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1, game.mods[0]);
-    if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62, game.mods[1]);
-    if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62, game.mods[2]);
-    dbg.previews = [0, 1, 2].filter(i => game.queue[i]).length;
-  }
+  // 提示模式原来只给看 1 个 NEXT；现在和普通局一样看 3 个（练的就是普通局）
+  if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, topH, 1, game.mods[0]);
+  if (game.queue[1]) drawMini(nextCtx, game.queue[1], 0, topH, nw / 2, botH, .62, game.mods[1]);
+  if (game.queue[2]) drawMini(nextCtx, game.queue[2], nw / 2, topH, nw / 2, botH, .62, game.mods[2]);
+  dbg.previews = [0, 1, 2].filter(i => game.queue[i]).length;
 
   // hold
   const hw = holdCv._w || holdCv.clientWidth, hh = holdCv._h || holdCv.clientHeight;
@@ -8498,6 +8501,7 @@ window.addEventListener('keydown', (e) => {
   if (!game.started || game.over || game.paused) return;
   if (e.repeat && act !== 'soft') return;
   if (!e.repeat) drillKey(act === 'soft', true);
+  kbUsed = true;
   switch (act){
     case 'left':  press('left'); break;
     case 'right': press('right'); break;
@@ -9332,7 +9336,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, startTspin, tsOn, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

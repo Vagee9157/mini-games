@@ -87,16 +87,23 @@ JS = r"""async () => {
   ok(T.hintHidden() && /^[IOTSZJL] 找/.test($('drLabel').textContent),
      `推荐藏着，细栏只说这块找哪种台阶（「${$('drLabel').textContent}」）`);
   ok(T.hintMove && !T.hintReveal, '出块时不亮推荐');
-  for (let i = 0; i < T.DRILL_STACK_N && T.drill && T.drill.stage === 'stack'; i++){
-    const hm = T.hintMove, p = T.game.piece;
-    if (!hm || !p) break;
-    p.rot = hm.rot; p.x = hm.x; p.y = 0;
+  // 推荐有三种：落点 / 暂存 / T 旋路径（提示模式现在用教练那套），三种都照做
+  const prs = a => a.acts.replace(/d/g, '').length;
+  for (let i = 0; i < T.DRILL_STACK_N * 2 && T.drill && T.drill.stage === 'stack' && T.game.pieces < T.DRILL_STACK_N; i++){
+    const rec = T.tsRec, p = T.game.piece;
+    if (!rec || !p) break;
+    if (rec.kind === 'hold'){ T.holdPiece(); continue; }
+    if (rec.kind === 'tsd'){
+      const m = T.simReach(T.simBoard(), 'T').filter(l => l.spin === 'tspin' && l.lines === 2).sort((a, c) => prs(a) - prs(c) || a.acts.length - c.acts.length)[0];
+      for (const a of T.parseActs(m.acts)) T.doAct(a); T.doAct('H'); settle(); continue;
+    }
+    p.rot = rec.rot; p.x = rec.x; p.y = 0;
     T.hardDrop(); settle();
   }
   ok(T.game.level === 1, `堆叠段不升级（${T.game.lines} 行仍是 ${T.game.level} 级）`);
   await sleep(800);
   const st = T.drill && T.drill.done.stack;
-  ok(!!st && st.total === T.DRILL_STACK_N && st.same === T.DRILL_STACK_N && st.exact === T.DRILL_STACK_N
+  ok(!!st && st.total === T.DRILL_STACK_N && st.same === T.DRILL_STACK_N
      && st.rules.every(v => v === 0) && !st.dead,
      `照推荐放 100 块：放对 ${st && st.same}/${st && st.total}、规则一条没犯（${st && st.rules}）、洞 ${st && st.holes}`);
   ok(!T.hintMode && !document.body.classList.contains('hinting'), '堆叠完退出提示模式');

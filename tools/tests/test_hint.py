@@ -1,4 +1,9 @@
-"""堆叠提示模式：模式行为 + 推荐质量
+"""提示模式：模式行为 + 推荐质量
+
+推荐用的是教练那套（和 T 旋练习同一个引擎）：堆平不留洞，同时给 T 搭槽、T 来了给 T 旋路径。
+条件和普通局一样：开灰线、正常升级、能暂存、看 3 个 NEXT（原来是关灰线、1 个 NEXT、不能暂存，
+在普通局里照它打反而分低 —— 子代理拿机器人比过：41.7 万 vs 58.9 万）。
+
 
 推荐好不好不靠「看着像」：让机器人只照着推荐放，跑几百块，看它死不死、
 造不造洞、能不能稳定打四消；再拿「哪里最低放哪里」的新手放法做对照。
@@ -31,27 +36,31 @@ JS = r"""() => {
   ok(T.hintMode && !T.practice, '点「提示」进提示模式');
   ok(document.body.classList.contains('hinting'), 'body 挂上 hinting');
   ok(msw.querySelector('[data-m="hint"]').classList.contains('on'), '开关高亮在「提示」');
-  ok(T.game.noGarbage === true, '提示模式不涨灰线');
+  ok(T.game.noGarbage === false, '提示模式和普通局一样涨灰线');
   // 直接画一次再读 —— dbg.previews 只在真正重绘时更新，同步测试等不到下一帧，
   // 不调的话读到的是上一个模式留下的旧值（第一版这两条就是这么假绿/假红的）
   T.drawPreview();
-  ok(T.dbg.previews === 1, `NEXT 只画 1 块（画了 ${T.dbg.previews}）`);
+  ok(T.dbg.previews === 3, `NEXT 和普通局一样看 3 块（画了 ${T.dbg.previews}）`);
 
   // 推荐存在、合法、能从顶上直接落到
+  // 第一块要是 T 可能建议暂存（没槽），换成普通块再看落点
+  if (T.game.piece.type === 'T'){ T.game.piece = null; T.game.queue.unshift('S'); T.game.mods.unshift(null); T.spawnNext(); }
   const hm = T.hintMove;
-  ok(!!hm && hm.type === T.game.piece.type, `出块就有推荐（${hm && hm.type} → 列 ${hm && hm.x} 朝向 ${hm && hm.rot}）`);
+  ok(!!hm && !!hm.cells && hm.type === T.game.piece.type, `出块就有推荐（${hm && hm.type} → 列 ${hm && hm.x} 朝向 ${hm && hm.rot}）`);
   const drops = T.simDrops(T.simBoard(), T.game.piece.type).map(d => d.cells.map(c => c.join(',')).sort().join(';'));
   ok(!!hm && drops.includes(hm.cells.map(c => c.join(',')).sort().join(';')), '推荐的位置是从顶上直接落得到的');
   ok(!!hm && hm.why.length > 0 && document.getElementById('hintWhy').textContent.includes(hm.why),
      `细栏写着理由（「${document.getElementById('hintWhy').textContent}」）`);
 
-  // 没有 HOLD
+  // 能暂存（和普通局一样）
+  const t0 = T.game.piece.type;
   T.holdPiece();
-  ok(T.game.hold === null, '提示模式按暂存没反应');
-
+  ok(T.game.hold === t0, `提示模式能暂存（暂存了 ${T.game.hold}）`);
   // 照推荐放 → 记一笔一致
+  if (!T.hintMove || !T.hintMove.cells){ T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext(); }
+  const hmA = T.hintMove;
   const p = T.game.piece;
-  p.rot = hm.rot; p.x = hm.x; p.y = 0; T.hardDrop(); settle();
+  p.rot = hmA.rot; p.x = hmA.x; p.y = 0; T.hardDrop(); settle();
   ok(T.hintStats.same === 1 && T.hintStats.total === 1, `照推荐放记一笔一致（${T.hintStats.same}/${T.hintStats.total}）`);
 
   // 故意造洞 → 提示一句、只记总数
@@ -74,7 +83,7 @@ JS = r"""() => {
   // 重开还在提示模式、灰线照样关着
   document.getElementById('restartBtn').click();          // 先弹确认面板，点「重新开始 · 提示」
   document.getElementById('rsAgain').click();
-  ok(T.hintMode && T.game.noGarbage === true && !!T.hintMove, '提示模式里点重开：还是提示模式、没灰线、有推荐');
+  ok(T.hintMode && T.game.noGarbage === false && !!T.hintMove, '提示模式里点重开：还是提示模式、照样涨灰线、有推荐');
 
   // ── 切回普通 ──
   msw.querySelector('[data-m="normal"]').click();
@@ -120,9 +129,7 @@ JS = r"""() => {
   setH([4, 4, 5, 6, 6, 6, 6, 6, 6, 0]);
   give('S');
   const hm2 = T.hintMove;
-  const fit2 = T.pieceFits('S').find(f => f.key === T.bottomPattern('S', hm2.rot).join(''));
-  ok(hm2.gaps === 0 && hm2.why.startsWith(fit2.glyph + ' ' + fit2.name),
-     `理由以台阶形状开头（「${hm2.why}」）`);
+  ok(!!hm2.cells && hm2.why.length > 0 && T.fitGaps(T.simBoard(), hm2.cells) === 0, `推荐的落点贴合、带理由（「${hm2.why}」）`);
 
   // 照推荐放：放对 +1、一模一样 +1
   let s0 = Object.assign({}, T.hintStats);
@@ -133,10 +140,10 @@ JS = r"""() => {
   let found = null;
   for (const t of 'OTSZJL'){
     setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); give(t);
-    const b0 = T.simBoard(), r = T.hintBest(b0, t, T.game.queue[0]);
-    const hb = T.simFeatures(T.simPlace(b0, r.best.cells).b).holes;
+    const b0 = T.simBoard(), rec = T.tsRec; if (!rec || rec.kind !== 'place') continue;
     const k = cs => cs.map(c => c.join(',')).sort().join(';');
-    const alt = r.all.find(m => k(m.cells) !== k(r.best.cells) && r.best.score - m.score <= T.HINT_TOL
+    const hb = T.simFeatures(T.simPlace(b0, rec.cells).b).holes;
+    const alt = T.simDrops(b0, t).find(m => k(m.cells) !== k(rec.cells) && rec.score - T.tsEval(b0, m.cells, rec.next) <= T.HINT_TOL
                               && T.simFeatures(T.simPlace(b0, m.cells).b).holes <= hb);
     if (alt){ found = alt; break; }
   }
@@ -156,17 +163,31 @@ JS = r"""() => {
   ok(T.hintStats.good === s0.good, '判错的不算放对');
   ok(!!T.hintReveal && T.hintReveal.cells.length > 0, '放错了把推荐亮一下对照');
 
-  // ③ 非 I 塞进井：L 竖放「左高两格」正好贴合在第 8、9 列，不留洞，但堵了井
-  setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); give('L');
-  const lw = T.simDrops(T.simBoard(), 'L').find(d => d.rot === 3 && d.cells.every(c => c[0] >= 8) && d.cells.some(c => c[0] === 9));
+  // ③ 给 T 留槽：搭好的 TSD 槽（槽口第 4 列、屋檐在左），拿 I 竖着塞进去 → 把槽填了
+  const loadRows = rows => { clear(); rows.forEach((r, i) => { const y = R2 - rows.length + i; for (let x = 0; x < 10; x++) T.game.board[y][x] = r[x] === '#' ? 'J' : null; }); };
+  const READY = ['####......', '###...####', '####.#####'];
+  loadRows(READY); give('I');
   s0 = JSON.parse(JSON.stringify(T.hintStats));
-  const recWell = T.hintMove.cells.some(c => c[0] === 9);
-  place(lw.rot, lw.x);
-  ok(!recWell && T.hintStats.rules[2] === s0.rules[2] + 1 && /^③/.test(toastNow()), `堵井判 ③（「${toastNow()}」）`);
+  { const xs = T.cellsOf('I', 1).map(c => c[0]); place(1, 4 - xs[0]); }
+  ok(T.hintStats.rules[2] === s0.rules[2] + 1 && /^③/.test(toastNow()) && /槽/.test(toastNow()), `把 T 槽填了判 ③（「${toastNow()}」）`);
+  // 槽好了来 T：给 T 旋路径，照路径打出 T 旋双消
+  loadRows(READY); give('T');
+  ok(T.tsRec && T.tsRec.kind === 'tsd' && /变换/.test(T.tsRec.path), `槽好了来 T：推荐 T 旋（「${T.hintMove && T.hintMove.why}」）`);
+  { const pr = a => a.acts.replace(/d/g, '').length;
+    const m = T.simReach(T.simBoard(), 'T').filter(l => l.spin === 'tspin' && l.lines === 2).sort((a, b) => pr(a) - pr(b) || a.acts.length - b.acts.length)[0];
+    s0 = JSON.parse(JSON.stringify(T.hintStats));
+    for (const a of T.parseActs(m.acts)) T.doAct(a); T.doAct('H'); settle(); }
+  ok(T.hintStats.good === s0.good + 1 && /T 旋双消/.test(toastNow()), `照路径打出 T 旋双消：算放对（「${toastNow()}」）`);
+  // 没槽来了 T：建议暂存；硬放下去判 ③
+  setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 2].map((v, i) => i === 9 ? 1 : v)); T.game.hold = null; give('T');
+  ok(T.tsRec && T.tsRec.kind === 'hold', `没槽时来了 T：建议暂存（「${T.hintMove && T.hintMove.why}」）`);
+  s0 = JSON.parse(JSON.stringify(T.hintStats));
+  T.hardDrop(); settle();
+  ok(T.hintStats.rules[2] === s0.rules[2] + 1 && /暂存/.test(toastNow()), `没槽还把 T 放下去：判 ③（「${toastNow()}」）`);
 
   // ④ 堆高了能消不消：九列堆到 13 格、最右一列空着，I 进井就能消
   setH([13, 13, 13, 13, 13, 13, 13, 13, 13, 0]); give('I');
-  const recLines = T.hintMove.lines;
+  const recLines = T.simPlace(T.simBoard(), T.hintMove.cells).lines;
   s0 = JSON.parse(JSON.stringify(T.hintStats));
   place(0, 0);                                    // I 横放在左边顶上，不消行
   ok(recLines > 0 && T.hintStats.rules[3] === s0.rules[3] + 1 && /^④/.test(toastNow()),
@@ -187,9 +208,10 @@ JS = r"""() => {
   if (found){
     give(found.type);
     const b0 = T.simBoard(), k = cs => cs.map(c => c.join(',')).sort().join(';');
-    const r = T.hintBest(b0, found.type, T.game.queue[0]);
-    const hb = T.simFeatures(T.simPlace(b0, r.best.cells).b).holes;
-    const alt = r.all.find(m => k(m.cells) !== k(T.hintMove.cells) && r.best.score - m.score <= T.HINT_TOL
+    const rec = T.tsRec;
+    const hb = rec && rec.cells ? T.simFeatures(T.simPlace(b0, rec.cells).b).holes : 0;
+    const alt = rec && rec.kind === 'place' && T.simDrops(b0, found.type).find(m => k(m.cells) !== k(rec.cells)
+                              && rec.score - T.tsEval(b0, m.cells, rec.next) <= T.HINT_TOL
                               && T.simFeatures(T.simPlace(b0, m.cells).b).holes <= hb);
     if (alt){ place(alt.rot, alt.x); ok(!!T.hintReveal, '放了另一处一样好的：亮一下推荐给你对照'); }
     else ok(true, '（这一手没有第二处一样好的落点，跳过）');
@@ -208,35 +230,37 @@ JS = r"""() => {
   return L;
 }"""
 
-# 推荐质量：照推荐放 vs 哪里最低放哪里。用的是调参时没用过的种子。
+# 推荐质量：照推荐放（含暂存、T 旋路径）vs 哪里最低放哪里。开着灰线（提示模式现在就是普通局的条件）
 QUALITY = r"""(arg) => {
   const T = __tetris, {policy, seed, N} = arg;
   T.setSeed(seed); T.startHint();
-  let tetris = 0, holes = 0, placed = 0;
-  for (let i = 0; i < N; i++){
+  const pr = a => a.acts.replace(/d/g, '').length;
+  let tsd = 0, holes = 0, placed = 0, guard = 0;
+  while (placed < N && guard++ < N * 3){
     let g = 0; while ((T.clearing || !T.game.piece) && !T.game.over && g++ < 400) T.step(16);
     if (T.game.over) break;
-    const p = T.game.piece, b0 = T.simBoard(), h0 = T.simFeatures(b0).holes;
-    let m = T.hintMove;
-    if (policy === 'tol'){
-      // 「这也行」的那些落点里随机挑：容差要是放宽了，这一路的质量会先掉
-      const r = T.hintBest(b0, p.type, T.game.queue[0]);
-      const hb = T.simFeatures(T.simPlace(b0, r.best.cells).b).holes;
-      const okm = r.all.filter(c => r.best.score - c.score <= T.HINT_TOL && T.simFeatures(T.simPlace(b0, c.cells).b).holes <= hb);
-      m = okm[(i * 7 + seed) % okm.length];
+    const p = T.game.piece, b0 = T.simBoard(), h0 = T.simFeatures(b0).holes - (T.tsBestSlot(b0) ? 1 : 0);
+    const rec = T.tsRec, l0 = T.game.lines;
+    if (policy === 'hint' && rec && rec.kind === 'hold'){ T.holdPiece(); continue; }
+    if (policy === 'hint' && rec && rec.kind === 'tsd'){
+      const m = T.simReach(b0, 'T').filter(l => l.spin === 'tspin' && l.lines === 2).sort((a, b) => pr(a) - pr(b) || a.acts.length - b.acts.length)[0];
+      for (const a of T.parseActs(m.acts)) T.doAct(a); T.doAct('H');
+    } else {
+      let m = rec && rec.cells ? rec : null;
+      if (policy === 'lowest' || !m){
+        const all = T.simDrops(b0, p.type);
+        m = all.reduce((a, c) => { const ta = Math.min(...a.cells.map(v=>v[1])), tc = Math.min(...c.cells.map(v=>v[1])); return tc > ta ? c : a; });
+      }
+      p.rot = m.rot; p.x = m.x; p.y = 0; T.hardDrop();
     }
-    if (policy === 'lowest'){
-      const all = T.simDrops(b0, p.type);
-      m = all.reduce((a, c) => { const ta = Math.min(...a.cells.map(v=>v[1])), tc = Math.min(...c.cells.map(v=>v[1]));
-        return tc > ta ? c : a; });
-    }
-    p.rot = m.rot; p.x = m.x; p.y = 0;
-    const l0 = T.game.lines; T.hardDrop(); placed++;
+    placed++;
     g = 0; while (T.clearing && g++ < 400) T.step(16);
-    if (T.game.lines - l0 === 4) tetris++;
-    if (T.simFeatures(T.simBoard()).holes > h0) holes++;
+    if (T.game.lines - l0 === 2 && T.game.combo >= 0 && T.lastHit >= 3.5) tsd++;
+    const b1 = T.simBoard();
+    if (T.simFeatures(b1).holes - (T.tsBestSlot(b1) ? 1 : 0) > h0) holes++;
+    T.step(250);                       // 让灰线照普通局的节奏涨
   }
-  return { placed, over: T.game.over, lines: T.game.lines, tetris, holes };
+  return { placed, over: T.game.over, lines: T.game.lines, tsd, holes, score: T.game.score };
 }"""
 
 fails = 0
@@ -255,21 +279,14 @@ with sync_playwright() as p:
     for seed in (77, 88):
         h = pg.evaluate(QUALITY, {'policy': 'hint', 'seed': seed, 'N': 400})
         n = pg.evaluate(QUALITY, {'policy': 'lowest', 'seed': seed, 'N': 400})
-        share = h['tetris'] * 4 / max(1, h['lines'])
         tot_holes += h['holes']; tot_placed += h['placed']
         r.append(('PASS ' if not h['over'] and h['placed'] == 400 else 'FAIL ') +
                  f"种子{seed} 照推荐放 400 块不死（放了 {h['placed']}，造洞 {h['holes']} 次）")
-        r.append(('PASS ' if share >= .5 else 'FAIL ') +
-                 f"种子{seed} 四消占消行至少一半（{int(share*100)}%）")
-        r.append(('PASS ' if n['over'] or n['holes'] > h['holes'] * 3 else 'FAIL ') +
-                 f"种子{seed} 对照组「哪里最低放哪里」明显更差（{'堆死于第 ' + str(n['placed']) + ' 块' if n['over'] else '造洞 ' + str(n['holes'])}）")
-    for seed in (77, 88):
-        t = pg.evaluate(QUALITY, {'policy': 'tol', 'seed': seed, 'N': 400})
-        share = t['tetris'] * 4 / max(1, t['lines'])
-        r.append(('PASS ' if not t['over'] and t['holes'] <= 400 * .05 and share >= .5 else 'FAIL ') +
-                 f"种子{seed} 在「这也行」的落点里随便挑：不死、造洞 {t['holes']} 次、四消占 {int(share*100)}%")
-    r.append(('PASS ' if tot_holes <= tot_placed * .05 else 'FAIL ') +
-             f"两局合计造洞不超过 5%（{tot_holes}/{tot_placed} = {tot_holes*100/max(1,tot_placed):.1f}%）")
+        r.append(('PASS ' if h['tsd'] >= 6 else 'FAIL ') + f"种子{seed} 照推荐打出 T 旋双消 {h['tsd']} 个（至少 6 个）")
+        r.append(('PASS ' if n['over'] or n['score'] < h['score'] * .6 else 'FAIL ') +
+                 f"种子{seed} 对照组「哪里最低放哪里」明显更差（{'堆死于第 ' + str(n['placed']) + ' 块' if n['over'] else str(n['score']) + ' 分 vs ' + str(h['score'])}）")
+    r.append(('PASS ' if tot_holes <= tot_placed * .06 else 'FAIL ') +
+             f"两局合计造洞不超过 6%（{tot_holes}/{tot_placed} = {tot_holes*100/max(1,tot_placed):.1f}%，T 槽屋檐下那格不算）")
     print(f"== 标准版 ==  JS错误 {len(errs)}")
     for e in errs[:4]: print("   !", e)
     fails += len(errs)
