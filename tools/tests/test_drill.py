@@ -108,7 +108,29 @@ JS = r"""async () => {
      `照推荐放 100 块：放对 ${st && st.same}/${st && st.total}、规则一条没犯（${st && st.rules}）、洞 ${st && st.holes}`);
   ok(!T.hintMode && !document.body.classList.contains('hinting'), '堆叠完退出提示模式');
 
-  // ── ③ 冲刺：按键计数和多余按键 ──
+  // ── ③ 挖灰线 ──
+  ok(/挖灰线/.test($('drGo').textContent), `堆叠完下一段是挖灰线（「${$('drGo').textContent}」）`);
+  $('drGo').click();
+  { const R = T.TOTAL_ROWS, rows = [];
+    for (let i = 0; i < T.DRILL_DIG_ROWS; i++){ const row = T.game.board[R - 1 - i]; rows.push(row.map(c => c ? 1 : 0).join('')); }
+    const holes = rows.map(r => r.indexOf('0'));
+    ok(T.drill.stage === 'dig' && T.drill.clock && rows.every(r => r.split('0').length === 2)
+       && holes.every((h, i) => i === 0 || h !== holes[i - 1]),
+       `底下垫了 ${T.DRILL_DIG_ROWS} 行灰线，每行一个缺口、相邻两行不在同一列（缺口列 ${holes.join(',')}）`);
+    ok(T.game.level === 10 && /还剩 8 行/.test($('drLabel').textContent), `10 级速度，细栏写着还剩几行（「${$('drLabel').textContent}」）`);
+    // 挖到只剩最后一行（缺口在最右），竖 I 插进去挖光
+    for (let y = 0; y < R; y++) T.game.board[y].fill(null);
+    for (let x = 0; x < 9; x++) T.game.board[R - 1][x] = 'X';
+    T.game.piece = null; T.game.queue.unshift('I'); T.game.mods.unshift(null); T.spawnNext();
+    const p = T.game.piece; p.rot = 1; p.x = 7; p.y = 0;
+    await sleep(120); T.hardDrop(); settle();
+  }
+  await sleep(900);
+  const dg = T.drill && T.drill.done.dig;
+  ok(!!dg && dg.done && dg.ms > 0 && dg.pieces === 1, `挖光：记下用时 ${dg && T.fmtMs(dg.ms)}、用了 ${dg && dg.pieces} 块`);
+  ok(/冲刺/.test($('drGo').textContent), '挖完下一段是冲刺');
+
+  // ── ④ 冲刺：按键计数和多余按键 ──
   $('drGo').click();
   ok(T.drill.stage === 'sprint' && T.drill.clock, '冲刺开始计时');
   for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
@@ -143,11 +165,11 @@ JS = r"""async () => {
   await sleep(900);
   const sp = T.drill && T.drill.done.sprint;
   ok(!!sp && sp.done && sp.ms > 0 && sp.pieces === 6, `冲刺成绩：${sp && T.fmtMs(sp.ms)}、${sp && sp.pieces} 块、${sp && sp.keys} 键、多余 ${sp && sp.faults}`);
-  ok(/练完了/.test($('drGo').textContent) && $('drSkip').disabled, '三段都完：按钮变「练完了」');
+  ok(/练完了/.test($('drGo').textContent) && $('drSkip').disabled, '四段都完：按钮变「练完了」');
 
   // ── 存档 ──
   const all = T.drillReadAll(), today = all.days[T.bjDay()];
-  ok(!!today && !!today.warm && !!today.stack && !!today.sprint, '今天三项都存下来了');
+  ok(!!today && !!today.warm && !!today.stack && !!today.dig && !!today.sprint, '今天四项都存下来了');
   ok($('drBody').querySelector('.dr-hist') && /\d+\/\d+/.test($('drBody').querySelector('.dr-hist').textContent), '面板里有最近几天的表');
   // 同一天再来一次更差的：留最好的
   T.drillSave('sprint', { done: true, ms: sp.ms + 5000, lines: 40, pieces: 6, keys: 9, faults: 3 });

@@ -107,7 +107,8 @@ JS = r"""() => {
   const clear = () => { for (let y = 0; y < R2; y++) T.game.board[y].fill(null); };
   // heights：每列高度（从底往上实心，无洞）
   const setH = hs => { clear(); hs.forEach((h, x) => { for (let k = 0; k < h; k++) T.game.board[R2 - 1 - k][x] = 'X'; }); };
-  const give = t => { T.game.piece = null; T.game.queue.unshift(t); T.game.mods.unshift(null); T.spawnNext(); };
+  // 下一块固定成 O：推荐看「当前块 + 下一块」，下一块随机的话同一个盘面推荐会变，判哪条规则也跟着变（偶发红过）
+  const give = t => { T.game.piece = null; T.game.queue[0] = 'O'; T.game.queue.unshift(t); T.game.mods.unshift(null); T.spawnNext(); };
   const toastNow = () => document.getElementById('toast').textContent;
   const place = (rot, x) => { const p = T.game.piece; p.rot = rot; p.x = x; p.y = 0; T.hardDrop(); settle(); };
 
@@ -137,15 +138,17 @@ JS = r"""() => {
   ok(T.hintStats.good === s0.good + 1 && T.hintStats.same === s0.same + 1, '照推荐放：放对、一模一样各 +1');
 
   // 一样好的另一处：算放对、不算一模一样，并且说「这也行」
+  // 下一块固定成 O、多试几种盘面：「一样好」取决于下一块是什么，随机的话偶尔一处都找不到（跑全套时红过）
   let found = null;
-  for (const t of 'OTSZJL'){
-    setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); give(t);
+  outer: for (const hs of [[2, 2, 2, 2, 2, 2, 2, 2, 2, 2], [2, 2, 2, 2, 2, 2, 2, 2, 2, 0], [3, 2, 2, 3, 3, 2, 2, 3, 3, 2]])
+  for (const t of 'SJLIOZ'){
+    setH(hs); T.game.queue[0] = 'O'; give(t);
     const b0 = T.simBoard(), rec = T.tsRec; if (!rec || rec.kind !== 'place') continue;
     const k = cs => cs.map(c => c.join(',')).sort().join(';');
     const hb = T.simFeatures(T.simPlace(b0, rec.cells).b).holes;
     const alt = T.simDrops(b0, t).find(m => k(m.cells) !== k(rec.cells) && rec.score - T.tsEval(b0, m.cells, rec.next) <= T.HINT_TOL
                               && T.simFeatures(T.simPlace(b0, m.cells).b).holes <= hb);
-    if (alt){ found = alt; break; }
+    if (alt){ found = alt; break outer; }
   }
   ok(!!found, '平地上能找到一处「和推荐一样好」的落点');
   if (found){

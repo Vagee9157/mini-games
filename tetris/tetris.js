@@ -2262,14 +2262,25 @@ const DRILL_WARM_N = 5;
 const DRILL_STACK_N = 100;
 const DRILL_SPRINT_LINES = 40;
 const DRILL_DAYS_KEPT = 60;
-const DRILL_STAGES = ['warm', 'stack', 'sprint'];
-const DRILL_NAME = { warm: '① T 槽热身', stack: '② 堆叠', sprint: '③ 40 行冲刺' };
-const DRILL_SHORT = { warm: '热身', stack: '堆叠', sprint: '冲刺' };
+// 挖灰线：底下垫 DRILL_DIG_ROWS 行灰线（每行缺口随机，和普通局涨上来的一样），10 级的速度，挖光就结束。
+// 子代理复查时指出的最大缺口：普通局是被灰线顶死的，可所有练习都把灰线关了，从来没练过挖
+const DRILL_DIG_ROWS = 8;
+const DRILL_DIG_LEVEL = 10;
+const DRILL_STAGES = ['warm', 'stack', 'dig', 'sprint'];
+const DRILL_NAME = { warm: '① T 槽热身', stack: '② 堆叠', dig: '③ 挖灰线', sprint: '④ 40 行冲刺' };
+const DRILL_SHORT = { warm: '热身', stack: '堆叠', dig: '挖灰线', sprint: '冲刺' };
 const DRILL_DESC = {
   warm: DRILL_WARM_N + ' 道随机 T 旋双消题，看一次过几道',
   stack: '自己找位置放 ' + DRILL_STACK_N + ' 块，放完对照推荐，看放对几成、最常犯哪条',
+  dig: '底下垫 ' + DRILL_DIG_ROWS + ' 行灰线，挖光计时 —— 普通局就是被灰线顶死的',
   sprint: '消 ' + DRILL_SPRINT_LINES + ' 行计时，看用时、PPS、多余按键',
 };
+// 盘面上还剩几行灰线（马上要消掉的满行不算）
+function drillDigLeft(){
+  let n = 0;
+  for (const row of game.board) if (row.some(c => c === GARBAGE) && !row.every(Boolean)) n++;
+  return n;
+}
 
 // ── 存取 ── 坏数据一律当没有，日期键和数字都过一遍校验再用
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -2471,6 +2482,19 @@ function drillBegin(stage){
   } else if (stage === 'sprint'){
     drill.keys = 0; drill.pieces = 0; drill.faults = 0;
     drill.clock = true;
+  } else if (stage === 'dig'){
+    const R = TOTAL_ROWS;
+    let last = -1;
+    for (let i = 0; i < DRILL_DIG_ROWS; i++){
+      let hole = (Math.random() * COLS) | 0;
+      if (hole === last) hole = (hole + 1 + ((Math.random() * (COLS - 1)) | 0)) % COLS;   // 相邻两行缺口不在同一列
+      last = hole;
+      for (let x = 0; x < COLS; x++) game.board[R - 1 - i][x] = x === hole ? null : GARBAGE;
+    }
+    game.level = DRILL_DIG_LEVEL;          // 每日练习不升级，停在这一级
+    drill.pieces = 0;
+    drill.clock = true;
+    staticDirty = true; needsDraw = true;
   }
   syncHint(); syncPractice(); syncDrill();
 }
@@ -2553,6 +2577,15 @@ function drillOnLock(p, n, spin){
     syncDrill();
     return;
   }
+  if (drill.stage === 'dig'){
+    drill.pieces++;
+    if (drillDigLeft() === 0){
+      const ms = Math.round(drill.ms);
+      drillPause(700, () => drillFinish('dig', { done: true, ms, lines: DRILL_DIG_ROWS, pieces: drill.pieces }));
+    }
+    syncDrill();
+    return;
+  }
   // 冲刺
   drill.pieces++;
   if (!drill.pk.soft && drill.spawnB){
@@ -2575,6 +2608,11 @@ function drillTopOut(){
   if (drill.stage === 'warm'){ drill.tries++; drillPause(900, drillWarmLoad); return true; }
   if (drill.stage === 'stack'){
     drillPause(600, () => drillFinish('stack', drillStackRes(true)));
+    return true;
+  }
+  if (drill.stage === 'dig'){
+    const left = drillDigLeft();
+    drillPause(600, () => drillFinish('dig', { done: false, ms: Math.round(drill.ms), lines: DRILL_DIG_ROWS - left, pieces: drill.pieces }));
     return true;
   }
   drillPause(600, () => drillFinish('sprint', {
@@ -2628,6 +2666,8 @@ function drillResText(stage, r){
   if (stage === 'stack') return '放对 ' + Math.round(100 * r.same / Math.max(1, r.total)) + '% · 洞 ' + (r.holes | 0)
                                 + drillWorstRule(r)
                                 + (r.dead ? ' · 中途堆满' : '');
+  if (stage === 'dig') return r.done ? fmtMs(r.ms) + ' 挖光 · 用了 ' + (r.pieces | 0) + ' 块'
+                                     : '被顶死了（挖掉 ' + (r.lines | 0) + '/' + DRILL_DIG_ROWS + ' 行）';
   if (!r.done) return '没打完（' + (r.lines | 0) + ' 行）';
   return fmtMs(r.ms) + ' · PPS ' + (r.pieces / (r.ms / 1000)).toFixed(2)
          + ' · 每块 ' + (r.keys / Math.max(1, r.pieces)).toFixed(1) + ' 键 · 多余 ' + (r.faults | 0);
@@ -2645,7 +2685,7 @@ function drillDelta(stage, r){
   const p = drillPrev(stage);
   if (!p || !r) return '';
   const q = p.r, md = p.day.slice(5).replace('-', '/');
-  if (stage === 'sprint'){
+  if (stage === 'sprint' || stage === 'dig'){
     if (!r.done || !q.done) return '';
     const d = (q.ms - r.ms) / 1000;
     return d >= 0 ? '比 ' + md + ' 快 ' + d.toFixed(1) + ' 秒' : '比 ' + md + ' 慢 ' + (-d).toFixed(1) + ' 秒';
@@ -2675,13 +2715,14 @@ function renderDrSheet(){
   const days = Object.keys(all.days).filter(k => DAY_RE.test(k)).sort().slice(-7).reverse();
   if (days.length){
     h += '<span class="sheet-lb">最近 ' + days.length + ' 天（每天取最好的一次）</span>'
-       + '<table class="dr-hist"><tr><th>日期</th><th>T 槽</th><th>堆叠</th><th>40 行</th><th>PPS</th><th>多余</th></tr>';
+       + '<table class="dr-hist"><tr><th>日期</th><th>T 槽</th><th>堆叠</th><th>挖灰线</th><th>40 行</th><th>PPS</th><th>多余</th></tr>';
     for (const k of days){
       const d = all.days[k] || {};
-      const w = d.warm, st = d.stack, sp = d.sprint;
+      const w = d.warm, st = d.stack, sp = d.sprint, dg = d.dig;
       h += '<tr><td>' + k.slice(5).replace('-', '/') + '</td>'
          + '<td>' + (w ? (w.first | 0) + '/' + (w.n | 0) : '—') + '</td>'
          + '<td>' + (st ? Math.round(100 * st.same / Math.max(1, st.total)) + '%' : '—') + '</td>'
+         + '<td>' + (dg && dg.done ? fmtMs(dg.ms) : '—') + '</td>'
          + '<td>' + (sp && sp.done ? fmtMs(sp.ms) : '—') + '</td>'
          + '<td>' + (sp && sp.done ? (sp.pieces / (sp.ms / 1000)).toFixed(2) : '—') + '</td>'
          + '<td>' + (sp && sp.done ? (sp.faults | 0) : '—') + '</td></tr>';
@@ -2733,6 +2774,9 @@ function syncDrill(){
     // 堆叠段推荐是藏着的：细栏只说这块该找哪几种台阶
     a = hintMove ? pieceHintText(hintMove.type) : DRILL_NAME.stack;
     b = Math.min(game.pieces, DRILL_STACK_N) + '/' + DRILL_STACK_N;     // 窄屏上「对 N · 」会把台阶提示挤成省略号
+  } else if (drill.stage === 'dig'){
+    a = '挖灰线　还剩 ' + drillDigLeft() + ' 行';
+    b = fmtMs(drill.ms);
   } else if (drill.stage === 'sprint'){
     a = '冲刺 ' + Math.min(game.lines, DRILL_SPRINT_LINES) + '/' + DRILL_SPRINT_LINES + ' 行';
     b = fmtMs(drill.ms);
@@ -9334,7 +9378,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   CLEAR_DRAW_MS, DROP_GUARD_MS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
-  get drill(){ return drill; },
+  get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
   tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
