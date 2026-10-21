@@ -1459,7 +1459,7 @@ function syncResume(){
   const save = readSave(), ov = $('overlay');
   if (!ov) return;
   ov.classList.toggle('has-save', !!save);
-  if (save && $('resumeScore')) $('resumeScore').textContent = (save.score || 0).toLocaleString();
+  if (save && $('resumeScore')) $('resumeScore').textContent = groupInt(save.score || 0);
 }
 
 // 顶栏的「普通 | 练习」。只在标准版有（疯狂版 bump.py 把节点删了，这里拿不到就跳过）。
@@ -2785,12 +2785,12 @@ function openNesSheet(run, isBest){
     if (run){
       const vs18 = run.start >= 18;
       res.hidden = false;
-      res.innerHTML = '<b class="nes-score">' + run.score.toLocaleString('en-US') + '</b>'
+      res.innerHTML = '<b class="nes-score">' + groupInt(run.score) + '</b>'
         + (isBest ? '<em class="nes-best">起始 ' + run.start + ' 级的新纪录</em>' : '')
         + '<div class="nes-stats">'
         + '<span>消行<b>' + run.lines + '</b></span><span>到达<b>' + run.level + ' 级</b></span>'
         + '<span>四消率<b>' + run.tr + '%</b></span><span>最长没 I<b>' + run.drought + ' 块</b></span>'
-        + (run.trans !== null ? '<span>过渡分<b>' + run.trans.toLocaleString('en-US') + '</b></span>' : '')
+        + (run.trans !== null ? '<span>过渡分<b>' + groupInt(run.trans) + '</b></span>' : '')
         + '</div>'
         + '<p class="nes-tier">' + (vs18 ? '水平参照：<b>' + escHtml(nesTier(run.score)) + '</b>（社区常说的分数段，起始 18 级）'
                                           : '要和比赛成绩比，用起始 18 级打') + '</p>';
@@ -3348,7 +3348,7 @@ function syncRank(){
 function fmtNeed(v){
   if (v >= 100000000) return (v / 100000000) + '亿';
   if (v >= 10000) return (v / 10000) + '万';
-  return v.toLocaleString();
+  return groupInt(v);
 }
 
 function fillLadder(el, table, val){
@@ -3727,7 +3727,7 @@ function scoreFor(n, spin, perfect){
     if (game.combo >= 1){ label += ` ×${game.combo}`; if (game.combo >= 5) cls += ' cmb'; }
     if (hot) cls += ' hot';
 
-    popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), label, cls,
+    popScore(CELL * COLS / 2, py, '+' + groupInt(gain), label, cls,
              st.scale * (hot ? 1.25 : 1));
 
     // 附加特效按稀有度给：四行横扫一道金光，T-spin 消行从中心爆开一圈紫环。
@@ -3921,15 +3921,15 @@ function endGame(why){
                                      : '差一点　目标 ' + fmtScore(goalNow);
     gl.classList.toggle('hit', goalHit);
   }
-  $('overScore').textContent = game.score.toLocaleString();
+  $('overScore').textContent = groupInt(game.score);
   $('overLines').textContent = game.lines;
   $('overLevel').textContent = game.level;
-  $('overBest').textContent = game.best.toLocaleString();
+  $('overBest').textContent = groupInt(game.best);
   // 清过档的话把旧规则下的纪录也摆出来 —— 个人小游戏里最高分就是全部的意义，
   // 光写进 localStorage 没人看得见等于没留
   const lg = readLegacy();
   $('legacyCell').hidden = !lg;
-  if (lg) $('overLegacy').textContent = lg.toLocaleString();
+  if (lg) $('overLegacy').textContent = groupInt(lg);
   fillRunLog();
   syncRank();
   $('overDied').textContent = DEATH_TEXT[game.why] || '';
@@ -5061,6 +5061,13 @@ function trimZeros(t){
   if (t.indexOf('.') < 0) return t;
   return t.replace(/0+$/, '').replace(/\.$/, '');
 }
+// 整数千分位（任意大小）。全游戏只用这个，**一次都不调 toLocaleString**：浏览器的 Intl 是懒加载的，
+// 第一次调用要初始化，4× 降频下实测卡 30~40ms —— 原来它躲在「每局第一次消行的得分飘字」里，
+// 正好卡在最该爽的那一下。中文 / 英文环境下 toLocaleString 给的也都是逗号，输出一致。
+function groupInt(v){
+  const n = Math.round(v), t = String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return n < 0 ? '-' + t : t;
+}
 // 千分位手写，不用 toLocaleString：它每次都要走一遍 Intl，滚分动画每帧都调，
 // 实测是普通局里最耗时的一个函数。这里只会出现 0~9999 的整数（再大就换万/亿），
 // 逗号写死也和原来一致 —— 中文/英文环境下 toLocaleString 给的都是逗号。
@@ -6129,7 +6136,7 @@ function zoneEnd(why){
     if (game.run) game.run.zoneRows = Math.max(game.run.zoneRows || 0, k);
     sweepRows([TOTAL_ROWS - 1], '#b49bff');
     popScore(CELL * COLS / 2, (TOTAL_ROWS - BUFFER - 1) * CELL,
-             '+' + gain.toLocaleString(), k + ' 行', 'zone');
+             '+' + groupInt(gain), k + ' 行', 'zone');
     shake(k >= 6); sfx('tetris', 1.2); buzz([40, 25, 40, 25, 90]);
     syncHud();
   } else if (why){
@@ -6897,7 +6904,7 @@ function clearFullNow(){
   // 刻意不推 combo / b2b / run.tetris：那三个是奖励「连续的、亲手打出来的消除」，
   // 让道具清出来的行去推它们，等于白送下一次真消除的加成。
   if (game.run && gain > game.run.bestHit) game.run.bestHit = gain;
-  popScore(CELL * COLS / 2, py, '+' + gain.toLocaleString(), n >= 2 ? n + ' 行' : '', 'tool');
+  popScore(CELL * COLS / 2, py, '+' + groupInt(gain), n >= 2 ? n + ' 行' : '', 'tool');
   game.lines += n;
   if (CRAZY){ heat += heatGain(n, null, false); betResolve(n); }
   const lv = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
