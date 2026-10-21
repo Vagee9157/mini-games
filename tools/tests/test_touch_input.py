@@ -54,8 +54,10 @@ JS = r"""async () => {
   ok(T.game.hold === held0, `按着暂存落底，下一块没被自动暂存（hold ${held0} → ${T.game.hold}）`);
   ev('holdSlot', 'mouseup');
 
-  // 键盘 IRS 保留：按住 ↑ 再空格，下一块转好出生
+  // 键盘 IRS 保留：按住 ↑ 再空格，下一块转好出生。
+  // 下一块要固定成能转的：随机到 O 的话它转不了，朝向永远是 0（原来每 7 次红一次）
   await fresh('T');
+  T.game.queue[0] = 'T';
   key('ArrowUp', 'keydown'); key('Space', 'keydown'); key('Space', 'keyup');
   ok(T.game.piece && T.game.piece.rot === 1, `键盘按住 ↑ 落底仍有 IRS（朝向 ${T.game.piece && T.game.piece.rot}）`);
   key('ArrowUp', 'keyup');

@@ -237,6 +237,9 @@
         <button class="row-btn" id="musicBtn">音乐：开</button>
         <button class="row-btn" id="buzzBtn">震动：开</button>
       </div>
+      <!-- 手感：左右按住多久开始连发、连发多快。默认「快」 -->
+      <span class="sheet-lb">手感 · 左右按住移动的快慢</span>
+      <div class="seg seg-3" id="handOpts"></div>
       <span class="sheet-lb">背景音乐</span>
       <div class="seg seg-3" id="trackOpts"></div>
       <span class="sheet-lb">音效风格</span>
@@ -253,7 +256,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=23f0a8d6"></script>
+<script src="../tetris/tetris.js?v=77a5cb0b"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

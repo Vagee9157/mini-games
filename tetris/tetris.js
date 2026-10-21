@@ -160,8 +160,25 @@ const LOCK_DELAY = 500;      // 落地后多久锁死（毫秒）
 // 贴墙按住也续不了命（tryMove 撞到就 return false，根本走不到 touchGround）。
 // 计数本身留着，lockPiece 还靠它说那句「你在那磨蹭什么」。
 const LOCK_RESET_LIMIT = Infinity;
-const DAS = 150;             // 按住方向键多久开始连发
-const ARR = 40;              // 连发间隔
+// 横移手感三档（样式面板里选，按设备记住，两个版本共用）。
+//   DAS = 按住方向键多久开始连发，ARR = 连发之后每格间隔
+// 原来写死 150/40（稳那档）：按住要 0.15 秒才开始连发、之后一秒 25 格，手机上嫌慢。
+// 默认改成「快」。不直接给最快 —— 太快容易滑过头，放错位置比慢一点更伤。
+const HANDLING = {
+  steady: { name: '稳',   das: 150, arr: 40 },
+  fast:   { name: '快',   das: 110, arr: 25 },
+  faster: { name: '很快', das: 80,  arr: 15 },
+};
+const HANDLING_KEY = 'tetris.handling.v1';
+let handling = 'fast';
+try { const h = localStorage.getItem(HANDLING_KEY); if (HANDLING[h]) handling = h; } catch { /* 读不到就用默认 */ }
+let DAS = HANDLING[handling].das;
+let ARR = HANDLING[handling].arr;
+function setHandling(k){
+  if (!HANDLING[k]) return;
+  handling = k; DAS = HANDLING[k].das; ARR = HANDLING[k].arr;
+  try { localStorage.setItem(HANDLING_KEY, k); } catch { /* 存不了就算了 */ }
+}
 const SOFT_DROP_FACTOR = 20; // 软降速度倍率
 const TRAIL_MS = 130;        // 硬降残影存活时间
 const TRAIL_MIN_DROP = 4;    // 落差不到这么多格就不留残影
@@ -792,6 +809,10 @@ let grounded = false;
 let softDropping = false;
 let lastFrame = 0;
 let lastDrawAt = 0;
+// 这一帧的变化是你按键造成的：下一帧就画，不等 30fps 的节流。
+// 节流是为了「方块自己往下掉」时省电（一秒只有一帧真的变了）；但按键也被它卡着，
+// 实测横移按下到上屏平均 18ms、最慢 29ms，按住连发的每一格也在 33/50ms 之间跳。
+let drawNow = false;
 let rafId = 0;
 
 // 消行动画：记下正在闪的行，动画走完才真正塌陷
@@ -888,7 +909,7 @@ function tryMove(dx, dy){
   if (collides(p.type, p.x + dx, p.y + dy, p.rot)) return false;
   p.x += dx; p.y += dy;
   game.lastWasRot = false;
-  needsDraw = true;
+  needsDraw = true; drawNow = true;
   if (dy === 0) touchGround(true);   // 横move 可以续 lock delay
   return true;
 }
@@ -906,7 +927,7 @@ function tryRotate(dir){
     if (!collides(p.type, p.x + kx, p.y + ky, to)){
       p.x += kx; p.y += ky; p.rot = to;
       game.lastWasRot = true;
-      needsDraw = true;
+      needsDraw = true; drawNow = true;
       game.lastRotKick = i;
       touchGround(true);
       sfx('rotate');
@@ -936,6 +957,7 @@ function hardDrop(){
     while (trails.length > TRAIL_MAX) trails.shift();
   }
   p.y += d;
+  drawNow = true;
   // 落了格就不再算「最后一步是旋转」。原来不清：半空转一下、硬降 19 格落进一个
   // 三角都被挡的坑，实测被判成 mini T-spin。Guideline 要求的是最后一个**成功的动作**
   // 是旋转，19 格下落就是一次位移。
@@ -966,7 +988,7 @@ function holdPiece(){
   }
   game.holdUsed = true;   // spawn 会把它清掉，所以放在后面
   previewDirty = true;
-  needsDraw = true;
+  needsDraw = true; drawNow = true;
   sfx('hold');
 }
 
@@ -2510,7 +2532,7 @@ function nesShift(d){
   const c = nes.cur;
   if (!c || nes.phase !== 'fall') return false;
   if (!nesFits(c.t, c.r, c.x + d, c.y)) return false;
-  c.x += d; needsDraw = true;
+  c.x += d; needsDraw = true; drawNow = true;
   return true;
 }
 function nesRotate(dir){
@@ -2520,7 +2542,7 @@ function nesRotate(dir){
   if (n === 1) return;
   const r = (c.r + dir + n) % n;
   if (!nesFits(c.t, r, c.x, c.y)) return;          // 没有踢墙
-  c.r = r; needsDraw = true;
+  c.r = r; needsDraw = true; drawNow = true;
   sfx('rotate');
 }
 // 按下：立刻挪一格，DAS 从 0 数。挪不动（贴墙）就直接算蓄满，松手前一直贴着
@@ -7902,10 +7924,11 @@ function tick(now){
   // 方块匀速往下掉的时候，一秒里其实只有一帧画面变了。
   // 没变就别画——这是手机发烫的主因。
   // 逻辑跑满 60，画面限到 30——这个游戏看不出差别，功耗直接减半
-  if ((needsDraw || particles.length || trails.length || clearing) && now - lastDrawAt >= 32){
+  if ((needsDraw || particles.length || trails.length || clearing) && (drawNow || now - lastDrawAt >= 32)){
     draw();
     lastDrawAt = now;
     needsDraw = false;
+    drawNow = false;
   }
 }
 
@@ -8402,7 +8425,20 @@ function syncMuteBtn(){
 }
 
 // 设置面板里的两排三选一
+function buildHandlingPanel(){
+  const hw = $('handOpts');
+  if (!hw) return;
+  hw.innerHTML = '';
+  for (const k of Object.keys(HANDLING)){
+    const b = document.createElement('button');
+    b.className = 'seg-btn' + (k === handling ? ' on' : '');
+    b.textContent = HANDLING[k].name;
+    b.addEventListener('click', () => { setHandling(k); buildHandlingPanel(); });
+    hw.appendChild(b);
+  }
+}
 function buildAudioPanel(){
+  buildHandlingPanel();
   const tw = $('trackOpts'), pw = $('packOpts');
   if (!tw || !pw) return;
   tw.innerHTML = '';
@@ -8775,6 +8811,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },
   NES_PIECES, NES_GRAVITY, NES_LINE_SCORE, NES_FRAME, NES_DAS, NES_ARR, NES_KEY, nesGravity, nesFirstLevelUp, nesTier,
   startNes, nesEnd, nesFrame, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },
   VS_LEVELS, VS_KEY, vsAttack, vsSimMatch, startVs, vsEnd, vsStep, vsOnLock, vsRecords, openVsSheet, vsBotMove,
