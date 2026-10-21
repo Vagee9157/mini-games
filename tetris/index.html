@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=a21090aa">
+<link rel="stylesheet" href="tetris.css?v=ae6825f1">
 </head>
 <body>
 <div class="topline"></div>
@@ -97,6 +97,13 @@
             <button class="pbtn ghost" id="practiceBtn" data-std-only>练习　学 T-spin</button>
             <!-- 每日练习：热身 + 堆叠 + 40 行冲刺，约 10 分钟，按天存成绩看进步 -->
             <button class="pbtn ghost" id="dailyBtn" data-std-only>每日练习</button>
+            <!-- 另外两种玩法：对战机器人（现代规则 + 互发垃圾行）、经典 NES（另一套规则，单独的引擎） -->
+            <!-- std-only:start -->
+            <div class="mode-row">
+              <button class="pbtn ghost" id="vsBtn" type="button">对战机器人</button>
+              <button class="pbtn ghost" id="nesBtn" type="button">经典 NES</button>
+            </div>
+            <!-- std-only:end -->
           </div>
 
           <div data-when="pause">
@@ -199,6 +206,15 @@
       </div>
 
       <!-- std-only:start -->
+      <!-- 对战时右栏的四个数字格换成机器人的小窗：只画它的盘面（变了才重画）+ 双方打出了几行 -->
+      <div class="vsbox" id="vsBox">
+        <span class="slot-label" id="vsName">机器人</span>
+        <canvas id="vsCv"></canvas>
+        <span class="vs-info" id="vsInfo"></span>
+      </div>
+      <!-- std-only:end -->
+
+      <!-- std-only:start -->
       <!-- 软降：按住加速下落，落地**不锁死**（落底才锁），T 旋全靠这个区别。
            放在右栏最底下，正好在「变换」正上方 —— 原来夹在按键排里（左移 右移 软降 落底
            变换），五个键挤一排，用户老按错，四个键也都被挤窄了。
@@ -281,6 +297,30 @@
       <button class="pbtn sheet-done" id="hintDone">接着放</button>
     </div>
   </div>
+  <!-- 经典 NES：选起始等级（每级显示你的最好成绩）+ 结算 -->
+  <div class="sheet" id="nesSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>经典 NES</h3></div>
+      <div class="nes-result" id="nesResult" hidden></div>
+      <p class="pr-tip">1989 红白机版的规则：没有暂存、没有硬降、没有落点影子，只看 1 个 NEXT，转不过去就是转不过去（没有踢墙），落地即锁。「落底」键在这里是逆时针旋转。比赛从 18 级起；第一次玩建议从 9 级或 12 级开始。</p>
+      <span class="sheet-lb">起始等级 · 下面是你在这一级的最好成绩</span>
+      <div class="nes-levels" id="nesLevels"></div>
+      <div class="pr-row"><button class="pr-b" id="nesExit" type="button">回普通</button></div>
+      <button class="pbtn sheet-done" id="nesGo">开始</button>
+    </div>
+  </div>
+  <!-- 对战机器人：选级别（每级显示速度和你的胜负）+ 结算 -->
+  <div class="sheet" id="vsSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>对战机器人</h3></div>
+      <div class="nes-result" id="vsResult" hidden></div>
+      <p class="pr-tip">你消行会给它涨灰线，它消行也给你涨。四消打 4 行、T 旋双消打 4 行、连击和 B2B 都加。打过去先抵消自己身上待涨的（盘面左边那条红）。先被顶死的输。</p>
+      <span class="sheet-lb">机器人级别 · 越高放得越快、越少失误</span>
+      <div class="vs-levels" id="vsLevels"></div>
+      <div class="pr-row"><button class="pr-b" id="vsExit" type="button">回普通</button></div>
+      <button class="pbtn sheet-done" id="vsGo">开打</button>
+    </div>
+  </div>
   <!-- 每日练习面板：三段的状态和成绩 + 最近 7 天。开着时方块停住 -->
   <div class="sheet" id="drSheet" hidden>
     <div class="sheet-box">
@@ -339,7 +379,7 @@
 
 </div>
 
-<script src="tetris.js?v=9845c978"></script>
+<script src="tetris.js?v=23f0a8d6"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

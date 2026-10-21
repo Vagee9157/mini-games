@@ -894,6 +894,7 @@ function tryMove(dx, dy){
 }
 
 function tryRotate(dir){
+  if (nes){ nesRotate(dir); return false; }
   const p = game.piece;
   if (!p || p.type === 'O') return false;
   const from = p.rot & 3;
@@ -916,6 +917,7 @@ function tryRotate(dir){
 }
 
 function hardDrop(){
+  if (nes) return;                 // NES 没有硬降
   const p = game.piece;
   if (!p) return;
   let d = 0;
@@ -948,6 +950,7 @@ function hardDrop(){
 }
 
 function holdPiece(){
+  if (nes) return;                 // NES 没有暂存
   if (!game.piece || game.holdUsed) return;
   if (hintMode){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
   if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
@@ -1388,7 +1391,7 @@ function startPractice(){
   // 普通局打到一半切过来：先存一份。练习期间 clearSave/saveGame 都是空操作，
   // 这份存档会原样留到切回普通模式，开局面板上「接着上次玩」就能接上。
   if (!assisted() && game.started && !game.over) saveGame(true);
-  drillEnd();
+  drillEnd(); nesEnd(); vsEnd();
   hintMode = false; hintMove = null;
   syncHint();                // 摘掉 body.hinting —— 不摘的话绿色提示细栏会一直挂在练习界面上
   practice = true;
@@ -1405,7 +1408,7 @@ function startPractice(){
 function exitPractice(){
   closePrSheet();
   closeHintSheet();
-  drillEnd();
+  drillEnd(); nesEnd(); vsEnd();
   practice = false;
   hintMode = false; hintMove = null; hintBase = null;
   // restart 不碰 noGarbage（那是 game 对象上的字段，newGame 才铺），
@@ -1484,7 +1487,8 @@ const HW = {
   tetris: 120, burn: -6, burnDanger: 30,
 };
 
-function assisted(){ return practice || hintMode || !!drill; }
+// 这几个模式都不写普通局的记录（最高分、存档、今日）。NES 和对战各有自己的记录
+function assisted(){ return practice || hintMode || !!drill || !!nes || !!vs; }
 
 function simBoard(){ return game.board.map(r => r.map(c => !!c)); }
 function simFits(b, type, x, y, rot){
@@ -1884,7 +1888,7 @@ function closeHintSheet(){
 function startHint(){
   if (!assisted() && game.started && !game.over) saveGame(true);
   closePrSheet();
-  drillEnd();
+  drillEnd(); nesEnd(); vsEnd();
   practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
   demoRunning = false; undoStack.length = 0;
   hintMode = true;
@@ -2090,6 +2094,7 @@ function startDrill(){
   if (CRAZY) return;
   if (!assisted() && game.started && !game.over) saveGame(true);
   closePrSheet();
+  nesEnd(); vsEnd();
   practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
   demoRunning = false; undoStack.length = 0;
   hintMode = false; hintMove = null; hintBase = null;
@@ -2396,6 +2401,729 @@ function drillStep(dt){
   if (tenth !== drill.statAt){ drill.statAt = tenth; const st = $('drStat'); if (st && drill.stage !== 'stack') st.textContent = fmtMs(drill.ms); }
 }
 
+// ───────────────────────── 经典 NES 模式 ─────────────────────────
+//
+// 1989 年任天堂红白机版，经典俄罗斯方块世界锦标赛（CTWC）用的就是它。和上面那套
+// 现代规则是两回事，所以单独一套盘面、单独一套逐帧计时，只借画布和按键：
+//   · 没有暂存、没有硬降、没有落点影子，只看 1 个 NEXT
+//   · 旋转用 NES 原版的朝向表（NRS）：绕中心转，**没有踢墙**，转不过去就是转不过去
+//   · 落地没有锁定延迟：重力那一下落不下去就锁死
+//   · 速度按帧算（NTSC 60.0988 帧/秒），横移是 DAS 16 帧起步、之后每 6 帧一格
+//   · 出块：先掷 0~7，掷到 7 或者和上一块相同就重掷一次 0~6（重掷结果照收）
+//   · 计分：单/双/三/四 = 40/100/300/1200 ×（等级 + 1），软降每格 1 分
+//   · 起始等级 0~19；第一次升级在 min(起始×10+10, max(100, 起始×10−50)) 行，之后每 10 行
+// 按键：左右照旧，「变换」= A（顺时针），「落底」键在这个模式里是 B（逆时针），软降 = 下。
+const NES_FPS = 60.0988;
+const NES_FRAME = 1000 / NES_FPS;
+const NES_ROWS = 20;
+// 每下落一格要几帧（NTSC），29 级起 1 帧一格（「杀屏」）
+const NES_GRAVITY = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3,
+                     2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
+function nesGravity(l){ return l < NES_GRAVITY.length ? NES_GRAVITY[l] : 1; }
+const NES_DAS = 16, NES_ARR = 6;
+const NES_SOFT = 2;                 // 软降：每 2 帧一格
+const NES_CLEAR_FRAMES = 18;        // 消行动画（原版 17~20 帧，跟帧计数的相位有关，取中间）
+const NES_LINE_SCORE = [0, 40, 100, 300, 1200];
+const NES_SPAWN_X = 5, NES_SPAWN_Y = 0;
+// 朝向表：[dy, dx]，相对中心格。每种块按顺时针顺序排，spawn 是出生时用哪一个。
+// 抄的是 NES ROM 里的 orientationTable；T/J/L 四个朝向彼此是纯 90° 旋转（test_nes 验这一点），
+// S/Z/I 只有两个朝向，来回切。
+const NES_PIECES = {
+  T: { spawn: 2, s: [[[-1, 0], [0, -1], [0, 0], [0, 1]],  [[-1, 0], [0, 0], [0, 1], [1, 0]],
+                     [[0, -1], [0, 0], [0, 1], [1, 0]],   [[-1, 0], [0, -1], [0, 0], [1, 0]]] },
+  J: { spawn: 3, s: [[[-1, 0], [0, 0], [1, -1], [1, 0]],  [[-1, -1], [0, -1], [0, 0], [0, 1]],
+                     [[-1, 0], [-1, 1], [0, 0], [1, 0]],  [[0, -1], [0, 0], [0, 1], [1, 1]]] },
+  Z: { spawn: 0, s: [[[0, -1], [0, 0], [1, 0], [1, 1]],   [[-1, 1], [0, 0], [0, 1], [1, 0]]] },
+  O: { spawn: 0, s: [[[0, -1], [0, 0], [1, -1], [1, 0]]] },
+  S: { spawn: 0, s: [[[0, 0], [0, 1], [1, -1], [1, 0]],   [[-1, 0], [0, 0], [0, 1], [1, 1]]] },
+  L: { spawn: 1, s: [[[-1, 0], [0, 0], [1, 0], [1, 1]],   [[0, -1], [0, 0], [0, 1], [1, -1]],
+                     [[-1, -1], [-1, 0], [0, 0], [1, 0]], [[-1, 1], [0, -1], [0, 0], [0, 1]]] },
+  I: { spawn: 1, s: [[[-2, 0], [-1, 0], [0, 0], [1, 0]],  [[0, -2], [0, -1], [0, 0], [0, 1]]] },
+};
+const NES_ORDER = ['T', 'J', 'Z', 'O', 'S', 'L', 'I'];   // ROM 里的出块编号顺序
+// 大致的水平参照（起始 18 级，也就是比赛的起点）。社区里常说的分数段，不是官方标准
+const NES_TIERS = [
+  [999999, '满分（maxout）'], [800000, '顶尖'], [500000, '很强'],
+  [300000, '强'], [100000, '熟练'], [0, '入门'],
+];
+const NES_KEY = nsKey('nes.v1');
+
+let nes = null;
+
+function nesCells(t, r, x, y){ return NES_PIECES[t].s[r].map(([dy, dx]) => [x + dx, y + dy]); }
+function nesFits(t, r, x, y){
+  for (const [cx, cy] of nesCells(t, r, x, y)){
+    if (cx < 0 || cx >= COLS || cy >= NES_ROWS) return false;
+    if (cy >= 0 && nes.board[cy][cx]) return false;    // 顶上越界的格不算撞（竖 I 能转出屏幕上沿）
+  }
+  return true;
+}
+// 第一次升级在哪一行
+function nesFirstLevelUp(s){ return Math.min(s * 10 + 10, Math.max(100, s * 10 - 50)); }
+// 锁定高度决定下一块等多久（ARE）：最底两行 10 帧，往上每 4 行 +2，最多 18
+function nesAre(lockY){
+  const fromBottom = NES_ROWS - 1 - Math.max(0, Math.min(NES_ROWS - 1, lockY));
+  return fromBottom < 2 ? 10 : 10 + 2 * Math.min(4, Math.floor((fromBottom - 2) / 4) + 1);
+}
+// 出块：掷 0~7，7 或者和上一块相同就重掷 0~6，重掷结果照收（所以还是会连出，约 1/28）
+function nesRoll(){
+  const prev = nes.prevId;
+  let id = (nes.rnd() * 8) | 0;
+  if (id === 7 || id === prev) id = (nes.rnd() * 7) | 0;
+  nes.prevId = id;
+  return NES_ORDER[id];
+}
+function nesRng(seed){
+  let s = (seed >>> 0) || 1;
+  return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+}
+
+function nesNew(start, seed){
+  const o = {
+    start, level: start, lines: 0, score: 0, nextUp: nesFirstLevelUp(start),
+    board: Array.from({ length: NES_ROWS }, () => new Array(COLS).fill(null)),
+    cur: null, next: null, prevId: 7,
+    phase: 'are', timer: 0, fall: 0, acc: 0,
+    hl: false, hr: false, dasDir: 0, dasN: 0, downN: 0, soft: 0,
+    clearRows: [], pieces: 0, tetrisLines: 0, burns: 0,
+    drought: 0, droughtMax: 0, trans: null, over: false, frames: 0,
+    rnd: nesRng(seed != null ? seed : (Date.now() ^ (Math.random() * 1e9))),
+    dirty: true, hud: '',
+  };
+  return o;
+}
+
+function nesSpawn(){
+  const t = nes.next || nesRoll();
+  nes.next = nesRoll();
+  const r = NES_PIECES[t].spawn;
+  nes.cur = { t, r, x: NES_SPAWN_X, y: NES_SPAWN_Y };
+  nes.fall = 0; nes.downN = 0; nes.soft = 0;
+  nes.phase = 'fall';
+  if (t === 'I') nes.drought = 0;
+  else if (++nes.drought > nes.droughtMax) nes.droughtMax = nes.drought;
+  previewDirty = true; needsDraw = true;
+  if (!nesFits(t, r, nes.cur.x, nes.cur.y)) nesOver();
+}
+
+function nesShift(d){
+  const c = nes.cur;
+  if (!c || nes.phase !== 'fall') return false;
+  if (!nesFits(c.t, c.r, c.x + d, c.y)) return false;
+  c.x += d; needsDraw = true;
+  return true;
+}
+function nesRotate(dir){
+  const c = nes && nes.cur;
+  if (!c || nes.phase !== 'fall' || game.paused) return;
+  const n = NES_PIECES[c.t].s.length;
+  if (n === 1) return;
+  const r = (c.r + dir + n) % n;
+  if (!nesFits(c.t, r, c.x, c.y)) return;          // 没有踢墙
+  c.r = r; needsDraw = true;
+  sfx('rotate');
+}
+// 按下：立刻挪一格，DAS 从 0 数。挪不动（贴墙）就直接算蓄满，松手前一直贴着
+function nesPress(dir){
+  if (!nes || game.paused) return;
+  if (dir === 'left') nes.hl = true; else nes.hr = true;
+  const d = dir === 'left' ? -1 : 1;
+  nes.dasDir = d;
+  nes.dasN = nesShift(d) ? 0 : NES_DAS;
+}
+function nesRelease(dir){
+  if (!nes) return;
+  if (dir === 'left') nes.hl = false; else nes.hr = false;
+  const d = nes.hl ? -1 : nes.hr ? 1 : 0;
+  if (d !== nes.dasDir){ nes.dasDir = d; nes.dasN = 0; }
+}
+
+function nesLock(){
+  const c = nes.cur;
+  for (const [x, y] of nesCells(c.t, c.r, c.x, c.y)) if (y >= 0) nes.board[y][x] = c.t;
+  nes.pieces++;
+  nes.score += nes.soft;            // 软降分在锁定时结算
+  nes.soft = 0;
+  const lockY = c.y;
+  nes.cur = null;
+  nes.dirty = true; needsDraw = true;
+  const rows = [];
+  for (let y = 0; y < NES_ROWS; y++) if (nes.board[y].every(Boolean)) rows.push(y);
+  sfx(rows.length === 4 ? 'tetris' : rows.length ? 'clear' : 'lock');
+  if (rows.length){
+    const n = rows.length;
+    nes.score += NES_LINE_SCORE[n] * (nes.level + 1);    // 按消行前的等级算
+    nes.lines += n;
+    if (n === 4) nes.tetrisLines += 4; else nes.burns += n;
+    while (nes.lines >= nes.nextUp){
+      nes.level++; nes.nextUp += 10;
+      if (nes.trans === null) nes.trans = nes.score;     // 第一次升级那一刻的分 = 「过渡分」
+      sfx('level');
+    }
+    if (n === 4) buzz([30, 40, 70]); else buzz(18 + n * 8);
+    nes.clearRows = rows;
+    nes.phase = 'clear'; nes.timer = NES_CLEAR_FRAMES;
+    nes.areNext = nesAre(lockY);
+  } else {
+    nes.phase = 'are'; nes.timer = nesAre(lockY);
+  }
+  nesHud();
+}
+
+function nesFrame(){
+  nes.frames++;
+  if (nes.phase === 'clear'){
+    if (--nes.timer > 0){ needsDraw = true; return; }
+    const keep = nes.board.filter((_, y) => !nes.clearRows.includes(y));
+    while (keep.length < NES_ROWS) keep.unshift(new Array(COLS).fill(null));
+    nes.board = keep; nes.clearRows = [];
+    nes.dirty = true; needsDraw = true;
+    nes.phase = 'are'; nes.timer = nes.areNext;
+    return;
+  }
+  if (nes.phase === 'are'){
+    if (--nes.timer <= 0) nesSpawn();
+    return;
+  }
+  if (nes.phase !== 'fall' || !nes.cur) return;
+  // 横移：按住时每帧 +1，到 16 挪一格并退回 10（于是之后每 6 帧一格）；挪不动就停在 16
+  if (nes.dasDir){
+    if (++nes.dasN >= NES_DAS) nes.dasN = nesShift(nes.dasDir) ? NES_DAS - NES_ARR : NES_DAS;
+  }
+  const c = nes.cur;
+  // 软降（左右没按的时候才生效，和原版一样）：每 2 帧一格，软降那一下也会把重力计数清零
+  if (softDropping && !nes.dasDir){
+    if (++nes.downN >= NES_SOFT){
+      nes.downN = 0; nes.fall = 0;
+      if (nesFits(c.t, c.r, c.x, c.y + 1)){ c.y++; nes.soft++; needsDraw = true; }
+      else { nesLock(); return; }
+    }
+  } else { nes.downN = 0; nes.soft = 0; }
+  if (++nes.fall >= nesGravity(nes.level)){
+    nes.fall = 0;
+    if (nesFits(c.t, c.r, c.x, c.y + 1)){ c.y++; needsDraw = true; }
+    else nesLock();                 // 没有锁定延迟
+  }
+}
+
+// 主循环接这里。逻辑严格按帧走，dt 先攒着，攒够一帧跑一帧
+function nesStep(dt){
+  if (!nes || nes.over) return 'stop';
+  nes.acc += dt;
+  let n = 0;
+  while (nes.acc >= NES_FRAME){
+    nes.acc -= NES_FRAME;
+    nesFrame();
+    if (nes.over) return 'stop';
+    if (++n >= 15){ nes.acc = 0; break; }        // 卡了很久回来，别一口气补几百帧
+  }
+  return 'normal';
+}
+
+function nesHud(){
+  if (!nes) return;
+  setStat($('score'), fmtScore(nes.score));
+  setStat($('lines'), String(nes.lines));
+  setStat($('level'), String(nes.level));
+  const b = nesRecords().best[nes.start];
+  setStat($('best'), fmtScore(b ? b.score : 0));
+}
+
+// ── 画 ──
+function nesDrawStatic(){
+  const W = CELL * COLS, H = CELL * ROWS;
+  bgCtx.clearRect(0, 0, W, H);
+  bgCtx.save();
+  bgCtx.strokeStyle = 'rgba(120,160,255,.06)';
+  bgCtx.lineWidth = 1;
+  bgCtx.beginPath();
+  for (let x = 1; x < COLS; x++){ bgCtx.moveTo(x * CELL + .5, 0); bgCtx.lineTo(x * CELL + .5, H); }
+  for (let y = 1; y < ROWS; y++){ bgCtx.moveTo(0, y * CELL + .5); bgCtx.lineTo(W, y * CELL + .5); }
+  bgCtx.stroke();
+  bgCtx.restore();
+  for (let y = 0; y < NES_ROWS; y++)
+    for (let x = 0; x < COLS; x++){
+      const t = nes.board[y][x];
+      if (t) drawCell(bgCtx, x * CELL, y * CELL, CELL, colorOf(t));
+    }
+  nes.dirty = false;
+}
+function nesDraw(){
+  const W = CELL * COLS, H = CELL * ROWS;
+  if (!W || !H) return;
+  ctx.clearRect(0, 0, W, H);
+  if (nes.dirty || staticDirty){ nesDrawStatic(); staticDirty = false; }
+  ctx.drawImage(bgCv, 0, 0, W, H);
+  if (nes.phase === 'clear'){
+    // 原版是从中间往两边一格一格擦掉；这里按剩余帧数从中间往外盖黑
+    const k = 1 - nes.timer / NES_CLEAR_FRAMES, half = Math.ceil(k * COLS / 2);
+    ctx.fillStyle = 'rgba(6, 10, 20, .92)';
+    for (const y of nes.clearRows) ctx.fillRect((COLS / 2 - half) * CELL, y * CELL, half * 2 * CELL, CELL);
+  }
+  const c = nes.cur;
+  if (c && nes.phase === 'fall')
+    for (const [x, y] of nesCells(c.t, c.r, c.x, c.y))
+      if (y >= 0) drawCell(ctx, x * CELL, y * CELL, CELL, colorOf(c.t));
+}
+function nesDrawPreview(){
+  const nw = nextCv._w || nextCv.clientWidth, nh = nextCv._h || nextCv.clientHeight;
+  nextCtx.clearRect(0, 0, nw, nh);
+  const hw = holdCv._w || holdCv.clientWidth, hh = holdCv._h || holdCv.clientHeight;
+  holdCtx.clearRect(0, 0, hw, hh);
+  if (!nes.next || !nw) return;
+  // NEXT 按 NES 的出生朝向画（和你下一块真正出来的样子一致）
+  const cells = NES_PIECES[nes.next].s[NES_PIECES[nes.next].spawn];
+  const xs = cells.map(v => v[1]), ys = cells.map(v => v[0]);
+  const bw = Math.max(...xs) - Math.min(...xs) + 1, bh = Math.max(...ys) - Math.min(...ys) + 1;
+  const cell = Math.min(nw / (bw + 1.1), nh / (bh + 1.0));
+  const px = (nw - bw * cell) / 2, py = (nh - bh * cell) / 2;
+  for (const [dy, dx] of cells)
+    drawCell(nextCtx, px + (dx - Math.min(...xs)) * cell, py + (dy - Math.min(...ys)) * cell, cell, colorOf(nes.next));
+  dbg.previews = 1;
+}
+
+// ── 记录 ── 按起始等级各存最好的一局 + 最近 20 局
+function nesRecords(){
+  try {
+    const d = JSON.parse(localStorage.getItem(NES_KEY) || 'null');
+    if (d && typeof d === 'object' && d.best && Array.isArray(d.runs)) return d;
+  } catch { /* 坏数据当没有 */ }
+  return { best: {}, runs: [] };
+}
+function nesTier(score){ return (NES_TIERS.find(([s]) => score >= s) || NES_TIERS[NES_TIERS.length - 1])[1]; }
+
+function nesOver(){
+  nes.over = true; nes.cur = null; nes.phase = 'over';
+  game.over = true;                    // 让主循环停下；不走 endGame，普通局的记录一个字都不碰
+  const run = { day: bjDay(), start: nes.start, score: nes.score, lines: nes.lines, level: nes.level,
+                tr: nes.lines ? Math.round(100 * nes.tetrisLines / nes.lines) : 0,
+                drought: nes.droughtMax, trans: nes.trans, pieces: nes.pieces };
+  const d = nesRecords();
+  const prev = d.best[nes.start];
+  const isBest = !prev || run.score > prev.score;
+  if (isBest) d.best[nes.start] = run;
+  d.runs.push(run);
+  d.runs = d.runs.slice(-20);
+  try { localStorage.setItem(NES_KEY, JSON.stringify(d)); } catch { /* 存不了就算了 */ }
+  sfx('over');
+  needsDraw = true;
+  setTimeout(() => { if (nes && nes.over) openNesSheet(run, isBest); }, 700);
+}
+
+// ── 进出 ──
+const NES_DROP_HTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9.7" y="9.5" width="11" height="11" rx="2.6"/><path d="M14.6 5.4H9.2A4.2 4.2 0 0 0 5 9.6v3.2"/><path d="M7.5 10.9 5 13.8l-2.5-2.9"/></svg><em>逆转</em>';
+let nesDropKeep = null;
+function nesButtons(on){
+  const b = $('btnDrop');
+  if (!b) return;
+  if (on && nesDropKeep === null){ nesDropKeep = b.innerHTML; b.innerHTML = NES_DROP_HTML; b.setAttribute('aria-label', '逆时针旋转'); }
+  if (!on && nesDropKeep !== null){ b.innerHTML = nesDropKeep; nesDropKeep = null; b.setAttribute('aria-label', '直接落底'); }
+}
+function startNes(level, seed){
+  if (CRAZY) return;
+  const lv = Math.max(0, Math.min(19, level | 0));
+  if (!assisted() && game.started && !game.over) saveGame(true);
+  closePrSheet(); closeHintSheet(); drillEnd(); vsEnd();
+  const sh = $('nesSheet'); if (sh) sh.hidden = true;
+  practice = false; practiceLevel = null; hintMode = false; hintMove = null; demoRunning = false;
+  nes = nesNew(lv, seed);
+  // 普通局的引擎停在「没有当前块」的状态，主循环整个让给 nesStep
+  game.started = true; game.over = false; game.paused = false; game.frozen = false;
+  game.piece = null; clearing = null; softDropping = false;
+  held.left = held.right = false;
+  $('overlay').classList.remove('show');
+  document.body.classList.add('nesing');
+  nesButtons(true);
+  syncPractice(); syncHint();
+  staticDirty = true; previewDirty = true; needsDraw = true;
+  nes.timer = 1;                    // 下一帧出第一块
+  nesHud();
+  lastFrame = performance.now();
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(tick);
+  sfx('hold');
+}
+function nesEnd(){
+  if (!nes) return;
+  nes = null;
+  document.body.classList.remove('nesing');
+  nesButtons(false);
+  const sh = $('nesSheet'); if (sh) sh.hidden = true;
+  staticDirty = true; previewDirty = true; needsDraw = true;
+}
+
+// ── 面板：选起始等级 / 结算 ──
+let nesPick = 18;
+function openNesSheet(run, isBest){
+  const sh = $('nesSheet');
+  if (!sh) return;
+  const d = nesRecords();
+  const res = $('nesResult');
+  if (res){
+    if (run){
+      const vs18 = run.start >= 18;
+      res.hidden = false;
+      res.innerHTML = '<b class="nes-score">' + run.score.toLocaleString('en-US') + '</b>'
+        + (isBest ? '<em class="nes-best">起始 ' + run.start + ' 级的新纪录</em>' : '')
+        + '<div class="nes-stats">'
+        + '<span>消行<b>' + run.lines + '</b></span><span>到达<b>' + run.level + ' 级</b></span>'
+        + '<span>四消率<b>' + run.tr + '%</b></span><span>最长没 I<b>' + run.drought + ' 块</b></span>'
+        + (run.trans !== null ? '<span>过渡分<b>' + run.trans.toLocaleString('en-US') + '</b></span>' : '')
+        + '</div>'
+        + '<p class="nes-tier">' + (vs18 ? '水平参照：<b>' + escHtml(nesTier(run.score)) + '</b>（社区常说的分数段，起始 18 级）'
+                                          : '要和比赛成绩比，用起始 18 级打') + '</p>';
+    } else { res.hidden = true; res.innerHTML = ''; }
+  }
+  const lv = $('nesLevels');
+  if (lv){
+    let h = '';
+    for (let i = 0; i < 20; i++){
+      const b = d.best[i];
+      h += '<button type="button" data-nl="' + i + '" class="' + (i === nesPick ? 'on' : '') + '"><b>' + i + '</b><span>'
+         + (b ? fmtScore(b.score | 0) : '—') + '</span></button>';
+    }
+    lv.innerHTML = h;
+  }
+  const go = $('nesGo');
+  if (go) go.textContent = (run ? '再来一局 · ' : '开始 · ') + '起始 ' + nesPick + ' 级';
+  sh.hidden = false;
+  if (nes && !nes.over) game.frozen = true;
+}
+function closeNesSheet(){
+  const sh = $('nesSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  if (nes && !nes.over){ game.frozen = false; resumeLoop(); }
+}
+
+// ───────────────────────── 对战机器人 ─────────────────────────
+//
+// 你用的还是上面那套现代规则（暂存、5 个 NEXT、T 旋、B2B），只是灰线不再按时间涨，
+// 改成对手消行打过来。机器人在右栏小窗里自己打，十个级别只差三样：
+//   每秒放几块（PPS）、往后看几块（只看当前 / 当前 + NEXT）、多大概率放偏
+// 落点用的是提示模式那套打分（高手堆叠经验），所以它是「照规矩堆、留井打四消」的打法。
+//
+// 攻击表（Guideline 系，和 Tetris 99 / TETR.IO 同一路）：
+//   单 0  双 1  三 2  四 4；T 旋单 2  双 4  三 6；mini 单 0  双 1
+//   B2B +1；连击按表加；全消 +10
+// 打过去的先抵消自己身上待涨的（抵消），剩下的才给对方。收到的不马上涨：等你下一次
+// 「锁定却没消行」时才顶上来，一次最多 8 行；同一波的缺口在同一列（一个 I 就能打穿）。
+// 定级是机器人互打量出来的（vsSimMatch，相邻两级各 30~40 局）：高一级赢低一级
+//   2:1 70%  3:2 65%  4:3 90%  5:4 80%  6:5 77%  7:6 67%  8:7 87%  9:8 67%  10:9 80%
+// 跨级更明显：3:1 85%，5:1 和 10:5 全胜。test_vs 里锁着「每一级都赢下一级」
+const VS_LEVELS = [
+  { pps: 0.3,  look: 1, err: .45 }, { pps: 0.45, look: 1, err: .25 }, { pps: 0.65, look: 1, err: .18 },
+  { pps: 0.8,  look: 2, err: .12 }, { pps: 1.0, look: 2, err: .08 }, { pps: 1.25, look: 2, err: .05 },
+  { pps: 1.5,  look: 2, err: .03 }, { pps: 1.8, look: 2, err: .02 }, { pps: 2.2,  look: 2, err: .01 },
+  { pps: 2.7,  look: 2, err: 0 },
+];
+const VS_COMBO = [0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5];
+const VS_RISE_MAX = 8;
+const VS_KEY = nsKey('vs.v1');
+const VS_START_DELAY = 900;          // 开局机器人先停一下，给你看清盘面
+
+let vs = null;
+
+// 一次消行能打几行
+function vsAttack(n, spin, perfect, combo, b2b){
+  if (!n) return 0;
+  // 表外（压实之类凑出的 5 行以上）按最大那档算。别写成 `表[n] || 默认`：mini 单是 0，会被当成「没有」
+  const k = Math.min(n, 4);
+  let a = spin === 'tspin' ? [0, 2, 4, 6, 6][k] : spin === 'mini' ? [0, 0, 1, 1, 1][k] : [0, 0, 1, 2, 4][k];
+  if (b2b) a += 1;
+  if (combo > 0) a += VS_COMBO[Math.min(combo, VS_COMBO.length - 1)];
+  if (perfect) a += 10;
+  return a;
+}
+// 打出去：先抵消自己待涨的，剩下的进对方的队列
+function vsSend(amount, mine, theirs){
+  let a = amount;
+  while (a > 0 && mine.length){
+    const k = Math.min(a, mine[0].n);
+    mine[0].n -= k; a -= k;
+    if (!mine[0].n) mine.shift();
+  }
+  if (a > 0) theirs.push({ n: a, hole: (vs.rnd() * COLS) | 0 });
+  return amount - a;                 // 抵消掉的行数
+}
+function vsPending(q){ return q.reduce((s, g) => s + g.n, 0); }
+
+function vsBotNew(lv){
+  return { lv, b: Array.from({ length: TOTAL_ROWS }, () => new Array(COLS).fill(null)),
+           bag: [], cur: null, next: null, timer: -VS_START_DELAY, inc: [], combo: -1, b2b: false,
+           sent: 0, pieces: 0, lines: 0, dead: false, dirty: true };
+}
+function vsBotType(B){
+  if (!B.bag.length){
+    const t = TYPES.slice();
+    for (let i = t.length - 1; i > 0; i--){ const j = (vs.rnd() * (i + 1)) | 0; [t[i], t[j]] = [t[j], t[i]]; }
+    B.bag = t;
+  }
+  return B.bag.shift();
+}
+// 机器人放一块：挑落点 → 放下 → 消行就打过去，没消就把待涨的顶上来
+function vsBotMove(B, conf, foe, foeQueue){
+  if (!B.cur){ B.cur = vsBotType(B); B.next = vsBotType(B); }
+  const bb = B.b.map(r => r.map(Boolean));
+  const t = B.cur;
+  if (!simFits(bb, t, PIECES[t].spawnX, 0, 0)){ B.dead = true; return; }
+  const r = hintBest(bb, t, conf.look > 1 ? B.next : null);
+  if (!r){ B.dead = true; return; }
+  let m = r.best;
+  if (conf.err){
+    // 失误分两种。原来只有一种（前几名里随便挑，常常是留洞的那个），结果低级别全是自杀：
+    // 放得越快、失误越多、死得越快，Lv2 对 Lv1 只赢 42%。现在：
+    //   小失误（概率 err）：只在「不留洞」的次优落点里挑 —— 像新手，放得不够好但不送
+    //   大失误（概率 err/4）：前六名里随便挑，可能留洞
+    const s = r.all.slice().sort((a, c) => c.score - a.score);
+    const u = vs.rnd();
+    if (u < conf.err / 4) m = s[Math.min(s.length - 1, 1 + ((vs.rnd() * 5) | 0))];
+    else if (u < conf.err){
+      const ok = s.slice(1).filter(c => c.gaps === 0).slice(0, 3);
+      if (ok.length) m = ok[(vs.rnd() * ok.length) | 0];
+    }
+  }
+  for (const [x, y] of m.cells) if (y >= 0) B.b[y][x] = t;
+  const full = [];
+  for (let y = 0; y < TOTAL_ROWS; y++) if (B.b[y].every(Boolean)) full.push(y);
+  if (full.length){
+    B.b = B.b.filter((_, y) => !full.includes(y));
+    while (B.b.length < TOTAL_ROWS) B.b.unshift(new Array(COLS).fill(null));
+    const perfect = B.b.every(row => row.every(c => !c));
+    const hard = full.length === 4;
+    const b2b = hard && B.b2b;
+    B.b2b = hard; B.combo++;
+    B.lines += full.length;
+    const a = vsAttack(full.length, null, perfect, B.combo, b2b);
+    if (a){ vsSend(a, B.inc, foeQueue); B.sent += a; }
+  } else {
+    B.combo = -1;
+    vsBotRise(B);
+  }
+  // 锁在隐藏区之上 = 顶出局
+  if (m.cells.every(([, y]) => y < BUFFER)) B.dead = true;
+  B.pieces++;
+  B.cur = B.next; B.next = vsBotType(B);
+  B.dirty = true;
+}
+function vsBotRise(B){
+  let n = 0;
+  while (B.inc.length && n < VS_RISE_MAX){
+    const g = B.inc[0];
+    if (B.b[0].some(Boolean)){ B.dead = true; return; }
+    B.b.shift();
+    const row = new Array(COLS).fill(GARBAGE); row[g.hole] = null;
+    B.b.push(row);
+    n++;
+    if (!--g.n) B.inc.shift();
+  }
+}
+
+// 主循环每一小步都喂进来
+function vsStep(dt){
+  if (!vs || vs.over) return;
+  vs.ms += dt;
+  const B = vs.bot, conf = VS_LEVELS[B.lv - 1];
+  B.timer += dt;
+  const gap = 1000 / conf.pps;
+  let n = 0;
+  while (B.timer >= gap && n++ < 3){
+    B.timer -= gap;
+    vsBotMove(B, conf, null, vs.inP);
+    if (vsPending(vs.inP) !== vs.shownIn){ vs.shownIn = vsPending(vs.inP); needsDraw = true; }
+    if (B.dead){ vsFinish(true); return; }
+  }
+  if (B.dirty) vsDrawBot();
+}
+
+// 你锁定一块之后（lockPiece 里，消行判定之后、出下一块之前）
+function vsOnLock(n, spin, perfect){
+  if (!vs || vs.over) return;
+  vs.pieces++;
+  if (n > 0){
+    const a = vsAttack(n, spin, perfect, game.combo, lastClearB2B);
+    if (a){
+      vsSend(a, vs.inP, vs.bot.inc);
+      vs.sent += a;
+      vs.bot.dirty = true;
+      if (a >= 4) showToast('打出 ' + a + ' 行', 900);
+    }
+  } else if (vs.inP.length){
+    let k = 0;
+    while (vs.inP.length && k < VS_RISE_MAX){
+      const g = vs.inP[0];
+      if (game.board[0].some(Boolean)){ endGame('灰线顶出'); return; }
+      game.board.shift();
+      const row = new Array(COLS).fill(GARBAGE); row[g.hole] = null;
+      game.board.push(row);
+      k++; vs.recv++;
+      if (!--g.n) vs.inP.shift();
+    }
+    staticDirty = true; needsDraw = true;
+    sfx('lock'); buzz(20);
+  }
+  vs.shownIn = vsPending(vs.inP);
+}
+
+// 你被顶死（endGame 里拦下来）
+function vsTopOut(){
+  if (!vs) return false;
+  if (!vs.over) vsFinish(false);
+  return true;
+}
+function vsFinish(win){
+  vs.over = true; vs.win = win;
+  game.over = true; game.piece = null;
+  const rec = vsRecords();
+  const r = rec[vs.bot.lv] || (rec[vs.bot.lv] = { w: 0, l: 0 });
+  if (win) r.w++; else r.l++;
+  try { localStorage.setItem(VS_KEY, JSON.stringify(rec)); } catch { /* 存不了就算了 */ }
+  sfx(win ? 'level' : 'over', win ? 1.2 : 1);
+  buzz(win ? [40, 30, 60] : 60);
+  needsDraw = true;
+  vsDrawBot();
+  setTimeout(() => { if (vs && vs.over) openVsSheet(true); }, 700);
+}
+function vsRecords(){
+  try {
+    const d = JSON.parse(localStorage.getItem(VS_KEY) || 'null');
+    if (d && typeof d === 'object') return d;
+  } catch { /* 坏数据当没有 */ }
+  return {};
+}
+
+// ── 画：右栏小窗 ── 只在它的盘面变了才重画，一次 200 来个 fillRect
+function vsDrawBot(){
+  const cv = $('vsCv');
+  if (!vs || !cv) return;
+  const B = vs.bot;
+  B.dirty = false;
+  const c = cv.getContext('2d');
+  const w = cv._w || cv.clientWidth, h = cv._h || cv.clientHeight;
+  if (!w || !h) return;
+  const s = Math.floor(Math.min(w / COLS, h / ROWS) * 4) / 4;
+  const ox = (w - s * COLS) / 2, oy = h - s * ROWS;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = 'rgba(8, 12, 24, .9)';
+  c.fillRect(ox, oy, s * COLS, s * ROWS);
+  for (let y = BUFFER; y < TOTAL_ROWS; y++)
+    for (let x = 0; x < COLS; x++){
+      const t = B.b[y][x];
+      if (!t) continue;
+      c.fillStyle = t === GARBAGE ? '#6b7a96' : colorOf(t);
+      c.fillRect(ox + x * s + .5, oy + (y - BUFFER) * s + .5, s - 1, s - 1);
+    }
+  // 它身上待涨的：左边一条红
+  const p = Math.min(ROWS, vsPending(B.inc));
+  if (p){ c.fillStyle = '#ff5470'; c.fillRect(ox, oy + (ROWS - p) * s, Math.max(2, s * .3), p * s); }
+  if (vs.over){
+    c.fillStyle = 'rgba(6, 9, 17, .6)'; c.fillRect(ox, oy, s * COLS, s * ROWS);
+  }
+  const lb = $('vsInfo');
+  if (lb) lb.textContent = '你打 ' + vs.sent + '\n它打 ' + B.sent;
+}
+// 你身上待涨的：主盘面左边一条红（draw 里调）
+function vsDrawIncoming(c){
+  if (!vs) return;
+  const p = Math.min(ROWS, vsPending(vs.inP));
+  if (!p) return;
+  c.save();
+  c.fillStyle = '#ff5470';
+  c.globalAlpha = .9;
+  c.fillRect(0, (ROWS - p) * CELL, Math.max(3, CELL * .14), p * CELL);
+  c.restore();
+}
+
+// ── 进出 ──
+function startVs(lv, seed){
+  if (CRAZY) return;
+  const L = Math.max(1, Math.min(VS_LEVELS.length, lv | 0));
+  if (!assisted() && game.started && !game.over) saveGame(true);
+  closePrSheet(); closeHintSheet(); drillEnd(); nesEnd();
+  const sh = $('vsSheet'); if (sh) sh.hidden = true;
+  practice = false; practiceLevel = null; hintMode = false; hintMove = null; demoRunning = false;
+  vs = { bot: null, inP: [], sent: 0, recv: 0, pieces: 0, ms: 0, over: false, win: null, shownIn: 0,
+         rnd: nesRng(seed != null ? seed : (Date.now() ^ (Math.random() * 1e9))) };
+  vs.bot = vsBotNew(L);
+  document.body.classList.add('vsing');
+  restart();
+  game.noGarbage = true;
+  const lb = $('vsName'); if (lb) lb.textContent = 'Lv ' + L;
+  syncPractice(); syncHint();
+  layout();                          // 右栏换成了小窗，量一次尺寸
+  vsDrawBot();
+}
+function vsEnd(){
+  if (!vs) return;
+  vs = null;
+  document.body.classList.remove('vsing');
+  const sh = $('vsSheet'); if (sh) sh.hidden = true;
+  needsDraw = true;
+}
+
+// ── 面板：选级别 / 结算 ──
+let vsPick = 3;
+function openVsSheet(result){
+  const sh = $('vsSheet');
+  if (!sh) return;
+  const rec = vsRecords();
+  const res = $('vsResult');
+  if (res){
+    if (result && vs){
+      const sec = vs.ms / 1000, B = vs.bot;
+      res.hidden = false;
+      res.innerHTML = '<b class="vs-head ' + (vs.win ? 'win' : 'lose') + '">' + (vs.win ? '你赢了' : '输了') + '</b>'
+        + '<div class="nes-stats">'
+        + '<span>你打出<b>' + vs.sent + ' 行</b></span><span>它打出<b>' + B.sent + ' 行</b></span>'
+        + '<span>你每分钟打<b>' + (vs.sent / Math.max(1, sec) * 60).toFixed(1) + '</b></span>'
+        + '<span>你每秒放<b>' + (vs.pieces / Math.max(1, sec)).toFixed(2) + ' 块</b></span>'
+        + '<span>用时<b>' + fmtMs(vs.ms) + '</b></span></div>';
+      vsPick = B.lv;
+    } else { res.hidden = true; res.innerHTML = ''; }
+  }
+  const lv = $('vsLevels');
+  if (lv){
+    let h = '';
+    VS_LEVELS.forEach((c, i) => {
+      const r = rec[i + 1];
+      h += '<button type="button" data-vl="' + (i + 1) + '" class="' + (i + 1 === vsPick ? 'on' : '') + '"><b>Lv ' + (i + 1) + '</b>'
+         + '<span>' + c.pps + ' 块/秒</span><span>' + (r ? (r.w | 0) + ' 胜 ' + (r.l | 0) + ' 负' : '没打过') + '</span></button>';
+    });
+    lv.innerHTML = h;
+  }
+  const go = $('vsGo');
+  if (go) go.textContent = (result ? '再来一局 · ' : '开打 · ') + 'Lv ' + vsPick;
+  sh.hidden = false;
+  if (vs && !vs.over) game.frozen = true;
+}
+function closeVsSheet(){
+  const sh = $('vsSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  if (vs && !vs.over){ game.frozen = false; resumeLoop(); }
+}
+
+// 两个机器人对打（测试和定级用，不画、不碰主盘面）。返回 A 赢没赢
+function vsSimMatch(lvA, lvB, seed, maxMs){
+  const keep = vs;
+  vs = { rnd: nesRng(seed), inP: [], bot: null };
+  const A = vsBotNew(lvA), Bb = vsBotNew(lvB);
+  A.timer = Bb.timer = 0;
+  const ca = VS_LEVELS[lvA - 1], cb = VS_LEVELS[lvB - 1];
+  let t = 0, ta = 0, tb = 0, win = null;
+  const lim = maxMs || 240000;
+  while (t < lim){
+    const na = ta + 1000 / ca.pps, nb = tb + 1000 / cb.pps;
+    if (na <= nb){ t = ta = na; vsBotMove(A, ca, Bb, Bb.inc); }
+    else { t = tb = nb; vsBotMove(Bb, cb, A, A.inc); }
+    if (A.dead){ win = false; break; }
+    if (Bb.dead){ win = true; break; }
+  }
+  const out = { win, ms: t, sentA: A.sent, sentB: Bb.sent, piecesA: A.pieces, piecesB: Bb.pieces };
+  vs = keep;
+  return out;
+}
+
 // ───────────────────────── 锁定与消行 ─────────────────────────
 
 // T-spin：T 块、最后一步是旋转、中心四角至少三个被挡
@@ -2473,6 +3201,7 @@ function lockPiece(){
   scoreFor(full.length, spin, perfect);
   practiceCheck(full.length, spin, perfect);
   drillOnLock(p, full.length, spin);
+  if (vs) vsOnLock(full.length, spin, perfect);
   crazyOnClear(full.length, spin, perfect);
 
   if (full.length){
@@ -3094,6 +3823,9 @@ function endGame(why){
   if (game.over) return;
   // 每日练习里顶出局不进结算页：算这一段的结果（热身就是这题重摆）
   if (drill && drillTopOut()) return;
+  // 对战里被顶死 = 输；NES 的结束走它自己的（暂停页的「收手」也会走到这里）
+  if (vs && vsTopOut()) return;
+  if (nes){ if (!nes.over) nesOver(); return; }
   game.over = true;
   // FEVER 的视觉不能留到结算页 —— crazyReset 要等重开才跑，中间这段
   // 背景条纹会一直在动
@@ -3263,6 +3995,15 @@ function layout(){
     cv.width = Math.round(r.width * dpr);
     cv.height = Math.round(r.height * dpr);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  // 对战右栏的机器人小窗（标准版才有）
+  const vc = $('vsCv');
+  if (vc){
+    const r = vc.getBoundingClientRect();
+    vc._w = r.width; vc._h = r.height;
+    vc.width = Math.round(r.width * dpr); vc.height = Math.round(r.height * dpr);
+    vc.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (vs) vsDrawBot();
   }
   draw();
 }
@@ -3465,6 +4206,7 @@ function drawStatic(){
 
 function draw(){
   dbg.draws++;
+  if (nes){ nesDraw(); return; }
   const W = CELL * COLS, H = CELL * ROWS;
   if (!W || !H) return;
   ctx.clearRect(0, 0, W, H);
@@ -3519,6 +4261,7 @@ function draw(){
   }
 
   drawHintReveal(ctx);
+  if (vs) vsDrawIncoming(ctx);
   // 落点虚影 + 当前方块
   const p = game.piece;
   if (p && !game.over){
@@ -3660,6 +4403,7 @@ function drawHoldHint(c, w, h){
 }
 
 function drawPreview(){
+  if (nes) return nesDrawPreview();
   // layout() 还没量到（样式没到位）时退回现读
   const nw = nextCv._w || nextCv.clientWidth, nh = nextCv._h || nextCv.clientHeight;
   nextCtx.clearRect(0, 0, nw, nh);
@@ -6988,6 +7732,8 @@ function betStep(dt){
 // 返回 'stop' / 'clearing' / 'normal'，由调用方决定怎么画。
 function stepOnce(dt){
   if (game.paused || game.over || game.frozen) return 'stop';
+  // NES 模式整个接管：它有自己的盘面和逐帧计时，下面这些普通局的东西一样都不跑
+  if (nes) return nesStep(dt);
   // 报幕这三秒：不累加 elapsed（否则灰线钟和热度衰减白跑三秒），也不生成方块。
   // 这里绝不能 return 'stop' —— tick 见到 stop 会把 rAF 停掉，三秒后没人拉得起来。
   if (introLeft > 0){
@@ -6997,6 +7743,7 @@ function stepOnce(dt){
   }
   // 判断放在调用处：普通局每帧连这一次函数调用都不付（实测它是普通局里唯一被采样到的新功能函数）
   if (drill) drillStep(dt);
+  if (vs) vsStep(dt);
 
   stepParticles(dt);
   stepTrails(dt);
@@ -7192,6 +7939,7 @@ function handleAutoRepeat(dt){
 const pressedAs = { left: 'left', right: 'right' };
 
 function press(dir){
+  if (nes) return nesPress(dir);
   if (game.over || game.paused) return;
   const d = evMirror() ? (dir === 'left' ? 'right' : 'left') : dir;
   pressedAs[dir] = d;
@@ -7201,6 +7949,7 @@ function press(dir){
   tryMove(d === 'left' ? -1 : 1, 0);
 }
 function release(dir){
+  if (nes) return nesRelease(dir);
   const d = pressedAs[dir] || dir;
   pressedAs[dir] = dir;
   held[d] = false;
@@ -7229,7 +7978,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -7249,12 +7998,14 @@ window.addEventListener('keydown', (e) => {
       else if (sheet.id === 'prSheet') closePrSheet();
       else if (sheet.id === 'drSheet') closeDrSheet();
       else if (sheet.id === 'hintSheet') closeHintSheet();
+      else if (sheet.id === 'nesSheet') closeNesSheet();
+      else if (sheet.id === 'vsSheet') closeVsSheet();
       else sheet.hidden = true;
     }
     return;
   }
   if (demoRunning) return;
-  if (act === 'restart'){ if (drill) drillRedo(); else restart(); return; }
+  if (act === 'restart'){ modeRestart(); return; }
   if (act === 'pause'){ togglePause(); return; }
   if (act === 'mute'){ toggleMute(); return; }
   if (act === 'fullscreen'){ toggleGameMode(); return; }
@@ -7284,11 +8035,20 @@ window.addEventListener('keyup', (e) => {
   if (act === 'hold')  preHeld.hold = false;
 });
 
+// 顶栏「重开」：各模式重开自己的（每日练习 = 这一段重来；NES = 同一起始等级；对战 = 同一级别）
+function modeRestart(){
+  if (nes) startNes(nes.start);
+  else if (vs) startVs(vs.bot.lv);
+  else if (drill) drillRedo();
+  else restart();
+}
+
 // 落底键连点保护：两下落底挨得太近（手抖、屏幕回弹算两次），第二下会把刚出生、
 // 还没看清的下一块一起砸下去。只拦屏幕按键，键盘不拦。
 const DROP_GUARD_MS = 160;
 let lastBtnDrop = -1e9;
 function btnHardDrop(){
+  if (nes){ nesRotate(-1); return; }     // NES 里这个键是 B（逆时针），不受落底连点保护
   const now = performance.now();
   if (now - lastBtnDrop < DROP_GUARD_MS) return;
   lastBtnDrop = now;
@@ -7782,6 +8542,32 @@ function init(){
   on('hintHideSw', () => { toggleHintHide(); renderHintSheet(); });
   const hsh = $('hintSheet');
   if (hsh) hsh.addEventListener('click', (e) => { if (e.target === hsh) closeHintSheet(); });
+  // ── 经典 NES / 对战 ──
+  on('nesBtn', () => openNesSheet());
+  on('vsBtn',  () => openVsSheet());
+  on('nesGo',  () => startNes(nesPick));
+  on('vsGo',   () => startVs(vsPick));
+  // 「回普通」：在局里就整个退出，在开局面板上点开的就只是关掉面板
+  on('nesExit', () => { if (nes) exitPractice(); else closeNesSheet(); });
+  on('vsExit',  () => { if (vs) exitPractice(); else closeVsSheet(); });
+  const nlv = $('nesLevels');
+  if (nlv) nlv.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-nl]'); if (!b) return;
+    nesPick = +b.dataset.nl;
+    for (const x of nlv.querySelectorAll('[data-nl]')) x.classList.toggle('on', x === b);
+    const go = $('nesGo'); if (go) go.textContent = go.textContent.replace(/起始 \d+ 级/, '起始 ' + nesPick + ' 级');
+  });
+  const vlv = $('vsLevels');
+  if (vlv) vlv.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-vl]'); if (!b) return;
+    vsPick = +b.dataset.vl;
+    for (const x of vlv.querySelectorAll('[data-vl]')) x.classList.toggle('on', x === b);
+    const go = $('vsGo'); if (go) go.textContent = go.textContent.replace(/Lv \d+/, 'Lv ' + vsPick);
+  });
+  for (const id of ['nesSheet', 'vsSheet']){
+    const sh = $(id);
+    if (sh) sh.addEventListener('click', (e) => { if (e.target === sh) (id === 'nesSheet' ? closeNesSheet : closeVsSheet)(); });
+  }
   // ── 每日练习 ──
   on('prDaily', () => startDrill());
   on('dailyBtn', () => startDrill());
@@ -7826,7 +8612,7 @@ function init(){
   $('rankSheet').addEventListener('click', (e) => { if (e.target === $('rankSheet')) closeRank(); });
   $('resumeBtn').addEventListener('click', togglePause);
   $('pauseBtn').addEventListener('click', togglePause);
-  $('restartBtn').addEventListener('click', () => { if (drill) drillRedo(); else restart(); });
+  $('restartBtn').addEventListener('click', () => modeRestart());
   // 收手：走正常的 endGame 路径，分数全额计入。它不是 buff ——
   // 收手拿到的就是当前分数，继续打只会更高，所以没有刷分动机。
   const sb = $('stopBtn');
@@ -7989,6 +8775,10 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  NES_PIECES, NES_GRAVITY, NES_LINE_SCORE, NES_FRAME, NES_DAS, NES_ARR, NES_KEY, nesGravity, nesFirstLevelUp, nesTier,
+  startNes, nesEnd, nesFrame, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },
+  VS_LEVELS, VS_KEY, vsAttack, vsSimMatch, startVs, vsEnd, vsStep, vsOnLock, vsRecords, openVsSheet, vsBotMove,
+  get vs(){ return vs; }, modeRestart, layout,
   hintEval, fitGaps, pieceFits, bottomPattern, pieceHintText, HINT_TOL, HINT_RULES, toggleHintHide, hintHidden,
   openHintSheet, closeHintSheet, get hintReveal(){ return hintReveal; },
   set hintHide(v){ hintHide = !!v; },
