@@ -162,12 +162,13 @@ const LOCK_DELAY = 500;      // 落地后多久锁死（毫秒）
 const LOCK_RESET_LIMIT = Infinity;
 // 横移手感三档（样式面板里选，按设备记住，两个版本共用）。
 //   DAS = 按住方向键多久开始连发，ARR = 连发之后每格间隔
-// 原来写死 150/40（稳那档）：按住要 0.15 秒才开始连发、之后一秒 25 格，手机上嫌慢。
-// 默认改成「快」。不直接给最快 —— 太快容易滑过头，放错位置比慢一点更伤。
+// 原来写死 150/40。改成 110/25 之后用户反馈「按一下左右直接就跑过去了，对不齐」：
+// 手指在屏幕上按一下常常就有 0.1 秒出头，110ms 起步等于轻点也会触发连发。
+// 现在默认「快」= 140/36，只比原来的 150/40 灵敏一点点；三档都往慢收了一截。
 const HANDLING = {
-  steady: { name: '稳',   das: 150, arr: 40 },
-  fast:   { name: '快',   das: 110, arr: 25 },
-  faster: { name: '很快', das: 80,  arr: 15 },
+  steady: { name: '稳',   das: 165, arr: 45 },
+  fast:   { name: '快',   das: 140, arr: 36 },
+  faster: { name: '很快', das: 115, arr: 28 },
 };
 const HANDLING_KEY = 'tetris.handling.v1';
 let handling = 'fast';
