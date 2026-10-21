@@ -1485,11 +1485,21 @@ function syncResume(){
 }
 
 // 顶栏的「普通 | 练习」。只在标准版有（疯狂版 bump.py 把节点删了，这里拿不到就跳过）。
+// 盘面左上角的模式标签：对战 / NES / T 旋练习时显示，顶栏的三个开关管不到这几个模式
+function syncModeTag(){
+  const t = $('modeTag');
+  if (!t) return;
+  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习' : '';
+  t.textContent = txt;
+  t.hidden = !txt;
+}
 function syncModeSwitch(){
+  syncModeTag();
   for (const b of document.querySelectorAll('#modeSw [data-m]')){
     const m = b.dataset.m;
     // 每日练习挂在「练习」下面（它的堆叠段借用了提示模式，但不算提示）
-    const on = m === 'practice' ? practice || !!drill : m === 'hint' ? hintMode && !drill : !assisted();
+    // T 旋练习挂在「练习」下（第一版亮的是「提示」，用户以为自己在提示模式）；对战 / NES 三个都不亮，盘面左上角有标签
+    const on = m === 'practice' ? practice || !!drill || tsOn() : m === 'hint' ? hintMode && !drill && !tsOn() : !assisted();
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
@@ -2227,6 +2237,7 @@ function startTspin(){
   tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
   document.body.classList.add('tspinning');
   previewDirty = true;
+  syncModeSwitch();
   tsCompute();
 }
 
@@ -2714,7 +2725,7 @@ function syncDrill(){
   } else if (drill.stage === 'stack'){
     // 堆叠段推荐是藏着的：细栏只说这块该找哪几种台阶
     a = hintMove ? pieceHintText(hintMove.type) : DRILL_NAME.stack;
-    b = '对 ' + hintStats.good + ' · ' + Math.min(game.pieces, DRILL_STACK_N) + '/' + DRILL_STACK_N;
+    b = Math.min(game.pieces, DRILL_STACK_N) + '/' + DRILL_STACK_N;     // 窄屏上「对 N · 」会把台阶提示挤成省略号
   } else if (drill.stage === 'sprint'){
     a = '冲刺 ' + Math.min(game.lines, DRILL_SPRINT_LINES) + '/' + DRILL_SPRINT_LINES + ' 行';
     b = fmtMs(drill.ms);
@@ -3083,6 +3094,7 @@ function startNes(level, seed){
 function nesEnd(){
   if (!nes) return;
   nes = null;
+  syncModeTag();
   document.body.classList.remove('nesing');
   const sh = $('nesSheet'); if (sh) sh.hidden = true;
   staticDirty = true; previewDirty = true; needsDraw = true;
@@ -3392,6 +3404,7 @@ function startVs(lv, seed){
 function vsEnd(){
   if (!vs) return;
   vs = null;
+  syncModeTag();
   document.body.classList.remove('vsing');
   const sh = $('vsSheet'); if (sh) sh.hidden = true;
   needsDraw = true;
@@ -4031,10 +4044,11 @@ function scoreFor(n, spin, perfect){
   // 飘字落在被消掉那几行的中间；空转的 T-spin 没有消除行，落在方块自己身上
   const st = clearStyle(n, spin, perfect);
   if (st && (n > 0 ? lastClearRows.length : !!spin)){
+    // 标准版放在消除行的上方：原来压在正在闪白光的消除行正中，浅色字压浅色底，几乎看不见
     const row = n > 0
-      ? lastClearRows.reduce((a, b) => a + b, 0) / lastClearRows.length
+      ? (CRAZY ? lastClearRows.reduce((a, b) => a + b, 0) / lastClearRows.length : Math.min(...lastClearRows) - 1.1)
       : lastLockY;
-    const py = (row - BUFFER + .5) * CELL;
+    const py = Math.max(CELL * 1.6, (row - BUFFER + .5) * CELL);
     const hot = CRAZY && feverLeft > 0;
 
     let label = st.name, cls = st.cls;
@@ -4071,7 +4085,7 @@ function scoreFor(n, spin, perfect){
   }
   // toast 只留"够得上事件"的：常态的连击/B2B 交给常驻徽章，
   // 否则同一件事会有飘字 + 徽章 + toast 三个通道同时喊。
-  if (label && (n === 4 || spin || perfect)) showToast(label.trim());
+  if (CRAZY && label && (n === 4 || spin || perfect)) showToast(label.trim());
   // 里程碑放在 label 的 toast 之后。放前面会被它当场盖掉 —— 而里程碑偏偏
   // 总是和大消除同时发生，等于永远看不见。两者冲突时让里程碑赢，它更少见。
   checkMilestone();
@@ -4649,9 +4663,10 @@ function draw(){
   for (const tr of trails){
     const a = Math.max(0, 1 - tr.t / TRAIL_MS);
     ctx.save();
-    ctx.globalAlpha = a * .32;
+    // 只留落点上方 6 格、调淡：原来从顶拉到底一整根，连着落几块会糊住盘面（看形状要看的正是那里）
+    ctx.globalAlpha = a * .22;
     for (const [x, y0, y1] of tr.cells){
-      const top = Math.max(y0, BUFFER) - BUFFER;
+      const top = Math.max(y0, y1 - 6, BUFFER) - BUFFER;
       const bot = Math.max(y1, BUFFER) - BUFFER;
       if (bot <= top) continue;
       const g = ctx.createLinearGradient(0, top * CELL, 0, bot * CELL);
@@ -8530,6 +8545,8 @@ function openRestartSheet(){
   if (!sh){ modeRestart(); return; }
   const a = $('rsAgain');
   if (a) a.textContent = restartLabel();
+  const nb = document.querySelector('#rsModes [data-rs="normal"]');
+  if (nb) nb.hidden = !assisted();
   sh.hidden = false;
   if (game.started && !game.over) game.frozen = true;
 }
