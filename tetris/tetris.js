@@ -7909,7 +7909,11 @@ const CLEAR_DRAW_MS = 12;
 function tick(now){
   rafId = requestAnimationFrame(tick);
   dbg.frames++;
-  const dt = Math.min(now - lastFrame, MAX_CATCHUP);
+  // 睡醒的那一帧：睡了多久就补多久。不放宽的话「睡 250ms + 等下一帧」常常超过 250 的上限，
+  // 超出的十几毫秒每次被砍掉 —— 实测方块因此每格晚 17~50ms（掉得慢了 4~5%）
+  const cap = napWoke ? MAX_CATCHUP + NAP_MAX : MAX_CATCHUP;
+  napWoke = false;
+  const dt = Math.min(now - lastFrame, cap);
   lastFrame = now;
 
   const r = step(dt);
@@ -7950,7 +7954,9 @@ function tick(now){
 const NAP_MAX = 250;
 const NAP_CLOCK = 100;
 const NAP_MIN = 20;           // 剩不到这么点就别睡了，直接等下一帧
+const NAP_EARLY = 26;
 let napTimer = 0;
+let napWoke = false;          // 下一次 tick 是从睡眠里醒来的（补算上限要放宽）
 function canNap(){
   if (CRAZY || nes || vs || demoRunning || introLeft > 0) return false;
   if (!game.started || game.over || game.paused || game.frozen) return false;
@@ -7963,21 +7969,23 @@ function canNap(){
 function loopNap(){
   if (!rafId || !canNap()) return;
   const left = gravityFor(game.level) - dropTimer;               // 离下一次掉格还有多久
-  const ms = Math.min(drill && drill.clock ? NAP_CLOCK : NAP_MAX, left - 2);
+  // 提前 NAP_EARLY 醒：定时器偶尔会晚几毫秒，掐着点睡的话那一格会晚一两帧才掉（实测最多晚 36ms）。
+  // 早醒一帧半，掉格那一刻就总是落在正常逐帧跑的路径上
+  const ms = Math.min(drill && drill.clock ? NAP_CLOCK : NAP_MAX, left - NAP_EARLY);
   if (ms < NAP_MIN) return;
   cancelAnimationFrame(rafId);
   rafId = 0;
   // 醒来前再看一眼：睡着的这会儿可能已经退回开局面板 / 暂停了，那就别把循环拉起来空转
   napTimer = setTimeout(() => {
     napTimer = 0;
-    if (!rafId && game.started && !game.over && !game.paused && !game.frozen) rafId = requestAnimationFrame(tick);
+    if (!rafId && game.started && !game.over && !game.paused && !game.frozen){ napWoke = true; rafId = requestAnimationFrame(tick); }
   }, ms);
 }
 // 按键、切面板之类：在睡就马上叫醒。不重置 lastFrame —— 睡着的这段时间要照实算进重力里
 function wakeLoop(){
   if (!napTimer) return;
   clearTimeout(napTimer); napTimer = 0;
-  if (!rafId) rafId = requestAnimationFrame(tick);
+  if (!rafId){ napWoke = true; rafId = requestAnimationFrame(tick); }
 }
 
 // ───────────────────────── 输入 ─────────────────────────

@@ -39,6 +39,25 @@ JS = r"""async () => {
   const g = T.gravityFor(T.game.level), fell = T.game.piece.y - y0;
   ok(Math.abs(fell - gt / g) <= 1, `重力照常：${(gt / 1000).toFixed(1)} 秒掉了 ${fell} 格（每 ${g.toFixed(0)}ms 一格，应约 ${(gt / g).toFixed(1)}）`);
 
+  // ── 掉落节奏：每一格的间隔都要和不睡时一样 ──
+  // 第一版这里没测，结果每次睡醒都被补算上限砍掉十几毫秒，方块每格晚 17~50ms（慢了 4~5%），
+  // 而上面那条「3 秒掉 3 格」的容差把它藏住了。逐格量间隔才看得出来
+  for (const lv of [1, 20]){
+    fresh(); T.game.level = lv;
+    T.game.piece = null; T.game.queue.unshift('I'); T.game.mods.unshift(null); T.spawnNext();
+    const gg = T.gravityFor(lv), seen = [];
+    let ly = T.game.piece.y; const ts = performance.now();
+    await new Promise(done => { const f = now => { const q = T.game.piece;
+      if (!q || now - ts > 4200){ done(); return; }
+      if (q.y !== ly){ ly = q.y; seen.push(now); } requestAnimationFrame(f); }; requestAnimationFrame(f); });
+    const dev = []; for (let i = 1; i < seen.length; i++) dev.push(Math.abs(seen[i] - seen[i - 1] - gg));
+    const mean = dev.reduce((a, b) => a + b, 0) / Math.max(1, dev.length);
+    // 偶尔晚一帧（~17ms）是正常抖动，不睡的版本也有；旧问题是每格都晚（平均 15~56ms）
+    ok(dev.length >= 3 && mean < 10 && Math.max(...dev) < 20,
+       `${lv} 级逐格掉落：${dev.length} 个间隔，偏差平均 ${mean.toFixed(1)}ms、最大 ${Math.max(...dev).toFixed(1)}ms（每格 ${gg.toFixed(0)}ms）`);
+  }
+  fresh(); await sleep(200);
+
   // ── 一按键立刻醒 ──
   await sleep(150);
   const x0 = T.game.piece.x, d0 = T.dbg.draws, tp = performance.now();
