@@ -304,7 +304,7 @@
     <div class="sheet-box">
       <div class="sheet-top"><h3>经典 NES</h3></div>
       <div class="nes-result" id="nesResult" hidden></div>
-      <p class="pr-tip">1989 红白机版的规则：没有暂存、没有硬降、没有落点影子，只看 1 个 NEXT，转不过去就是转不过去（没有踢墙），落地即锁。「落底」键在这里是逆时针旋转。比赛从 18 级起；第一次玩建议从 9 级或 12 级开始。</p>
+      <p class="pr-tip">1989 红白机版的规则：没有暂存、没有落点影子，只看 1 个 NEXT，转不过去就是转不过去（没有踢墙），落地即锁。原版没有硬降，这里保留了「落底」键（落几格给几分，和一路软降到底一样）。比赛从 18 级起；第一次玩建议从 9 级或 12 级开始。</p>
       <span class="sheet-lb">起始等级 · 下面是你在这一级的最好成绩</span>
       <div class="nes-levels" id="nesLevels"></div>
       <div class="pr-row"><button class="pr-b" id="nesExit" type="button">回普通</button></div>
@@ -405,7 +405,7 @@
 
 </div>
 
-<script src="tetris.js?v=bfa4d23d"></script>
+<script src="tetris.js?v=e4691634"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

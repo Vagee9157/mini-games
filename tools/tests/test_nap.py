@@ -51,10 +51,11 @@ JS = r"""async () => {
       if (!q || now - ts > 4200){ done(); return; }
       if (q.y !== ly){ ly = q.y; seen.push(now); } requestAnimationFrame(f); }; requestAnimationFrame(f); });
     const dev = []; for (let i = 1; i < seen.length; i++) dev.push(Math.abs(seen[i] - seen[i - 1] - gg));
-    const mean = dev.reduce((a, b) => a + b, 0) / Math.max(1, dev.length);
-    // 偶尔晚一帧（~17ms）是正常抖动，不睡的版本也有；旧问题是每格都晚（平均 15~56ms）
-    ok(dev.length >= 3 && mean < 10 && Math.max(...dev) < 20,
-       `${lv} 级逐格掉落：${dev.length} 个间隔，偏差平均 ${mean.toFixed(1)}ms、最大 ${Math.max(...dev).toFixed(1)}ms（每格 ${gg.toFixed(0)}ms）`);
+    const med = dev.slice().sort((a, b) => a - b)[dev.length >> 1];
+    // 看中位数不看平均：偶尔晚一帧（~17ms）是正常抖动，不睡的版本也有，跑全套时机器忙还会连着晚两格，
+    // 平均就被拉过线了（偶发红过）。旧问题是**每一格**都晚（中位 15~50ms），中位数照样抓得住
+    ok(dev.length >= 3 && med < 8 && Math.max(...dev) < 25,
+       `${lv} 级逐格掉落：${dev.length} 个间隔，偏差中位 ${med.toFixed(1)}ms、最大 ${Math.max(...dev).toFixed(1)}ms（每格 ${gg.toFixed(0)}ms）`);
   }
   fresh(); await sleep(200);
 

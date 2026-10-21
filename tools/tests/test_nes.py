@@ -52,14 +52,14 @@ JS = r"""async () => {
   ok(!!$('nesBtn'), '开局面板有「经典 NES」入口');
   T.startNes(0, 12345);
   ok(!!T.nes && document.body.classList.contains('nesing'), '进 NES 模式');
-  ok(/逆转/.test($('btnDrop').textContent), `「落底」键变成逆时针旋转（「${$('btnDrop').textContent.trim()}」）`);
+  ok(/落底/.test($('btnDrop').textContent), `「落底」键在 NES 里照样是落底（「${$('btnDrop').textContent.trim()}」）`);
   frames(1);
   const c = T.nes.cur;
   ok(!!c && c.x === 5 && c.y === 0 && c.r === P[c.t].spawn && T.nes.phase === 'fall', `出第一块：中心在第 5 列第 0 行、出生朝向（${c && c.t}）`);
   T.drawPreview();
   ok(T.dbg.previews === 1, 'NEXT 只画 1 块');
-  T.holdPiece(); T.hardDrop();
-  ok(T.nes.cur === c && c.y === 0, '暂存和硬降都没反应');
+  T.holdPiece();
+  ok(T.nes.cur === c && c.y === 0, '暂存没反应');
 
   // ── DAS：按下立刻 1 格，16 帧后第 2 格，之后每 6 帧一格 ──
   const xs = [];
@@ -79,9 +79,8 @@ JS = r"""async () => {
   T.nes.cur = { t: 'T', r: 2, x: 4, y: 6 };
   T.nesRotate(1); const r1 = T.nes.cur.r; T.nesRotate(-1);
   ok(r1 === 3 && T.nes.cur.r === 2, '空地上顺/逆时针各转一下');
-  // 屏幕上的「落底」键 = 逆时针
-  $('btnDrop').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); $('btnDrop').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-  ok(T.nes.cur.r === 1, `点「落底」键：逆时针转了（朝向 2 → ${T.nes.cur.r}）`);
+  T.nesRotate(-1);
+  ok(T.nes.cur.r === 1, `键盘 Z（B 键）逆时针（朝向 2 → ${T.nes.cur.r}）`);
 
   // ── 落地即锁：重力那一下落不下去就锁死 ──
   const nb = () => { for (const row of T.nes.board) row.fill(null); };
@@ -93,6 +92,18 @@ JS = r"""async () => {
   frames(1);
   ok(!T.nes.cur && T.nes.phase === 'are' && T.nes.board[19][4] === 'O', '重力那一帧落不下去：当场锁死，进 ARE');
   ok(T.nes.timer === T.nesAre(18), `ARE ${T.nes.timer} 帧`);
+
+  // ── 落底：一按到底立刻锁定，落几格给几分（和一路软降到底一样）──
+  nb();
+  T.nes.cur = { t: 'O', r: 0, x: 4, y: 3 }; T.nes.phase = 'fall'; T.nes.fall = 0;
+  const sd = T.nes.score;
+  $('btnDrop').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); $('btnDrop').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  ok(!T.nes.cur && T.nes.board[19][4] === 'O' && T.nes.phase === 'are', '点「落底」：一按到底、当场锁定');
+  ok(T.nes.score - sd === 15, `落了 15 格给 ${T.nes.score - sd} 分（每格 1 分）`);
+  frames(30);
+  const pc0 = T.nes.pieces;
+  $('btnDrop').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); $('btnDrop').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  ok(T.nes.pieces === pc0, '落底连点保护照样有（160ms 内第二下不算）');
 
   // ── 计分 ──
   T.startNes(5, 7); frames(1);

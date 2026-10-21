@@ -938,7 +938,7 @@ function tryRotate(dir){
 }
 
 function hardDrop(){
-  if (nes) return;                 // NES 没有硬降
+  if (nes){ nesHardDrop(); return; }   // NES 原版没有硬降，这里按用户要求加了（见 nesHardDrop）
   const p = game.piece;
   if (!p) return;
   let d = 0;
@@ -2427,14 +2427,16 @@ function drillStep(dt){
 //
 // 1989 年任天堂红白机版，经典俄罗斯方块世界锦标赛（CTWC）用的就是它。和上面那套
 // 现代规则是两回事，所以单独一套盘面、单独一套逐帧计时，只借画布和按键：
-//   · 没有暂存、没有硬降、没有落点影子，只看 1 个 NEXT
+//   · 没有暂存、没有落点影子，只看 1 个 NEXT（原版也没有硬降，这里保留了落底，见下面「按键」）
 //   · 旋转用 NES 原版的朝向表（NRS）：绕中心转，**没有踢墙**，转不过去就是转不过去
 //   · 落地没有锁定延迟：重力那一下落不下去就锁死
 //   · 速度按帧算（NTSC 60.0988 帧/秒），横移是 DAS 16 帧起步、之后每 6 帧一格
 //   · 出块：先掷 0~7，掷到 7 或者和上一块相同就重掷一次 0~6（重掷结果照收）
 //   · 计分：单/双/三/四 = 40/100/300/1200 ×（等级 + 1），软降每格 1 分
 //   · 起始等级 0~19；第一次升级在 min(起始×10+10, max(100, 起始×10−50)) 行，之后每 10 行
-// 按键：左右照旧，「变换」= A（顺时针），「落底」键在这个模式里是 B（逆时针），软降 = 下。
+// 按键：左右照旧，「变换」= A（顺时针），软降 = 下（键盘 Z = B 逆时针）。
+// 「落底」照旧是落底 —— 原版没有硬降，这是唯一和原版不一样的地方（用户要的）。
+// 分按「一路软降到底」给，每格 1 分，和原版玩家按住下键能拿到的一样，只是省了等它掉的时间。
 const NES_FPS = 60.0988;
 const NES_FRAME = 1000 / NES_FPS;
 const NES_ROWS = 20;
@@ -2534,6 +2536,18 @@ function nesShift(d){
   if (!nesFits(c.t, c.r, c.x + d, c.y)) return false;
   c.x += d; needsDraw = true; drawNow = true;
   return true;
+}
+// 落底：一按到底立刻锁定。落了几格就按软降算几分
+function nesHardDrop(){
+  const c = nes && nes.cur;
+  if (!c || nes.phase !== 'fall' || game.paused) return;
+  let d = 0;
+  while (nesFits(c.t, c.r, c.x, c.y + d + 1)) d++;
+  c.y += d;
+  nes.soft += d;
+  drawNow = true;
+  sfx('drop'); buzz(14);
+  nesLock();
 }
 function nesRotate(dir){
   const c = nes && nes.cur;
@@ -2733,14 +2747,6 @@ function nesOver(){
 }
 
 // ── 进出 ──
-const NES_DROP_HTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9.7" y="9.5" width="11" height="11" rx="2.6"/><path d="M14.6 5.4H9.2A4.2 4.2 0 0 0 5 9.6v3.2"/><path d="M7.5 10.9 5 13.8l-2.5-2.9"/></svg><em>逆转</em>';
-let nesDropKeep = null;
-function nesButtons(on){
-  const b = $('btnDrop');
-  if (!b) return;
-  if (on && nesDropKeep === null){ nesDropKeep = b.innerHTML; b.innerHTML = NES_DROP_HTML; b.setAttribute('aria-label', '逆时针旋转'); }
-  if (!on && nesDropKeep !== null){ b.innerHTML = nesDropKeep; nesDropKeep = null; b.setAttribute('aria-label', '直接落底'); }
-}
 function startNes(level, seed){
   if (CRAZY) return;
   const lv = Math.max(0, Math.min(19, level | 0));
@@ -2755,7 +2761,6 @@ function startNes(level, seed){
   held.left = held.right = false;
   $('overlay').classList.remove('show');
   document.body.classList.add('nesing');
-  nesButtons(true);
   syncPractice(); syncHint();
   staticDirty = true; previewDirty = true; needsDraw = true;
   nes.timer = 1;                    // 下一帧出第一块
@@ -2769,7 +2774,6 @@ function nesEnd(){
   if (!nes) return;
   nes = null;
   document.body.classList.remove('nesing');
-  nesButtons(false);
   const sh = $('nesSheet'); if (sh) sh.hidden = true;
   staticDirty = true; previewDirty = true; needsDraw = true;
 }
@@ -8276,10 +8280,10 @@ function restartPick(m){
 const DROP_GUARD_MS = 160;
 let lastBtnDrop = -1e9;
 function btnHardDrop(){
-  if (nes){ nesRotate(-1); return; }     // NES 里这个键是 B（逆时针），不受落底连点保护
   const now = performance.now();
   if (now - lastBtnDrop < DROP_GUARD_MS) return;
   lastBtnDrop = now;
+  if (nes){ nesHardDrop(); return; }     // NES 里也是落底，连点保护照样有
   drillKey(false, false);
   hardDrop();
 }
@@ -9029,7 +9033,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   openRestartSheet, closeRestartSheet, restartPick,
   HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },
   NES_PIECES, NES_GRAVITY, NES_LINE_SCORE, NES_FRAME, NES_DAS, NES_ARR, NES_KEY, nesGravity, nesFirstLevelUp, nesTier,
-  startNes, nesEnd, nesFrame, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },
+  startNes, nesEnd, nesFrame, nesHardDrop, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },
   VS_LEVELS, VS_KEY, vsAttack, vsSimMatch, startVs, vsEnd, vsStep, vsOnLock, vsRecords, openVsSheet, vsBotMove,
   get vs(){ return vs; }, modeRestart, layout,
   hintEval, fitGaps, pieceFits, bottomPattern, pieceHintText, HINT_TOL, HINT_RULES, toggleHintHide, hintHidden,
