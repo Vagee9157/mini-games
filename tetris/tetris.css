@@ -1793,3 +1793,11 @@ body.nesing .slot.hold{ opacity: .25; }
 @media (prefers-reduced-motion: reduce){
   .shaker.hit{ animation: none; }
 }
+
+/* ── T 旋练习 ── 提示模式的变体：可以暂存（HOLD 框不压暗），没有「先自己找」 */
+body.hinting.tspinning .slot.hold{ opacity: 1; }
+body.tspinning #hintHide{ display: none; }
+body.tspinning .hint-why{ color: #ff9ce4; }
+/* 开局面板三个玩法按钮：一行排三个，窄屏也不折行 */
+.mode-row{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.mode-row .pbtn.ghost{ padding-left: 4px; padding-right: 4px; font-size: 12px; letter-spacing: 0; }

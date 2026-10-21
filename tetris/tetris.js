@@ -975,7 +975,7 @@ function hardDrop(){
 function holdPiece(){
   if (nes) return;                 // NES 没有暂存
   if (!game.piece || game.holdUsed) return;
-  if (hintMode){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
+  if (hintMode && !tsOn()){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
   if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
@@ -1723,6 +1723,7 @@ function pieceHintText(type){
 }
 
 function hintCompute(){
+  if (tsOn()) return tsCompute();
   hintMove = null; hintBase = null;
   const p = game.piece;
   if (!hintMode || !p || game.over) return syncHint();
@@ -1758,6 +1759,7 @@ let hintReveal = null;      // 「先自己找」时，放下之后把推荐亮�
 
 // 你放下之后：和推荐一样好就算对；不对就说违反了哪一条
 function hintJudge(p){
+  if (tsOn()) return;              // T 旋练习在锁定之后判（要知道消了几行、是不是 T 旋）
   if (!hintMode || !hintMove || !hintBase || p.type !== hintMove.type) return;
   hintReveal = null;          // 上一块亮着的推荐作废，不然连着放两块会叠在一起
   const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
@@ -1828,6 +1830,8 @@ function toggleHintHide(){
 
 function syncHint(){
   document.body.classList.toggle('hinting', hintMode);
+  document.body.classList.toggle('tspinning', tsOn());
+  if (tsOn()) return tsSyncBar();
   if (drill) syncDrill();      // 每日练习的堆叠段：推荐理由写在它自己的细栏里
   if (!hintMode) return;
   const w = $('hintWhy');
@@ -1858,6 +1862,7 @@ function hintBox(c, cells, solid, alpha){
   c.restore();
 }
 function drawHint(c, ghostCells){
+  if (tsOn()) return tsDraw(c, ghostCells);
   if (!hintMode || !hintMove || !game.piece || game.over || hintHidden()) return;
   const key = cs => cs.map(v => v.join(',')).sort().join(';');
   hintBox(c, hintMove.cells, !!ghostCells && key(ghostCells) === key(hintMove.cells), 1);
@@ -1873,6 +1878,12 @@ function drawHintReveal(c){
 function renderHintSheet(){
   const body = $('hintRulesBody');
   if (!body) return;
+  const sw = $('hintHideSw'); if (sw) sw.hidden = false;      // T 旋练习会把它藏起来，回到堆叠提示要放回来
+  // 标题和开头那段介绍两个模式各一套（第一版 T 旋练习里还写着「堆叠规则」）
+  const tt = $('hintSheetTitle'), ti = $('hintSheetIntro');
+  if (tt) tt.textContent = tsOn() ? 'T 旋要领' : '堆叠规则';
+  if (ti) ti.hidden = tsOn();
+  if (tsOn()) return tsRenderSheet(body);
   const worst = hintStats.rules.indexOf(Math.max(...hintStats.rules));
   let h = '<span class="sheet-lb">放之前按顺序问自己</span>';
   HINT_RULES.forEach((r, i) => {
@@ -1915,11 +1926,287 @@ function startHint(){
   practice = false; practiceLevel = null; practiceStep = 0; practiceDone = false;
   demoRunning = false; undoStack.length = 0;
   hintMode = true;
+  hintKind = 'stack';
   hintStats = { same: 0, good: 0, total: 0, holes: 0, rules: [0, 0, 0, 0] };
   hintReveal = null;
   restart();                 // 里面 spawn 时会算第一块的推荐
   game.noGarbage = true;
   syncPractice(); syncHint();
+}
+
+// ───────────────────────── T 旋练习 ─────────────────────────
+//
+// 提示模式的变体：教练的目标从「堆平」换成「打出 T 旋双消（TSD）」。照着几篇公开攻略的共识做：
+//   · 槽的样子：两行深的缺口、一边有屋檐，槽下面那行只空槽口一格（tetris.wiki「T-Spin Double」）
+//   · 屋檐用 L/J 横放最常用，S/Z 也行；别拿 T 去填平地（gamertagmythras 的 T-spin 指南）
+//   · 槽下面那行要补满，不然 T 转进去只消一行
+//   · 7 块必有一个 T：槽没好就先暂存 T；转进去时软降到底，最后一下必须是旋转
+// 每块出来：普通块推荐「怎么把槽搭起来」；槽好了在盘面上标出来（品红）等 T；
+// T 来了给出转进去的路径；没槽时来了 T 建议先暂存。放完马上判，说清楚差在哪。
+// 可以暂存、看 3 个 NEXT（要看 T 什么时候来），不涨灰线、不升级、不记成绩（assisted）。
+let hintKind = 'stack';           // 'stack' = 堆叠提示，'tspin' = T 旋练习
+function tsOn(){ return hintMode && hintKind === 'tspin'; }
+let tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
+let tsRec = null;                 // 这一块的建议 { kind: 'tsd'|'place'|'hold', cells, rot, x, why, path, readyBefore }
+let tsBase = null;                // 出块那一刻的盘面
+
+// 盘面上的 TSD 槽：T 尖朝下时中心在 (x, y)。x 是槽口那一列，y 是槽的上一行
+function tsdSlots(b){
+  const out = [];
+  const filled = (X, Y) => X < 0 || X >= COLS || Y >= TOTAL_ROWS || (Y >= 0 && b[Y][X]);
+  for (let y = 1; y < TOTAL_ROWS - 1; y++){
+    for (let x = 1; x < COLS - 1; x++){
+      if (filled(x - 1, y) || filled(x, y) || filled(x + 1, y) || filled(x, y + 1)) continue;
+      if (!filled(x - 1, y + 1) || !filled(x + 1, y + 1)) continue;      // 底下两个角
+      const roofL = filled(x - 1, y - 1), roofR = filled(x + 1, y - 1);
+      if (roofL === roofR) continue;                                      // 没屋檐 / 两边都盖死
+      if (filled(x, y - 1)) continue;                                     // 槽口正上方堵了
+      let miss = 0;                                                       // 两行还差几格才能一起消
+      for (let X = 0; X < COLS; X++){
+        if (Math.abs(X - x) > 1 && !b[y][X]) miss++;
+        if (X !== x && !b[y + 1][X]) miss++;
+      }
+      out.push({ x, y, roof: roofL ? -1 : 1, miss, ready: miss === 0 });
+    }
+  }
+  return out;
+}
+// 手机上只有顺时针键。实测（simReach 只用顺时针，数左右 + 变换的次数）：
+//   屋檐在左的槽 2~6 下，固定手法「变换一下 → 送下去 → 到底再变换一下」
+//   屋檐在右的槽 5~10 下，要在顶上转三下、到底再转三下（等于逆时针）—— 实战里很容易按乱
+// 所以同样差几格时优先左屋檐，搭槽的加分右屋檐只给一半
+function tsBestSlot(b){
+  let best = null;
+  for (const s of tsdSlots(b))
+    if (!best || s.miss < best.miss || (s.miss === best.miss && s.roof < best.roof)) best = s;
+  return best;
+}
+function tsReadyCount(b){ return tsdSlots(b).filter(s => s.ready).length; }
+// 搭槽的加分：槽搭好 / 差几格（每差一格扣 step）/ 有雏形。是个可改的对象，调参时机器人直接改它。
+// 量出来的（机器人照教练建议打，3 局 × 400 块）：
+//   90/44/9/28    每 25 块一个 TSD  新增洞 9.9%  最高 9
+//   140/70/12/55  每 21 块一个      洞 11.1%    最高 14
+//   120/60/12/25  每 22 块一个      洞 9.6%     最高 10   ← 选这个：TSD 差不多一样多，洞最少、堆得最低
+// （「洞」里约一半是搭好的槽屋檐下面那一格，本来就要空着等 T）
+const TS_W = { ready: 120, part: 60, step: 12, notch: 25 };
+// 槽的雏形：一个「中间深、两边浅」的三格缺口（两边比中间高一格，再外面比中间高两格）。
+// 攻略里搭 TSD 的第一步就是留出这个缺口，然后拿 L/J/O 往一边盖屋檐
+function tsNotch(h){
+  for (let c = 1; c < COLS - 1; c++){
+    const k = h[c];
+    if (h[c - 1] !== k + 1 || h[c + 1] !== k + 1) continue;
+    if (c - 2 >= 0 && h[c - 2] < k + 2) continue;
+    if (c + 2 < COLS && h[c + 2] < k + 2) continue;
+    return c;
+  }
+  return -1;
+}
+// 盘面分。不能直接用堆叠提示那套：它把最右一列留成井等 I 打四消，可 TSD 要求槽两边那两行
+// 都填满 —— 井一直空着，这两行就永远满不了，槽永远「搭不好」（第一版跑 500 块只成 0~4 个 TSD）。
+// 这里十列一起铺平，不留井；槽本身那一格空不算洞；有槽 / 有雏形就加分
+function tsScore(b){
+  const f = simFeatures(b), h = f.h;
+  let s = -f.holes * HW.hole;
+  for (let i = 0; i + 1 < COLS; i++){
+    const d = Math.abs(h[i] - h[i + 1]);
+    s -= d <= 1 ? d * HW.step1 : d === 2 ? HW.step2 : HW.step3 * (d - 2);
+  }
+  for (let i = 0; i < COLS; i++){
+    const l = i > 0 ? h[i - 1] : 99, r = i + 1 < COLS ? h[i + 1] : 99;
+    if (Math.min(l, r) - h[i] >= 3) s -= HW.pit;
+  }
+  const maxH = Math.max(...h);
+  s -= h.reduce((a, v) => a + v, 0) * HW.height;
+  if (maxH > 12) s -= (maxH - 12) * HW.tall;
+  const best = tsBestSlot(b);
+  if (best){
+    s += HW.hole;
+    const bonus = best.ready ? TS_W.ready : best.miss <= 4 ? TS_W.part - best.miss * TS_W.step : 0;
+    s += best.roof < 0 ? bonus : bonus * .5;
+  } else if (tsNotch(h) >= 0) s += TS_W.notch;
+  return s;
+}
+// 普通消行：堆高了就放开消（保命），平时别为了一两行去消，留着两行给 T 旋
+function tsLineValue(lines, b){
+  if (!lines) return 0;
+  return lines * (simFeatures(b).maxH >= HINT_DANGER ? HW.burnDanger : HW.burn);
+}
+function tsEval(b0, cells, nextType){
+  const r1 = simPlace(b0, cells);
+  let v = -Infinity;
+  if (nextType && nextType !== 'T'){
+    for (const n of simDrops(r1.b, nextType)){
+      const r2 = simPlace(r1.b, n.cells);
+      v = Math.max(v, tsScore(r2.b) + tsLineValue(r2.lines, r1.b));
+    }
+  }
+  if (v === -Infinity) v = tsScore(r1.b);
+  return v + tsLineValue(r1.lines, b0);
+}
+// 按键串（simReach 的 L/R/d/C）讲成人话：右 2 → 软降 → 变换
+function tsPathText(acts){
+  const out = [];
+  const re = /(L+|R+|d+|C+)/g;
+  let m;
+  while ((m = re.exec(acts))){
+    const g = m[1], k = g.length;
+    if (g[0] === 'L') out.push('左 ' + k);
+    else if (g[0] === 'R') out.push('右 ' + k);
+    else if (g[0] === 'd') out.push('软降');
+    else out.push(k > 1 ? '变换 ×' + k : '变换');
+  }
+  // 开头那段一路往下的软降是「先落到槽口附近」，说成「送下去」更好懂
+  return out.join(' → ').replace(/^软降 → /, '');
+}
+function tsNextT(){
+  if (game.hold === 'T' && !game.holdUsed) return '暂存里有 T';
+  const i = game.queue.indexOf('T');
+  return i < 0 ? 'T 还没进 NEXT' : 'T 还有 ' + (i + 1) + ' 块';
+}
+
+function tsCompute(){
+  tsRec = null; hintMove = null;
+  const p = game.piece;
+  if (!tsOn() || !p || game.over) return syncHint();
+  const b0 = simBoard();
+  tsBase = b0;
+  const readyBefore = tsReadyCount(b0);
+  const key = cs => cs.map(c => c.join(',')).sort().join(';');
+  if (p.type === 'T'){
+    const locks = simReach(b0, 'T');
+    const tsd = locks.filter(l => l.spin === 'tspin' && l.lines === 2);
+    if (tsd.length){
+      // 挑「要按的键最少」的那条：软降是按住不放，不算次数；只数左右和变换。
+      // 原来按总长度挑，软降每格都算一下，结果挑出「变换 ×3 → 软降 → 变换 ×3」这种绕远的
+      const presses = a => a.acts.replace(/d/g, '').length;
+      const m = tsd.sort((a, c) => presses(a) - presses(c) || a.acts.length - c.acts.length)[0];
+      tsRec = { kind: 'tsd', cells: m.cells, rot: m.rot, x: m.x, path: tsPathText(m.acts), readyBefore,
+                why: 'T 来了：' + tsPathText(m.acts) };     // 「最后一下必须是变换」写在要领卡里，细栏放不下
+    } else if (!game.holdUsed && game.hold !== 'T'){
+      tsRec = { kind: 'hold', readyBefore, why: '还没有槽 —— 先暂存 T，留着打 T 旋' };
+    }
+  } else if (game.hold === 'T' && !game.holdUsed && readyBefore){
+    tsRec = { kind: 'hold', readyBefore, why: '槽好了、暂存里有 T —— 点暂存把 T 换出来' };
+  }
+  if (!tsRec){
+    // 普通落点：哪个最有利于把槽搭起来
+    const next = game.queue[0];
+    let best = null;
+    for (const m of simDrops(b0, p.type)){
+      const v = tsEval(b0, m.cells, next);
+      if (!best || v > best.v) best = Object.assign({ v }, m);
+    }
+    if (best){
+      const before = tsBestSlot(b0), after = tsBestSlot(simPlace(b0, best.cells).b);
+      let why;
+      if (after && after.ready && !(before && before.ready))
+        why = ((p.type === 'L' || p.type === 'J') ? '搭屋檐' : '这块') + ' —— 槽搭好了' + (after.roof < 0 ? '（屋檐在左，顺时针好转）' : '');
+      else if (after && before && after.miss < before.miss) why = '补槽两边 —— 还差 ' + after.miss + ' 格就能等 T';
+      else if (after && !before) why = (p.type === 'L' || p.type === 'J' || p.type === 'S' || p.type === 'Z') ? '起个槽：这块做屋檐' : '起个槽';
+      else if (before && before.ready) why = '槽留着别碰 · ' + tsNextT();
+      else why = hintWhy(b0, Object.assign({ score: best.v }, best), simDrops(b0, p.type).map(m => Object.assign({ score: tsEval(b0, m.cells, null), gaps: fitGaps(b0, m.cells) }, m)), false);
+      tsRec = { kind: 'place', cells: best.cells, rot: best.rot, x: best.x, readyBefore, why };
+    }
+  }
+  if (tsRec && tsRec.cells) hintMove = { type: p.type, cells: tsRec.cells, rot: tsRec.rot, x: tsRec.x, why: tsRec.why };
+  needsDraw = true;
+  syncHint();
+}
+
+// 锁定之后（消行判定之后）
+function tsOnLock(p, n, spin){
+  if (!tsOn() || !tsBase) return;
+  const rec = tsRec;
+  const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
+  if (p.type === 'T'){
+    if (spin === 'tspin' && n === 2){
+      tsStats.tsd++;
+      showToast('✓ T 旋双消　第 ' + tsStats.tsd + ' 个', 1400);
+    } else if (rec && rec.kind === 'tsd'){
+      tsStats.miss++;
+      showToast(spin === 'tspin' && n === 1 ? '只消了一行 —— 槽下面那行没补满'
+                : '槽在这：' + rec.path + '（软降到底再变换，转完别再挪）', 2600);
+    } else if (rec && rec.kind === 'hold'){
+      tsStats.waste++;
+      showToast('没槽时别把 T 用掉 —— 先暂存，留着打 T 旋', 2200);
+    }
+  } else {
+    const after = tsReadyCount(simPlace(tsBase, cells).b);
+    const before = rec ? rec.readyBefore : tsReadyCount(tsBase);
+    if (before > 0 && after < before){
+      tsStats.filled++;
+      showToast('把 T 槽填了 —— 槽留给 T', 1800);
+    } else if (before === 0 && after > 0){
+      tsStats.built++;
+      showToast('✓ 槽搭好了，等 T（' + tsNextT() + '）', 1800);
+    }
+  }
+  syncHint();
+}
+
+// 画：推荐落点（绿框）+ 盘面上已经搭好的槽（品红，T 的形状）
+const TS_COLOR = '#ff6bd6';
+function tsDraw(c, ghostCells){
+  if (!tsOn() || game.over) return;
+  const slot = tsBase ? tsdSlots(tsBase).filter(s => s.ready)[0] : null;
+  if (slot){
+    const cells = [[slot.x - 1, slot.y], [slot.x, slot.y], [slot.x + 1, slot.y], [slot.x, slot.y + 1]];
+    c.save();
+    c.strokeStyle = TS_COLOR; c.globalAlpha = .85;
+    c.lineWidth = Math.max(2, CELL * .08);
+    c.setLineDash([CELL * .18, CELL * .12]);
+    for (const [x, y] of cells){
+      if (y < BUFFER) continue;
+      roundRect(c, x * CELL + 3, (y - BUFFER) * CELL + 3, CELL - 6, CELL - 6, CELL * .16);
+      c.stroke();
+    }
+    c.restore();
+  }
+  if (hintMove && game.piece){
+    const key = cs => cs.map(v => v.join(',')).sort().join(';');
+    hintBox(c, hintMove.cells, !!ghostCells && key(ghostCells) === key(hintMove.cells), 1);
+  }
+}
+
+function tsSyncBar(){
+  const w = $('hintWhy');
+  if (w) w.innerHTML = stepsHTML(tsRec ? tsRec.why : '');
+  const sc = $('hintScore');
+  if (sc) sc.textContent = 'TSD ' + tsStats.tsd;
+  const rs = $('hintSheet');
+  if (rs && !rs.hidden) renderHintSheet();
+}
+
+// 要领卡
+const TS_RULES = [
+  ['槽长什么样', '两行深的缺口，一边有屋檐盖着；槽下面那行只空槽口那一格。盘面上品红虚线就是一个搭好的槽'],
+  ['屋檐用 L / J', 'L、J 横放最顺手，S、Z 也行。别拿 T 去填平地 —— T 是用来转进槽的'],
+  ['底下那行要补满', '槽两边都得填满，不然 T 转进去只消一行（T 旋单消）'],
+  ['槽没好先暂存 T', '7 块里必有一个 T：槽没搭好就把 T 放进暂存，等槽好了再换出来'],
+  ['转进去的手法', '把 T 送到槽口上方，软降到底，最后一下按变换转进去 —— 转完不能再挪，挪了就不算 T 旋'],
+  ['屋檐搭在左边', '手机只有顺时针：屋檐在左的槽，手法固定是「变换一下 → 送下去 → 到底再变换一下」，2~3 下；屋檐在右要连按六七下，容易按乱'],
+];
+function tsRenderSheet(body){
+  let h = '<span class="sheet-lb">要领（来自 tetris.wiki 等公开攻略的共识）</span>';
+  TS_RULES.forEach(([t, d], i) => {
+    h += '<div class="hr-rule"><b>' + (i + 1) + ' ' + escHtml(t) + '</b><span>' + escHtml(d) + '</span></div>';
+  });
+  const s = tsStats;
+  h += '<span class="sheet-lb">这一局</span><div class="hr-rule"><span>'
+     + '打出 T 旋双消 <b>' + s.tsd + '</b> 个 · 搭好槽 ' + s.built + ' 次<br>'
+     + '有槽没打 ' + s.miss + ' 次 · 把槽填了 ' + s.filled + ' 次 · 没槽用掉 T ' + s.waste + ' 次</span></div>';
+  body.innerHTML = h;
+  const tg = $('hintHideSw');
+  if (tg) tg.hidden = true;
+}
+
+function startTspin(){
+  startHint();
+  hintKind = 'tspin';
+  tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
+  document.body.classList.add('tspinning');
+  previewDirty = true;
+  tsCompute();
 }
 
 // ───────────────────────── 每日练习 ─────────────────────────
@@ -2134,6 +2421,7 @@ function drillBegin(stage){
   drill.stage = stage;
   drill.ms = 0; drill.clock = false;
   hintMode = stage === 'stack';
+  hintKind = 'stack';
   hintMove = null; hintBase = null;
   hintStats = { same: 0, good: 0, total: 0, holes: 0, rules: [0, 0, 0, 0] };
   restart();
@@ -3228,6 +3516,7 @@ function lockPiece(){
   scoreFor(full.length, spin, perfect);
   practiceCheck(full.length, spin, perfect);
   drillOnLock(p, full.length, spin);
+  if (tsOn()) tsOnLock(p, full.length, spin);
   if (vs) vsOnLock(full.length, spin, perfect);
   crazyOnClear(full.length, spin, perfect);
 
@@ -3757,7 +4046,7 @@ function scoreFor(n, spin, perfect){
     // 只有灰线在满级之后继续被它推快，所以再强的人也一定会撞墙。
     const newLevel = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
     // 每日练习不升级：三段每天同一个速度，数字才能跨天比
-    if (newLevel > game.level && !drill){ game.level = newLevel; flashLevel(); syncEdge(); }
+    if (newLevel > game.level && !drill && !tsOn()){ game.level = newLevel; flashLevel(); syncEdge(); }
   }
   // toast 只留"够得上事件"的：常态的连击/B2B 交给常驻徽章，
   // 否则同一件事会有飘字 + 徽章 + toast 三个通道同时喊。
@@ -4451,7 +4740,7 @@ function drawPreview(){
   const topH = Math.round(nh * 0.54);
   const botH = nh - topH;
   // 提示模式只给看 1 个 NEXT（推荐也只拿它算），占满整个框
-  if (hintMode){
+  if (hintMode && !tsOn()){
     if (game.queue[0]) drawMini(nextCtx, game.queue[0], 0, 0, nw, nh, 1, game.mods[0]);
     dbg.previews = game.queue[0] ? 1 : 0;
   } else {
@@ -8200,6 +8489,7 @@ function restartLabel(){
   if (vs) return '再来一局 · 对战 Lv ' + vs.bot.lv;
   if (drill) return '这一段重来';
   if (practice) return '重新开始 · 练习';
+  if (tsOn()) return '重新开始 · T 旋练习';
   if (hintMode) return '重新开始 · 提示';
   return '重新开始';
 }
@@ -8231,6 +8521,7 @@ function restartPick(m){
   if (m === 'nes') return openNesSheet();
   if (m === 'practice'){ startPractice(); openPrSheet(); return; }
   if (m === 'hint') return startHint();
+  if (m === 'tspin') return startTspin();
   if (m === 'drill') return startDrill();
 }
 
@@ -8698,7 +8989,7 @@ function init(){
       const m = b.dataset.m;
       if (m === 'practice' && !practice){ startPractice(); openPrSheet(); }
       else if (m === 'practice' && drill){ startPractice(); openPrSheet(); }
-      else if (m === 'hint' && (!hintMode || drill)) startHint();
+      else if (m === 'hint' && (!hintMode || drill || tsOn())) startHint();
       else if (m === 'normal' && assisted()) exitPractice();
     });
     syncModeSwitch();
@@ -8748,6 +9039,7 @@ function init(){
   if (hsh) hsh.addEventListener('click', (e) => { if (e.target === hsh) closeHintSheet(); });
   // ── 经典 NES / 对战 ──
   on('nesBtn', () => openNesSheet());
+  on('tsBtn',  () => startTspin());
   on('vsBtn',  () => openVsSheet());
   on('nesGo',  () => startNes(nesPick));
   on('vsGo',   () => startVs(vsPick));
@@ -8985,6 +9277,8 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, startTspin, tsOn, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 
   openRestartSheet, closeRestartSheet, restartPick,

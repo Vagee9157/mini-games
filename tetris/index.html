@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=5f29b68e">
+<link rel="stylesheet" href="tetris.css?v=b96f5a78">
 </head>
 <body>
 <div class="topline"></div>
@@ -104,6 +104,7 @@
             <div class="mode-row">
               <button class="pbtn ghost" id="vsBtn" type="button">对战机器人</button>
               <button class="pbtn ghost" id="nesBtn" type="button">经典 NES</button>
+              <button class="pbtn ghost" id="tsBtn" type="button">T 旋练习</button>
             </div>
             <!-- std-only:end -->
           </div>
@@ -292,8 +293,8 @@
   <!-- 提示模式的规则卡：四条优先级（带这一局各犯几次）+ 七种块各找什么台阶。开着时方块停住 -->
   <div class="sheet" id="hintSheet" hidden>
     <div class="sheet-box">
-      <div class="sheet-top"><h3>堆叠规则</h3></div>
-      <p class="pr-tip">高手不是每块都在想，是每种块来了都有默认去处：先找和它底面一样的台阶。推荐的落点里九成以上就是这么来的。</p>
+      <div class="sheet-top"><h3 id="hintSheetTitle">堆叠规则</h3></div>
+      <p class="pr-tip" id="hintSheetIntro">高手不是每块都在想，是每种块来了都有默认去处：先找和它底面一样的台阶。推荐的落点里九成以上就是这么来的。</p>
       <div class="hr-body" id="hintRulesBody"></div>
       <button class="pr-b hr-switch" id="hintHideSw" type="button"></button>
       <button class="pbtn sheet-done" id="hintDone">接着放</button>
@@ -351,6 +352,7 @@
         <button class="pr-b" type="button" data-rs="nes">经典 NES</button>
         <button class="pr-b" type="button" data-rs="practice">练习</button>
         <button class="pr-b" type="button" data-rs="hint">提示</button>
+        <button class="pr-b" type="button" data-rs="tspin">T 旋练习</button>
         <button class="pr-b" type="button" data-rs="drill">每日练习</button>
       </div>
       <!-- std-only:end -->
@@ -405,7 +407,7 @@
 
 </div>
 
-<script src="tetris.js?v=534e53a6"></script>
+<script src="tetris.js?v=f156316a"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

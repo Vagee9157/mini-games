@@ -33,7 +33,7 @@ JS = r"""async () => {
   ok(!sh.hidden && T.game.frozen, '点重开：弹出面板，方块停住');
   const y0 = T.game.piece.y; T.step(3000);
   ok(T.game.score === sc && T.game.pieces === pc && T.game.piece.y === y0, '面板开着这局一格都不动');
-  ok(/^重新开始$/.test($('rsAgain').textContent) && $('rsModes').querySelectorAll('[data-rs]').length === 6, '主按钮「重新开始」+ 六个玩法');
+  ok(/^重新开始$/.test($('rsAgain').textContent) && $('rsModes').querySelectorAll('[data-rs]').length === 7, '主按钮「重新开始」+ 七个玩法（含 T 旋练习）');
 
   // ── 三种关法都不重开 ──
   $('rsClose').click();

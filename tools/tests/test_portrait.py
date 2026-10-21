@@ -1,4 +1,4 @@
-"""手机竖屏兼容：9 种主流竖屏尺寸 × 7 种状态（开局 / 普通 / 练习 / 提示 / 每日练习 / 对战 / NES）
+"""手机竖屏兼容：9 种主流竖屏尺寸 × 8 种状态（开局 / 普通 / 练习 / 提示 / 每日练习 / 对战 / NES / T 旋练习）
 
 只管手机竖屏（横屏和桌面不在这里）。每个尺寸、每种状态都查：
   ① 页面能不能被滚动 —— 直接去滚 body 和 documentElement，看动不动。
@@ -64,7 +64,7 @@ with sync_playwright() as p:
     for name, w, h, kind in SIZES:
         d = dict(base); d['viewport'] = {'width': w, 'height': h}
         row = []
-        for mode in ('start', 'normal', 'practice', 'hint', 'drill', 'vs', 'nes'):
+        for mode in ('start', 'normal', 'practice', 'hint', 'drill', 'vs', 'nes', 'tspin'):
             pg = b.new_page(**d); pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
             pg.goto(f"http://127.0.0.1:{port}/tetris/index.html" + ("?mode=app" if kind=='app' else ""))
             pg.wait_for_function("() => !!window.__tetris")
@@ -76,6 +76,7 @@ with sync_playwright() as p:
             # 对战：右栏换成机器人小窗；NES：同一个盘面，按键换了意思
             if mode == 'vs': pg.evaluate("() => __tetris.startVs(5, 1)")
             if mode == 'nes': pg.evaluate("() => __tetris.startNes(9, 1)")
+            if mode == 'tspin': pg.evaluate("() => __tetris.startTspin()")
             pg.wait_for_timeout(250)
             m = pg.evaluate(M)
             tag = f"{name} {w}×{h} {mode}"
