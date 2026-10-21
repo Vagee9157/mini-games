@@ -46,6 +46,41 @@ JS = r"""async (eng) => {
   ok(ts.length >= 4 && ts[0] < 40 && ts[1] >= T.DAS - 10 && ts[1] < T.DAS + 40 && T.game.piece.x === 8,
      `按住右：按下立刻 1 格、${T.DAS}ms 左右开始连发、走到墙（时刻 ${ts.join(', ')}ms）`);
 
+  // ── 消行动画那 0.26 秒里的点按：存着，新块一出来照做；落底不存、也不启动防连点 ──
+  const clearSetup = () => { fresh('I'); const R = T.TOTAL_ROWS;
+    for (let x = 0; x < 9; x++) T.game.board[R - 1][x] = 'J';
+    T.game.board[R - 2][0] = 'J';
+    const p = T.game.piece; p.rot = 1; p.x = 7; p.y = 0; };
+  clearSetup(); await sleep(150);
+  T.game.queue[0] = 'T';                                 // 下一块固定成能转的
+  ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');
+  await sleep(90);
+  const midClear = !!T.clearing && !T.game.piece;
+  ev('btnRight', 'mousedown'); ev('btnRight', 'mouseup');
+  ev('btnCw', 'mousedown'); ev('btnCw', 'mouseup');
+  ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');  // 这一下没东西可落
+  await sleep(260);
+  const q = T.game.piece;
+  ok(midClear && q && q.type === 'T' && q.rot === 1 && q.x === 4 && q.y < 3,
+     `消行动画中点了右 + 变换：新块出来就照做（列 ${q && q.x}、朝向 ${q && q.rot}，应为 4 / 1；没被落底砸下去：y=${q && q.y}）`);
+  const n0 = T.game.pieces;
+  await sleep(100);
+  ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');
+  await sleep(30);
+  ok(T.game.pieces === n0 + 1, '消行时那下空落底不启动防连点：新块出来 0.1 秒后按落底照常落下');
+
+  // ── 两边同时按：后按的方向说了算，松开后回到另一边 ──
+  fresh(); T.game.piece.x = 4; await sleep(150);
+  ev('btnLeft', 'mousedown'); await sleep(220);
+  const xs = []; ev('btnRight', 'mousedown');
+  for (let i = 0; i < 14; i++){ await sleep(25); xs.push(T.game.piece.x); }
+  const rising = xs.every((v, i) => i === 0 || v >= xs[i - 1]) && xs[xs.length - 1] > xs[0];
+  ok(rising, `按住左再按住右：一路往右走、不来回抖（${xs.join(',')}）`);
+  const xr = T.game.piece.x;
+  ev('btnRight', 'mouseup'); await sleep(400);
+  ok(T.game.piece.x < xr, `松开右、左还按着：回头往左走（${xr} → ${T.game.piece.x}）`);
+  ev('btnLeft', 'mouseup');
+
   // ── 掉落节奏 / 游戏时间对表：只在 Chromium 上量 ——
   // 这台机器上的无头 WebKit 偶尔整帧卡住 300ms 以上，超过循环本来就有的单帧补算上限（MAX_CATCHUP 250），
   // 时间被截掉一段，量出来像「掉慢了」（跑全套时偶发红）。那是测试环境的卡顿，不是游戏的问题
@@ -85,6 +120,7 @@ with sync_playwright() as p:
     for eng in ('chromium', 'webkit'):
         b = getattr(p, eng).launch()
         pg = b.new_page(**p.devices['iPhone 13']); errs = []
+        pg.set_default_timeout(180000)   # 真实时钟跑 40 次轻点 + 各项，单次要 30 多秒；跑全套时机器忙，默认 30 秒会超时
         pg.on('pageerror', lambda e: errs.append(str(e)))
         pg.route("**fonts.googleapis.com/**", lambda r: r.abort())
         pg.goto(f"http://127.0.0.1:{port}/tetris/index.html"); pg.wait_for_function("() => !!window.__tetris")

@@ -895,6 +895,25 @@ function spawn(type, mod){
   else if (preHeld.ccw) tryRotate(-1);
 }
 
+// 消行动画那 0.26 秒没有当前块，原来这期间的点按（左右 / 旋转 / 暂存）全被吞掉 ——
+// 「消完行按了没反应」。现在先存着（最多 3 下），新块一出来就照做。
+// 落底不存：存了的话新块一出来就被砸下去，正是之前「连点两下砸掉两块」那个问题
+const inputBuf = [];
+function bufferInput(a){
+  if (clearing && game.started && !game.over && !game.paused && inputBuf.length < 3) inputBuf.push(a);
+}
+function flushInputs(){
+  const acts = inputBuf.splice(0);
+  for (const a of acts){
+    if (!game.piece || game.over) break;
+    if (a === 'L') tryMove(-1, 0);
+    else if (a === 'R') tryMove(1, 0);
+    else if (a === 'C') tryRotate(1);
+    else if (a === 'A') tryRotate(-1);
+    else if (a === 'X') holdPiece();
+  }
+}
+
 function spawnNext(){
   fillQueue();
   const t = game.queue.shift(), m = game.mods.shift();
@@ -918,7 +937,8 @@ function tryMove(dx, dy){
 function tryRotate(dir){
   if (nes){ nesRotate(dir); return false; }
   const p = game.piece;
-  if (!p || p.type === 'O') return false;
+  if (!p){ bufferInput(dir > 0 ? 'C' : 'A'); return false; }
+  if (p.type === 'O') return false;
   const from = p.rot & 3;
   const to = (from + dir + 4) & 3;
   const table = (p.type === 'I' ? KICKS.I : KICKS.JLSTZ)[`${from}>${to}`];
@@ -974,7 +994,8 @@ function hardDrop(){
 
 function holdPiece(){
   if (nes) return;                 // NES 没有暂存
-  if (!game.piece || game.holdUsed) return;
+  if (!game.piece){ bufferInput('X'); return; }
+  if (game.holdUsed) return;
   if (hintMode && !tsOn()){ showToast('提示模式没有暂存 —— 只看一个 NEXT 堆好'); return; }
   if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
@@ -8233,6 +8254,7 @@ function stepOnce(dt){
       clearing = null;
       armPre = true;
       spawnNext();
+      flushInputs();
       saveGame();
     }
     return 'clearing';
@@ -8356,9 +8378,13 @@ const preHeld = { cw: false, ccw: false, hold: false };
 let armPre = false;    // 只有「锁定后自动出的那一块」才吃 IRS/IHS
 const repeat = { left: 0, right: 0, started: { left: false, right: false } };
 
+// 两边同时按着：后按的那个方向说了算。原来两边各连发各的，方块在两格之间来回抖、
+// 哪边都不走（左手还压着左、右手去按右时就会这样）
+let lastDir = 'left';
 function handleAutoRepeat(dt){
   for (const dir of ['left', 'right']){
     if (!held[dir]) continue;
+    if (held.left && held.right && dir !== lastDir) continue;
     repeat[dir] += dt;
     const thresh = repeat.started[dir] ? ARR : DAS;
     while (repeat[dir] >= thresh){
@@ -8384,6 +8410,8 @@ function press(dir){
   held[d] = true;
   repeat[d] = 0;
   repeat.started[d] = false;
+  lastDir = d;
+  if (!game.piece){ bufferInput(d === 'left' ? 'L' : 'R'); return; }
   tryMove(d === 'left' ? -1 : 1, 0);
 }
 function release(dir){
@@ -8393,6 +8421,9 @@ function release(dir){
   held[d] = false;
   repeat[d] = 0;
   repeat.started[d] = false;
+  // 另一边还按着：接着往那边走（DAS 重新数）
+  const o = d === 'left' ? 'right' : 'left';
+  if (held[o]){ lastDir = o; repeat[o] = 0; repeat.started[o] = false; }
 }
 
 // 镜像开关的那一刻把两路都松掉。上面记的那份能兜住正常的按下-松手，
@@ -8402,6 +8433,7 @@ function clearHeld(){
   repeat.left = repeat.right = 0;
   repeat.started.left = repeat.started.right = false;
   pressedAs.left = 'left'; pressedAs.right = 'right';
+  inputBuf.length = 0;
 }
 
 const KEYMAP = {
@@ -8530,6 +8562,10 @@ function restartPick(m){
 const DROP_GUARD_MS = 160;
 let lastBtnDrop = -1e9;
 function btnHardDrop(){
+  // 没东西可落（消行动画中 / NES 等下一块）：这一下不算，也不启动防连点。
+  // 原来照样记一次，结果新块出来后真按的那一下落底被当成「连点」吞掉
+  const canDrop = nes ? !!(nes.cur && nes.phase === 'fall') : !!game.piece;
+  if (!canDrop) return;
   const now = performance.now();
   if (now - lastBtnDrop < DROP_GUARD_MS) return;
   lastBtnDrop = now;
@@ -8825,6 +8861,7 @@ function restart(){
   clearing = null;
   softDropping = false;
   held.left = held.right = false;
+  inputBuf.length = 0;
   $('overlay').classList.remove('show');
   $('pauseTx').textContent = '暂停';
   // 图标也要复位。原来只改文字不改 path，暂停→重开之后按钮会一直是播放三角
@@ -9277,6 +9314,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  get inputBuf(){ return inputBuf; },
   tsdSlots, tsBestSlot, tsPathText, TS_W, startTspin, tsOn, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
