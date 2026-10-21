@@ -2,6 +2,9 @@
    三套布局：桌面（侧栏）/ 手机竖屏（按键在下）/ 手机横屏（按键分到左右拇指）。 */
 
 html, body{ height: 100%; overflow: hidden; overscroll-behavior: none; }
+/* 屏幕锁住：双击不放大（iOS 不认 viewport 里的 user-scalable=no，靠这条关掉双击缩放）。
+   双指缩放和空白处拖动在 tetris.js 的 lockPage() 里挡 */
+html, body{ touch-action: manipulation; }
 /* clip 而不是只靠 hidden：hidden 的容器手指滚不动，但 focus()、点击之类会把它程序性地
    滚下去。实测 375×812 上 body 内容比屏幕高 78px，点一下「开始」顶栏就被顶出屏幕。
    clip 不产生滚动容器，没有东西可滚。不支持 clip 的老浏览器退回上一行的 hidden。 */
@@ -1837,3 +1840,13 @@ body.tspinning .hint-why{ color: #ff9ce4; }
 .pop{ background: rgba(6, 10, 20, .55); padding: 3px 10px 4px; border-radius: 10px; }
 /* 练习面板里的每日练习：次要按钮，一行放得下 */
 .dr-entry{ width: 100%; margin: 0 0 8px; font-size: 13px; white-space: nowrap; }
+
+/* 竖屏：练习 / 提示 / 每日练习那条细栏挪到最底下，和按键排拉开 16px —— 原来贴着「变换」下沿，
+   按变换时老误点到「规则」「先自己找」。底部留白相应少 16px，盘面大小不变 */
+@media (orientation: portrait){
+  body:is(.practising, .hinting, .drilling) .game,
+  body.immersive:is(.practising, .hinting, .drilling) .game{
+    padding-bottom: max(18px, calc(env(safe-area-inset-bottom) + 14px));
+  }
+  body.practising .prbar, body.hinting .hintbar, body.drilling .drbar{ margin-top: 16px; }
+}

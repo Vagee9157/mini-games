@@ -4002,6 +4002,27 @@ function fillRunLog(){
   box.hidden = false;
 }
 
+// 屏幕锁住不动：双指缩放、双击放大、手指在空白处拖动都不要。iOS Safari 不认 viewport 的
+// user-scalable=no；双击放大由 CSS 的 touch-action: manipulation 关，这里挡另外两种。
+// 拖动只放行真能滚的东西（弹层、结算卡这些 overflow:auto 且内容超高的），其它一律 preventDefault
+function canScroll(el){
+  for (; el && el !== document.body && el.nodeType === 1; el = el.parentElement){
+    if (el.scrollHeight > el.clientHeight + 1){
+      const oy = getComputedStyle(el).overflowY;
+      if (oy === 'auto' || oy === 'scroll') return true;
+    }
+  }
+  return false;
+}
+function lockPage(){
+  const stop = e => e.preventDefault();
+  for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, stop, { passive: false });
+  document.addEventListener('dblclick', stop, { passive: false });
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length > 1 || !canScroll(e.target)) e.preventDefault();
+  }, { passive: false });
+}
+
 // ───────────────────────── 局后复盘（标准版普通局） ─────────────────────────
 //
 // 20 级以后倍率封顶 ×8，同样消一行，单消 800、四消 1600、T 旋双消 3200 —— 分数高低主要看「怎么消的」，
@@ -9165,6 +9186,8 @@ function init(){
   layout();
   bindButtons();
 
+  lockPage();
+
   // 任何一次触碰都先把音频上下文拉起来（iOS 必须在手势里做）
   // 一直挂着直到音频真的跑起来为止，不能只试一次
   const KICK_EVENTS = ['pointerdown', 'touchstart', 'keydown'];
@@ -9486,7 +9509,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, reviewTips, reviewRead, REVIEW_KEY, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, reviewRead, REVIEW_KEY, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 
