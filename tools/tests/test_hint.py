@@ -182,7 +182,18 @@ JS = r"""() => {
   place(hmh.rot, hmh.x);
   ok(!T.hintReveal || T.hintReveal.until < performance.now() + 1, '放得和推荐一模一样就不用再亮');
   setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]);
-  if (found){ give(found.type); place(found.rot, found.x); ok(!!T.hintReveal, '放了另一处一样好的：亮一下推荐给你对照'); }
+  // 「另一处一样好的」要按此刻的局面重新挑：前面挑的那个是按当时的 NEXT 算的，
+  // NEXT 一换推荐也会变，有时它正好就成了推荐本身（原来偶发红在这里）
+  if (found){
+    give(found.type);
+    const b0 = T.simBoard(), k = cs => cs.map(c => c.join(',')).sort().join(';');
+    const r = T.hintBest(b0, found.type, T.game.queue[0]);
+    const hb = T.simFeatures(T.simPlace(b0, r.best.cells).b).holes;
+    const alt = r.all.find(m => k(m.cells) !== k(T.hintMove.cells) && r.best.score - m.score <= T.HINT_TOL
+                              && T.simFeatures(T.simPlace(b0, m.cells).b).holes <= hb);
+    if (alt){ place(alt.rot, alt.x); ok(!!T.hintReveal, '放了另一处一样好的：亮一下推荐给你对照'); }
+    else ok(true, '（这一手没有第二处一样好的落点，跳过）');
+  }
   T.toggleHintHide();
   ok(!T.hintHidden(), '再点一下改回直接看');
 
