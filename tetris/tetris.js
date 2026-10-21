@@ -3577,12 +3577,19 @@ function lockPiece(){
 
   // 这一下造了几个洞。countHoles 是 220 格扫描，只在锁定时跑两次 ——
   // 一局八十几次，不进每帧循环。
-  const holesBefore = CRAZY ? countHoles() : 0;
+  const review = !CRAZY && !assisted() && !!game.run;    // 普通局的局后复盘要记洞和堆高
+  const holesBefore = CRAZY || review ? countHoles() : 0;
   const stalled = lockResets;
 
   for (const [cx, cy] of cellsOf(p.type, p.rot)){
     const by = p.y + cy, bx = p.x + cx;
     if (by >= 0 && by < TOTAL_ROWS) game.board[by][bx] = p.type;
+  }
+  if (review){
+    const made = countHoles() - holesBefore;
+    if (made > 0) game.run.holes += made;
+    const top = topFilledRow();
+    if (top >= 0 && TOTAL_ROWS - top >= REVIEW_HIGH) game.run.highLocks++;
   }
   if (CRAZY){
     const made = countHoles() - holesBefore;
@@ -3995,6 +4002,72 @@ function fillRunLog(){
   box.hidden = false;
 }
 
+// ───────────────────────── 局后复盘（标准版普通局） ─────────────────────────
+//
+// 20 级以后倍率封顶 ×8，同样消一行，单消 800、四消 1600、T 旋双消 3200 —— 分数高低主要看「怎么消的」，
+// 不是消了多少行。结算页只给总分的话，打了 246 行才 24 万，自己看不出差在哪。
+// 这里把这局拆开：消行构成、分数从哪来、造了几个洞、多少块是在高处放的，再挑最要紧的 1~3 条建议。
+const REVIEW_KEY = nsKey('review.v1');
+const REVIEW_KEPT = 20;
+const REVIEW_HIGH = 13;            // 堆到 13 行以上（盘面过六成）放的块算「在高处放」
+function reviewRead(){
+  try { const a = JSON.parse(localStorage.getItem(REVIEW_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+function reviewSave(e){
+  const a = reviewRead(); a.push(e);
+  try { localStorage.setItem(REVIEW_KEY, JSON.stringify(a.slice(-REVIEW_KEPT))); } catch { /* 存不了就只看这一局 */ }
+}
+function pct(a, b){ return b > 0 ? Math.round(a / b * 100) : 0; }
+function reviewTips(r, pieces, lines){
+  const tips = [];
+  const per100 = pieces ? r.holes / pieces * 100 : 0;
+  const high = pct(r.highLocks, pieces);
+  const small = pct(r.smallLines, r.smallLines + r.bigLines);
+  const tsd = r.tsc[2] + r.tsc[3];
+  if (per100 >= 8)
+    tips.push(['洞造多了', `这局造了 ${r.holes} 个洞（每 100 块 ${per100.toFixed(0)} 个）。洞上面那几行全都消不掉，堆高就是这么来的。放之前看一眼会不会盖住空格，宁可放高一格也别盖`]);
+  if (high >= 25)
+    tips.push(['在高处待太久', `${high}% 的块是在盘面过六成时放的。堆高了就先消低处、别再攒，降下来再搭槽 —— 灰线一涨就顶死了`]);
+  if (lines >= 30 && small >= 50)
+    tips.push(['消得太碎', `${small}% 的行是 1~3 行一次消掉的。20 级后单消一行 800 分，四消一行 1600、T 旋双消一行 3200。盘面不高时先别急着消，攒着打四消或 T 旋`]);
+  if (pieces >= 100 && tsd === 0)
+    tips.push(['没打出 T 旋', 'T 旋双消一次 = 两行拿四消的分。T 来了没槽就先暂存，等槽搭好再换出来；手生的话先去「T 旋练习」中速练两把']);
+  else if (pieces >= 100 && tsd > 0 && tsd < r.clr[4] / 2)
+    tips.push(['T 旋还能多打', `T 旋双消 ${tsd} 次、四消 ${r.clr[4]} 次。T 旋双消只要两行就拿四消的分，还不用留井，多搭槽`]);
+  if (!tips.length)
+    tips.push(['打法对了', `四消 + T 旋拿了 ${pct(r.bigPts, r.bigPts + r.smallPts)}% 的分。下一步是扛得更久：盘面一高就先保命`]);
+  return tips.slice(0, 3);
+}
+function fillReview(){
+  const box = $('review');
+  if (!box) return;
+  const r = game.run;
+  const show = !CRAZY && !!r && !assisted() && game.pieces >= 10;
+  box.hidden = !show;
+  if (!show) return;
+  const secs = game.elapsed / 1000, lines = game.lines, pieces = game.pieces;
+  const perLine = lines ? Math.round(game.score / lines) : 0;
+  const prev = reviewRead().slice(-1)[0];
+  const tsd = r.tsc[2] + r.tsc[3], tsOther = r.tsc[1] + r.tsc[0] + r.mini;
+  const rows = [];
+  const add = (k, v, wide) => rows.push(`<span${wide ? ' class="w"' : ''}><i>${k}</i><b>${v}</b></span>`);
+  add('每行均分', groupInt(perLine) + (prev && prev.lines ? `（上局 ${groupInt(prev.perLine)}）` : ''), true);
+  add('四消', r.clr[4] + ' 次');
+  add('T 旋双消', tsd + ' 次');
+  add('单消 / 双消 / 三消', `${r.clr[1]} / ${r.clr[2]} / ${r.clr[3]} 次`, true);
+  if (tsOther) add('其它 T 旋（单消 / mini 等）', tsOther + ' 次', true);
+  add('四消+T旋 拿分', pct(r.bigPts, r.bigPts + r.smallPts) + '%');
+  add('B2B', r.b2bs + ' 次');
+  add('造洞', r.holes + ' 个');
+  add('高处放块', pct(r.highLocks, pieces) + '%');
+  add('用时', Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0'));
+  add('每秒', (secs > 0 ? pieces / secs : 0).toFixed(2) + ' 块');
+  $('rvStats').innerHTML = rows.join('');
+  $('rvTips').innerHTML = reviewTips(r, pieces, lines)
+    .map(([t, d]) => `<li><b>${escHtml(t)}</b><span>${escHtml(d)}</span></li>`).join('');
+  if (isRealRun()) reviewSave({ d: Date.now(), score: game.score, lines, perLine, t4: r.clr[4], tsd, holes: r.holes, pieces });
+}
+
 // 分数关口播报。一局能撞三四个，是频率最高的一条，顺带给「一局之内没有
 // 阶段感」补一个节点 —— 分数原来只是个一直涨的数字。
 // 关口密一点，一局能多撞几次。大部分只报个数，整数关口才给一句话 ——
@@ -4041,7 +4114,10 @@ function newRun(){
   // 结算页因此永远看不到这三种（它们占非金块变异的四成多）。
   return { peak: 1, dangerMs: 0, gold: 0, bomb: 0, laser: 0, hammer: 0, fill: 0, fork: 0, dye: 0,
            bets: 0, betWins: 0, rerolls: 0, bestHit: 0, tspin: 0, tetris: 0, perfect: 0,
-           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0, zones: 0, zoneRows: 0, ups: [] };
+           mile: 0, wasDanger: false, saves: 0, chests: 0, delays: 0, zones: 0, zoneRows: 0, ups: [],
+           // 标准版局后复盘用：普通消行按行数、T 旋按行数各记几次，分数分「四消+T旋」和「1~3 行」两份
+           clr: [0, 0, 0, 0, 0], tsc: [0, 0, 0, 0], mini: 0, b2bs: 0, maxCombo: 0,
+           bigPts: 0, bigLines: 0, smallPts: 0, smallLines: 0, holes: 0, highLocks: 0 };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -4110,6 +4186,15 @@ function scoreFor(n, spin, perfect){
     if (n === 4) game.run.tetris++;
     if (spin === 'tspin') game.run.tspin++;
     if (perfect) game.run.perfect++;
+    if (n > 0){
+      const R = game.run, big = n >= 4 || spin === 'tspin';
+      if (spin === 'tspin') R.tsc[Math.min(n, 3)]++;
+      else if (spin === 'mini') R.mini++;
+      else R.clr[Math.min(n, 4)]++;
+      if (b2bApplied) R.b2bs++;
+      if (game.combo > R.maxCombo) R.maxCombo = game.combo;
+      if (big){ R.bigPts += gain; R.bigLines += n; } else { R.smallPts += gain; R.smallLines += n; }
+    }
   }
 
   // 飘字落在被消掉那几行的中间；空转的 T-spin 没有消除行，落在方块自己身上
@@ -4331,6 +4416,7 @@ function endGame(why){
   $('legacyCell').hidden = !lg;
   if (lg) $('overLegacy').textContent = groupInt(lg);
   fillRunLog();
+  fillReview();
   syncRank();
   $('overDied').textContent = DEATH_TEXT[game.why] || '';
   // 「最强」只在够得着的时候才提（低于第一档说什么都是扫兴）。
@@ -9400,7 +9486,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, reviewTips, reviewRead, REVIEW_KEY, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

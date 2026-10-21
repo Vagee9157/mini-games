@@ -602,6 +602,14 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* 局后复盘（标准版） */
+.review{ margin: 14px 0 0; text-align: left; }
+.rv-lb{ display: block; margin: 9px 0 4px; font-size: 10.5px; letter-spacing: .08em; color: var(--ink-dim); }
+.rv-tips{ list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rv-tips li{ padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.03);
+  font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
+.rv-tips b{ display: block; color: #ffd166; font-weight: 600; margin-bottom: 1px; }
+
 .overlay [data-when]{ display: none; }
 .overlay[data-mode="start"] [data-when~="start"],
 .overlay[data-mode="pause"] [data-when~="pause"],
