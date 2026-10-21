@@ -117,6 +117,25 @@ JS = r"""async () => {
   }
   const med = a => a.sort((x, y) => x - y)[a.length >> 1];
   ok(med(ts.T) < 12 && med(ts.other) < 12, `出块算建议：T 中位 ${med(ts.T).toFixed(1)}ms、最慢 ${Math.max(...ts.T).toFixed(1)}；其它块中位 ${med(ts.other).toFixed(1)}ms`);
+
+  // ── 速度：要领卡里选慢 / 中 / 快，当场换、不涨级、重开后还记得 ──
+  T.startTspin();
+  ok(T.game.level === 1 && T.tsSpeed === 1 && $('modeTag').textContent === 'T 旋练习 · 慢', `默认慢速 1 级（标签「${$('modeTag').textContent}」）`);
+  $('hintRules').click();
+  const sb = [...document.querySelectorAll('#hintRulesBody [data-tsv]')];
+  ok(sb.length === 3 && sb[0].classList.contains('on'), '要领卡里有三档速度，慢速亮着');
+  sb[2].click();
+  ok(T.game.level === 20 && $('modeTag').textContent === 'T 旋练习 · 快'
+     && document.querySelector('#hintRulesBody [data-tsv="20"]').classList.contains('on'), '点「快」：当场变 20 级，标签和按钮跟着变');
+  T.closeHintSheet && T.closeHintSheet();
+  T.game.lines = 199;                  // 普通局这时候一消行就该升级
+  const ln0 = T.game.lines;
+  load(['###....###']); give('I'); T.game.piece.x = 3; T.game.piece.rot = 0; T.hardDrop(); settle();
+  ok(T.game.lines > ln0 && T.game.level === 20, `消行后不涨级（消了 ${T.game.lines - ln0} 行，${T.game.level} 级）`);
+  T.startTspin();
+  ok(T.game.level === 20 && localStorage.getItem(T.TS_SPEED_KEY) === '20', '重开 T 旋练习还是快速，选择存下来了（刷新也记得）');
+  T.startHint();
+  ok(T.game.level === 1, '切回堆叠提示：从 1 级开始，不受 T 旋速度影响');
   return L;
 }"""
 

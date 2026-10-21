@@ -1489,7 +1489,7 @@ function syncResume(){
 function syncModeTag(){
   const t = $('modeTag');
   if (!t) return;
-  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习' : '';
+  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习 · ' + tsSpeedName() : '';
   t.textContent = txt;
   t.hidden = !txt;
 }
@@ -2220,8 +2220,25 @@ const TS_RULES = [
   ['转进去的手法', '把 T 送到槽口上方，软降到底，最后一下按变换转进去 —— 转完不能再挪，挪了就不算 T 旋'],
   ['手机上屋檐搭在左边', '屏幕上只有顺时针：屋檐在左的槽，手法固定是「变换一下 → 送下去 → 到底再变换一下」，2~3 下；屋檐在右要连按六七下，容易按乱。用键盘（有 Z 键逆时针）就两边都一样'],
 ];
+// 速度：1 级慢慢想，练熟了换快的 —— 普通局到 10 级以后块掉得快，得一眼认出槽、手上直接按出来
+const TS_SPEED_KEY = nsKey('ts.speed.v1');
+const TS_SPEEDS = [[1, '慢'], [10, '中'], [20, '快']];
+let tsSpeed = 1;
+try { const v = +localStorage.getItem(TS_SPEED_KEY); if (TS_SPEEDS.some(([l]) => l === v)) tsSpeed = v; } catch { /* 读不到就慢速 */ }
+function tsSpeedName(){ return (TS_SPEEDS.find(([l]) => l === tsSpeed) || TS_SPEEDS[0])[1]; }
+function setTsSpeed(lv){
+  if (!TS_SPEEDS.some(([l]) => l === lv)) return;
+  tsSpeed = lv;
+  try { localStorage.setItem(TS_SPEED_KEY, String(lv)); } catch { /* 存不了就算了 */ }
+  if (tsOn()){ game.level = lv; syncEdge(); needsDraw = true; }   // 当场换速，不用重开
+  syncModeTag();
+  renderHintSheet();
+}
 function tsRenderSheet(body){
-  let h = '<span class="sheet-lb">要领（来自 tetris.wiki 等公开攻略的共识）</span>';
+  let h = '<span class="sheet-lb">速度</span><div class="seg seg-3">'
+        + TS_SPEEDS.map(([l, n]) => '<button class="seg-btn' + (l === tsSpeed ? ' on' : '') + '" type="button" data-tsv="' + l + '">'
+                                   + n + ' · ' + l + ' 级</button>').join('') + '</div>';
+  h += '<span class="sheet-lb">要领（来自 tetris.wiki 等公开攻略的共识）</span>';
   TS_RULES.forEach(([t, d], i) => {
     h += '<div class="hr-rule"><b>' + (i + 1) + ' ' + escHtml(t) + '</b><span>' + escHtml(d) + '</span></div>';
   });
@@ -2230,6 +2247,7 @@ function tsRenderSheet(body){
      + '打出 T 旋双消 <b>' + s.tsd + '</b> 个 · 搭好槽 ' + s.built + ' 次<br>'
      + '有槽没打 ' + s.miss + ' 次 · 把槽填了 ' + s.filled + ' 次 · 没槽用掉 T ' + s.waste + ' 次</span></div>';
   body.innerHTML = h;
+  body.querySelectorAll('[data-tsv]').forEach(b => b.onclick = () => setTsSpeed(+b.dataset.tsv));
   const tg = $('hintHideSw');
   if (tg) tg.hidden = true;
 }
@@ -2238,6 +2256,8 @@ function startTspin(){
   startHint();
   hintKind = 'tspin';
   game.noGarbage = true;            // T 旋练习专心练槽：不涨灰线
+  game.level = tsSpeed;             // 等级不涨（见锁定后升级那里），停在选的速度
+  syncEdge();
   tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
   document.body.classList.add('tspinning');
   previewDirty = true;
@@ -9380,7 +9400,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 
