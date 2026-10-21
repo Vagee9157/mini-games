@@ -3231,10 +3231,17 @@ function lockPiece(){
     // 连击 0~5 逐级升半音（2^(1/12) ≈ 1.0595）
     const pitch = Math.pow(1.0595, Math.min(6, Math.max(0, game.combo)));
     sfx(spin ? 'tspin' : (full.length === 4 ? 'tetris' : 'clear'), pitch);
-    buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);
+    if (CRAZY) buzz(full.length >= 4 ? [30, 40, 70] : 18 + full.length * 8);   // 标准版的震动在 hitFx 里按力度给
     if (full.length === 4 || perfect) musicDuck(170);
     clearing = { rows: full, t: 0, dur: 260 };
-    for (const y of full) burstRow(y);
+    if (CRAZY) for (const y of full) burstRow(y);
+    else {
+      // 碎块：每格 1~3 颗，力度越大飞得越快。总数照样受粒子上限管着
+      const per = lastHit >= 5 ? 3 : lastHit >= 2 ? 2 : 1;
+      for (const y of full) burstRow(y, per, 1 + lastHit * .12);
+      clearing.color = hitColor(full.length, spin, Math.max(0, game.combo));
+      clearing.power = lastHit;
+    }
     if (CRAZY) addEmbers(full, full.length === 4 ? '#ffd166' : '#7fe3ff');
     flashBoard(full.length);
   } else {
@@ -3731,9 +3738,11 @@ function scoreFor(n, spin, perfect){
     // 而全消是整局可能一次都打不出来的东西，稀有度差着量级。
     if (perfect) perfectFx();
 
-    const big = n === 4 || spin || perfect;
-    if (big) shake(n === 4 || perfect);
-    else if (n >= 2) shake(false);
+    if (CRAZY){
+      const big = n === 4 || spin || perfect;
+      if (big) shake(n === 4 || perfect);
+      else if (n >= 2) shake(false);
+    } else lastHit = hitFx(n, spin, perfect, b2bApplied);
   }
 
   if (n > 0){
@@ -4246,7 +4255,9 @@ function draw(){
       const flash = 1 - clearing.t / FLASH_MS;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = `rgba(255,255,255,${(.10 + .30 * flash).toFixed(3)})`;
+      ctx.fillStyle = clearing.color
+        ? rgba(clearing.color, .12 + (.24 + clearing.power * .035) * flash)
+        : `rgba(255,255,255,${(.10 + .30 * flash).toFixed(3)})`;
       for (const y of clearing.rows){
         if (y < BUFFER) continue;
         ctx.fillRect(0, (y - BUFFER) * CELL, W, CELL);
@@ -4351,7 +4362,7 @@ function draw(){
     }
   }
   if (CRAZY && embers.length) drawEmbers();
-  if (sweeps.length || rings.length) drawFx();
+  if (sweeps.length || rings.length || waves.length) drawFx();
   if (CRAZY && wallCol >= 0){
     // 封锁列：斜纹一片，和「这里不能放」这件事对得上
     ctx.save();
@@ -4525,17 +4536,85 @@ function burstLand(p){
   }
 }
 
-function burstRow(y){
+// ── 打击感（标准版）──
+// 原来 1~3 行几乎一个样：单消不震，双消三消同一档小震，连击只升个音。
+// 现在先算「这一下有多重」，所有反馈都按它加码：
+//   行数为主（1/2/3/4 行 = 1/2/3.2/5），T 旋 +1.5、mini +.5，B2B +1，连击每连 +.5（封顶 +4），全消拉满
+// 跟着它走的：震屏幅度、消除行闪光的颜色和亮度、冲击波（两行起）、碎块多少和速度、
+// 棋盘外框一闪（三行起 / 连击）、连击计数、震动、低音重击（三行起）。
+// 全部只在消行那零点几秒里画；不加长消行停顿，规则和节奏一点不变。疯狂版走它原来那套。
+function hitPower(n, spin, perfect, combo, b2b){
+  if (perfect) return 10;
+  let p = [0, 1, 2, 3.2, 5][Math.min(4, n)] || 0;
+  if (spin === 'tspin') p += 1.5; else if (spin === 'mini') p += .5;
+  if (b2b) p += 1;
+  if (combo > 0) p += Math.min(4, combo * .5);
+  return Math.min(10, p);
+}
+// 颜色：哪一种消除（白 / 青 / 紫 / 金 / 品红），连击 3 连起往橙、6 连起往红走
+function hitColor(n, spin, combo){
+  if (combo >= 5) return '#ff5a5a';
+  if (combo >= 2) return '#ff9f43';
+  if (spin === 'tspin' || spin === 'mini') return '#ff6bd6';
+  return ['#ffffff', '#dff6ff', '#7fe3ff', '#c9a6ff', '#ffd166'][Math.min(4, n)];
+}
+const REDUCED_MOTION = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+let waves = [];     // 冲击波 { top, bottom, color, p, t }
+let lastHit = 0;    // 这一次消行的打击力度（lockPiece 拿它定碎块多少、闪光多亮）
+const WAVE_MS = 380;
+function hitFx(n, spin, perfect, b2b){
+  const combo = Math.max(0, game.combo);
+  const p = hitPower(n, spin, perfect, combo, b2b);
+  const color = hitColor(n, spin, combo);
+  // 震屏：幅度和时长都按力度连续变（单消约 2px 轻磕，四消 6px，连击 / B2B 再往上）
+  const el = $('shaker');
+  if (el && !REDUCED_MOTION){
+    el.style.setProperty('--sh', (1 + p * .95).toFixed(1) + 'px');
+    el.style.setProperty('--sh-ms', Math.round(160 + p * 26) + 'ms');
+    el.classList.remove('shake', 'shake-big', 'hit');
+    void el.offsetWidth;
+    el.classList.add('hit');
+  }
+  // 冲击波：两行起，从消掉那几行往上下推开两道光
+  if ((n >= 2 || combo >= 2 || spin) && lastClearRows.length){
+    const top = Math.max(BUFFER, Math.min(...lastClearRows)), bottom = Math.max(...lastClearRows);
+    if (bottom >= BUFFER){ waves.push({ top, bottom, color, p, t: 0 }); while (waves.length > 2) waves.shift(); }
+  }
+  // 外框一闪：三行起或连击
+  const hb = $('boardHit');
+  if (hb && p >= 3){
+    // 颜色变了才重设：光晕是一大圈模糊，改一次颜色就要整块重新栅格化
+    if (hb._c !== color){ hb._c = color; hb.style.setProperty('--hit-c', color); }
+    hb.style.setProperty('--hit-a', Math.min(1, .35 + p * .08).toFixed(2));
+    hb.classList.remove('on'); void hb.offsetWidth; hb.classList.add('on');
+  }
+  // 连击计数：第 2 连起单独弹一个，越连越大
+  if (combo >= 1 && CELL){
+    const k = combo + 1;
+    popScore(CELL * COLS / 2, CELL * ROWS * .2, k + ' 连', 'COMBO', 'combo' + (combo >= 5 ? ' c3' : combo >= 2 ? ' c2' : ''),
+             Math.min(1.9, 1 + combo * .12));
+  }
+  // 震动：节奏跟着行数，连击再加一下
+  const v = n >= 4 ? [30, 40, 80] : n === 3 ? [24, 30, 30] : n === 2 ? [22] : [12];
+  if (combo >= 2) v.push(30, Math.min(60, 20 + combo * 6));
+  buzz(v);
+  // 低音重击：三行起
+  if (n >= 3 || perfect) sfx('drop', n >= 4 ? .5 : .62);
+  return p;
+}
+
+// per：每格几颗；spd：速度倍率（标准版按打击力度给，疯狂版用默认）
+function burstRow(y, per = 2, spd = 1){
   if (y < BUFFER) return;
   for (let x = 0; x < COLS; x++){
     const t = game.board[y][x];
     const color = t ? colorOf(t) : '#ffffff';
-    for (let i = 0; i < 2; i++){
+    for (let i = 0; i < per; i++){
       particles.push({
         x: (x + .5) * CELL,
         y: (y - BUFFER + .5) * CELL,
-        vx: (rndFx() - .5) * 220,
-        vy: (rndFx() - .5) * 160,
+        vx: (rndFx() - .5) * 220 * spd,
+        vy: (rndFx() - .5) * 160 * spd,
         life: 1, color, size: CELL * .2,
       });
     }
@@ -4599,7 +4678,9 @@ function stepFx(dt){
     if ((sweeps[i].t += dt) > SWEEP_MS) sweeps.splice(i, 1);
   for (let i = rings.length - 1; i >= 0; i--)
     if ((rings[i].t += dt) > RING_MS) rings.splice(i, 1);
-  if (sweeps.length || rings.length) needsDraw = true;
+  for (let i = waves.length - 1; i >= 0; i--)
+    if ((waves[i].t += dt) > WAVE_MS) waves.splice(i, 1);
+  if (sweeps.length || rings.length || waves.length) needsDraw = true;
 }
 
 function drawFx(){
@@ -4617,6 +4698,23 @@ function drawFx(){
     ctx.save();
     ctx.fillStyle = g;
     ctx.fillRect(headX - bandW, top, bandW, h);
+    ctx.restore();
+  }
+  // 冲击波：两道横线从消除带的上下沿往外推，越推越淡越细
+  for (const w of waves){
+    const k = w.t / WAVE_MS, e = 1 - (1 - k) * (1 - k);
+    const dist = CELL * (1 + w.p * 1.1) * e;
+    const yTop = (w.top - BUFFER) * CELL - dist, yBot = (w.bottom - BUFFER + 1) * CELL + dist;
+    // 第一版 .05+.022p 太细，双消那道几乎看不见，和单消拉不开
+    const lw = Math.max(2, CELL * (.1 + w.p * .03) * (1 - k * .7));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = (1 - k) * .95;
+    ctx.fillStyle = w.color;
+    ctx.fillRect(0, yTop - lw / 2, W, lw);
+    ctx.fillRect(0, yBot - lw / 2, W, lw);
+    ctx.globalAlpha = (1 - k) * .16;
+    ctx.fillRect(0, yTop, W, Math.max(0, yBot - yTop));
     ctx.restore();
   }
   for (const r of rings){
@@ -4649,7 +4747,8 @@ function stepParticles(dt){
     q.y += q.vy * dt / 1000;
     q.vy += 520 * dt / 1000;
   }
-  if (particles.length > 110) particles.splice(0, particles.length - 110);
+  // 上限 140：标准版四消每格 3 颗正好 120；再多就挤掉最早的那些
+  if (particles.length > 140) particles.splice(0, particles.length - 140);
 }
 
 function drawParticles(){
@@ -7963,7 +8062,7 @@ function canNap(){
   const p = game.piece;
   if (!p || clearing || grounded) return false;                  // 落地后在等锁定（还有锁定闪光）
   if (held.left || held.right || softDropping) return false;     // 按住横移 / 软降
-  if (needsDraw || particles.length || trails.length || squash || sweeps.length || rings.length) return false;
+  if (needsDraw || particles.length || trails.length || squash || sweeps.length || rings.length || waves.length) return false;
   return true;
 }
 function loopNap(){
@@ -8918,6 +9017,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; },
+  hitPower, hitColor, get waves(){ return waves; }, get lastHit(){ return lastHit; },
   get napping(){ return !!napTimer; }, wakeLoop, NAP_MAX,
   openRestartSheet, closeRestartSheet, restartPick,
   HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },

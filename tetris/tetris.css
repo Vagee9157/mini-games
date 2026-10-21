@@ -1767,3 +1767,29 @@ body.nesing .slot.hold{ opacity: .25; }
 .rs-modes{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 #restartSheet .sheet-lb{ margin-top: 2px; }
 .rs-close{ display: block; width: 100%; margin-top: 10px; }
+
+/* ── 打击感（标准版）── 幅度 / 时长 / 颜色 / 亮度都由 JS 按打击力度写进变量 */
+.shaker.hit{ animation: shakeHit var(--sh-ms, .22s) cubic-bezier(.2,.7,.3,1); }
+@keyframes shakeHit{
+  0%, 100%{ transform: translate(0, 0); }
+  12%{ transform: translate(calc(var(--sh, 3px) * -1), calc(var(--sh, 3px) * .7)); }
+  30%{ transform: translate(calc(var(--sh, 3px) * .8), calc(var(--sh, 3px) * -.6)); }
+  52%{ transform: translate(calc(var(--sh, 3px) * -.5), calc(var(--sh, 3px) * -.3)); }
+  76%{ transform: translate(calc(var(--sh, 3px) * .25), calc(var(--sh, 3px) * .2)); }
+}
+.board-hit{
+  position: absolute; inset: 0; border-radius: 10px; pointer-events: none;
+  opacity: 0; will-change: opacity;
+  box-shadow: 0 0 0 2px var(--hit-c, #fff), 0 0 40px var(--hit-c, #fff);
+}
+.board-hit.on{ animation: boardHit .48s ease-out; }
+@keyframes boardHit{ 0%{ opacity: 0; } 14%{ opacity: var(--hit-a, .6); } 100%{ opacity: 0; } }
+/* 连击计数：越连越热 */
+.pop.combo b{ color: #ffe3a3; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 18px rgba(255,190,90,.6); }
+.pop.combo i{ color: #ffd166; letter-spacing: .3em; }
+.pop.combo.c2 b{ color: #ffb36b; text-shadow: 0 2px 10px rgba(0,0,0,.6), 0 0 24px rgba(255,140,60,.8); }
+.pop.combo.c3 b{ color: #ff7a6b; text-shadow: 0 2px 12px rgba(0,0,0,.7), 0 0 30px rgba(255,80,80,.9); }
+.pop.combo.c3 i{ color: #ff8f7a; }
+@media (prefers-reduced-motion: reduce){
+  .shaker.hit{ animation: none; }
+}
