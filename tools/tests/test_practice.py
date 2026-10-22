@@ -429,7 +429,8 @@ with sync_playwright() as p:
             (pr['worst'] == 0, f"{dev} 练习时右栏不压顶栏/按键（最大越界 {pr['worst']}px {pr['who']}）"),
             (n['worst'] == 0, f"{dev} 正常局右栏不压顶栏/按键（最大越界 {n['worst']}px {n['who']}）"),
             (pr['scroll'] <= 0, f"{dev} 练习时页面不出现滚动（{pr['scroll']}px）"),
-            (not n['barWrap'] and n['barH'] <= 40, f"{dev} 顶栏加了模式开关不折行、不变高（高 {n['barH']}px）"),
+            # 顶栏按钮故意加高过一次（点击区不到 44pt、老误触「合集」）：上限从 40 提到 48，再高就是又长了
+            (not n['barWrap'] and n['barH'] <= 48, f"{dev} 顶栏加了模式开关不折行、不超高（高 {n['barH']}px，上限 48）"),
             (n['keyMin'] >= 44, f"{dev} 每个键都不小于 44pt（最小一边 {n['keyMin']}px）"),
             (bool(n['soft']) and n['soft']['above'] and n['soft']['gap'] >= 10 and n['soft']['min'] >= 44,
              f"{dev} 软降在变换正上方、隔开 ≥10px、不小于 44pt（{n['soft']}）"),

@@ -1954,3 +1954,34 @@ body.tspinning .hint-why{ color: #ff9ce4; }
 .review .runstats span.w b{ white-space: normal; text-align: right; overflow: visible; }
 /* 局结束：提示细栏收起来（占位留着，盘面不跳） */
 body.gameover .hintbar{ visibility: hidden; }
+
+/* 结算卡：一行分数 + 一行「最高 · 行 · 级」，替掉原来四个大格（和右栏重复，把复盘挤到要滑） */
+.final{ display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 0 0 12px; }
+.final .final-score{ font-family: var(--mono); font-size: 26px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.final .final-sub{ display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font-size: 11.5px; color: var(--ink-dim); }
+.final .final-sub b{ font-family: var(--mono); font-weight: 500; color: var(--ink-soft); }
+
+/* 「先离开这一局？」 */
+.leave-go{ border-color: rgba(127,227,255,.55); color: #7fe3ff; }
+
+/* 顶栏好按：模式开关和按钮做高一点，点击区再往外扩到 44pt 上下；「合集」和模式开关拉开，
+   原来「合集」57×25、紧挨着「普通」，一碰就离开页面。320 宽的小屏放不下，照旧用紧凑的 */
+@media (min-width: 361px) and (max-width: 480px){
+  .bar:has(.modesw){ gap: 6px; }
+  .bar:has(.modesw) .back{ margin-right: 8px; padding-top: 8px; padding-bottom: 8px; }
+  .bar:has(.modesw) .modesw button{ padding: 9px 9px; font-size: 12.5px; }
+  .bar:has(.modesw) #pauseBtn, .bar:has(.modesw) #menuBtn{ padding: 8px 11px; }
+  .bar:has(.modesw) #pauseBtn span{ display: none; }      /* 暂停只留图标（谁都认得），省出位置给其它按钮加大 */
+  .bar:has(.modesw) :is(.back, .modesw button, .tbtn){ position: relative; }
+  .bar:has(.modesw) :is(.back, .modesw button, .tbtn)::after{ content: ''; position: absolute; inset: -7px -2px; }
+}
+/* 上面那几条被老的 .final span / .final b（四个大格时代的块级样式）盖了，这里拉回行内 */
+.final .final-sub span{ display: inline; font-family: inherit; font-size: inherit; letter-spacing: 0; color: inherit; }
+.final .final-sub b{ display: inline; font-size: 12px; margin: 0; }
+.final .final-score{ margin: 0; }
+/* 结算卡下面还有东西（第三条建议 / 损失最大的几手）：底边一道渐隐 + 「往下滑」，滑到底就收起 */
+.overlay[data-mode="over"] .card.more::after{
+  content: '往下滑还有'; position: sticky; bottom: -1px; display: block; margin-top: -34px; height: 34px;
+  padding-top: 14px; font-size: 10.5px; color: var(--ink-dim); text-align: center; pointer-events: none;
+  background: linear-gradient(rgba(8,11,20,0), rgba(8,11,20,.96) 55%);
+}

@@ -114,6 +114,49 @@ STD = r"""async () => {""" + PRE + r"""
   const bb = segB && segB.querySelector('b');
   ok(bb && /200 后/.test(bb.textContent) && bb.scrollWidth <= bb.clientWidth + 1, `复盘「分段每行」三段都看得到（${bb && bb.textContent}）`);
 
+  // ── 顶栏：选中的模式要亮、点击区够大、打到一半切模式先确认；NES 第一次默认 9 级；结算卡一行 ──
+  const lit = () => [...document.querySelectorAll('#modeSw [data-m]')].filter(x => x.classList.contains('on')).map(x => x.dataset.m).join(',');
+  T.startNes(9); await wait(20);
+  ok(lit() === 'normal', `NES 局：「普通」那格亮着（${lit()}）`);
+  document.querySelector('#modeSw [data-m="normal"]').click(); await wait(20);
+  ok(!T.nes, 'NES 里点亮着的「普通」：照旧退回普通（这是 NES / 对战的出口）');
+  T.startHint(); await wait(20);
+  document.querySelector('#modeSw [data-m="hint"]').click(); await wait(20);
+  ok(T.hintMode, '提示模式里点亮着的「提示」：不动');
+  T.exitPractice(); T.startVs(1); await wait(20);
+  ok(lit() === 'normal', '对战局：「普通」亮着');
+  T.exitPractice(); T.startHint(); await wait(20);
+  ok(lit() === 'hint', '提示模式：「提示」亮着');
+  T.startTspin(); await wait(20);
+  ok(lit() === 'practice', 'T 旋练习：「练习」亮着');
+  document.querySelector('#modeSw [data-m="normal"]').click(); await wait(20);
+  ok(!T.nes && !T.hintMode, '从 T 旋练习点「普通」：回普通');
+  const sw = [...document.querySelectorAll('#modeSw button')].map(x => x.getBoundingClientRect());
+  const bk = document.querySelector('.back').getBoundingClientRect();
+  ok(sw.every(r => r.height >= 30 && r.width >= 40) && sw[0].left - bk.right >= 12, `模式开关每格 ${Math.round(sw[0].width)}×${Math.round(sw[0].height)}，「合集」隔开 ${Math.round(sw[0].left - bk.right)}px`);
+  ok(getComputedStyle(document.querySelector('#modeSw button'), '::after').content !== 'none', '点击区往外扩（::after）');
+  $('startBtn').click(); T.game.noGarbage = true; T.game.pieces = 40;
+  document.querySelector('#modeSw [data-m="practice"]').click(); await wait(20);
+  ok(!$('leaveSheet').hidden && !T.practice && T.game.frozen, '普通局打了 40 块点「练习」：先问一句，这局停着');
+  $('leaveStay').click(); await wait(20);
+  ok($('leaveSheet').hidden && !T.game.frozen && !T.practice, '点「接着打」：回到这局');
+  document.querySelector('#modeSw [data-m="hint"]').click(); await wait(20);
+  ok(/提示/.test($('leaveGo').textContent), '点「提示」：按钮写「去提示模式」');
+  $('leaveGo').click(); await wait(20);
+  ok(T.hintMode && !!T.readSave(), '点「去提示模式」：切过去，这局存着');
+  document.querySelector('#modeSw [data-m="normal"]').click(); await wait(20);
+  $('startBtn').click(); T.game.pieces = 3;
+  document.querySelector('#modeSw [data-m="practice"]').click(); await wait(20);
+  ok($('leaveSheet').hidden && T.practice, '刚开局（3 块）点「练习」：直接切，不问');
+  T.exitPractice();
+  localStorage.removeItem('tetris.nes.v1');
+  T.openNesSheet && T.openNesSheet(); await wait(20);
+  ok(/起始 9 级/.test($('nesGo').textContent), `第一次打开 NES：默认 9 级（${$('nesGo').textContent}）`);
+  $('nesSheet').hidden = true; T.game.frozen = false;
+  $('startBtn').click(); T.game.score = 240000; T.game.lines = 246; T.game.level = 42; T.endGame('堆到顶了'); await wait(30);
+  ok(/240,000/.test($('overScore').textContent) && $('overLines').textContent === '246' && $('overLevel').textContent === '42'
+     && document.querySelector('.final').getBoundingClientRect().height < 90, `结算卡：分数一行 +「最高 · 行 · 级」一行（高 ${Math.round(document.querySelector('.final').getBoundingClientRect().height)}px）`);
+
   // ── 中途开局一开局不能「收手」 ──
   T.startMid(200); await wait(20); $('pauseBtn').click(); await wait(20);
   ok($('stopBtn').hidden, '中途开局刚开就暂停：没有「收手」（开局送的块不算）');

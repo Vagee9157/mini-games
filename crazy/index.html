@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=a59083d6">
+<link rel="stylesheet" href="../tetris/tetris.css?v=6322a3b7">
 </head>
 <body>
 <div class="topline"></div>
@@ -101,12 +101,10 @@
             <p class="died" id="overDied"></p>
             <p class="overgoal" id="overGoal" hidden></p>
             <div class="overrank" id="overRank" hidden></div>
+            <!-- 一行：这局分数 + 最高 / 行 / 级。原来四个大格和右栏一模一样，把复盘挤到要滑才看得见 -->
             <div class="final">
-              <div><span>SCORE</span><b id="overScore">0</b></div>
-              <div><span>BEST</span><b id="overBest">0</b></div>
-              <div><span>LINES</span><b id="overLines">0</b></div>
-              <div><span>LEVEL</span><b id="overLevel">1</b></div>
-              <div id="legacyCell" hidden><span>旧版纪录</span><b id="overLegacy">0</b></div>
+              <b class="final-score" id="overScore">0</b>
+              <span class="final-sub"><span>最高 <b id="overBest">0</b></span><span><b id="overLines">0</b> 行</span><span><b id="overLevel">1</b> 级</span><span id="legacyCell" hidden>旧版纪录 <b id="overLegacy">0</b></span></span>
             </div>
             <!-- 这局的流水账。疯狂版才填（标准版没有热度/变异/梭哈这些东西可讲）。 -->
             <div class="runlog" id="runlog" hidden>
@@ -297,7 +295,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=76924de5"></script>
+<script src="../tetris/tetris.js?v=80bddcaf"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

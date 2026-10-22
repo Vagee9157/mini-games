@@ -820,6 +820,7 @@ function restoreGame(d){
   needsDraw = true;
   fillQueue();
   if (!game.piece) spawnNext();
+  else aidOnSpawn();          // 存档里带着当前块：不出新块，后台教练 / 多余按键的快照得自己拍
   $('overlay').classList.remove('show');
   $('pauseTx').textContent = '暂停';
   syncHud();
@@ -1084,6 +1085,8 @@ function holdPiece(){
     spawnNext();
   }
   game.holdUsed = true;   // spawn 会把它清掉，所以放在后面
+  // spawn 里算推荐（提示模式 / 后台教练）时 holdUsed 还是 false，会推荐「先暂存」这种这时做不到的事 —— 置上之后重算一次
+  if (!game.over && game.piece){ if (hintMode) hintCompute(); aidOnSpawn(); }
   previewDirty = true;
   needsDraw = true; drawNow = true;
   sfx('hold');
@@ -1526,6 +1529,7 @@ function startPractice(){
 // 切回普通模式：不自动开新局，回到开局面板。原来这里直接 restart() 开一局新的 ——
 // 一来普通局打到一半去练习的那一局就被跳过了，二来「切模式」不该顺手替你按「开始」。
 function exitPractice(){
+  document.body.classList.remove('gameover');
   closePrSheet();
   closeHintSheet();
   drillEnd(); nesEnd(); vsEnd();
@@ -1574,8 +1578,9 @@ function syncModeSwitch(){
   for (const b of document.querySelectorAll('#modeSw [data-m]')){
     const m = b.dataset.m;
     // 每日练习挂在「练习」下面（它的堆叠段借用了提示模式，但不算提示）
-    // T 旋练习挂在「练习」下（第一版亮的是「提示」，用户以为自己在提示模式）；对战 / NES 三个都不亮，盘面左上角有标签
-    const on = m === 'practice' ? practice || !!drill || tsOn() : m === 'hint' ? hintMode && !drill && !tsOn() : !assisted();
+    // T 旋练习挂在「练习」下（第一版亮的是「提示」，用户以为自己在提示模式）。
+    // 对战 / NES / 中途开局都算「普通」那一格（正经打的局），具体是哪种看盘面左上角的标签 —— 原来对战 / NES 三格都不亮
+    const on = m === 'practice' ? practice || !!drill || tsOn() : m === 'hint' ? hintMode && !drill && !tsOn() : !assisted() || !!nes || !!vs;
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
@@ -1883,7 +1888,7 @@ function judgeCore(rec, b0, p, n, spin){
         out.r = 2; out.msg = '把 T 槽填了，槽留给 T';
       } else if (hm > hr){
         const gaps = fitGaps(b0, cells);
-        out.r = 0; out.msg = gaps > 0 ? '留了 ' + gaps + ' 个洞，有能贴合的地方' : '这一块造了 ' + (hm - h0) + ' 个洞';
+        out.r = 0; out.msg = gaps > 0 ? '留了 ' + gaps + ' 个洞，有能贴合的地方' : hm > h0 ? '这一块造了 ' + (hm - h0) + ' 个洞' : '推荐那里放完洞更少';
       } else if (rec.danger && recLines > 0 && myLines === 0){
         out.r = 3; out.msg = '堆高了，先消行';
       } else if (hintSlotScore(recB) > hintSlotScore(mineB)){
@@ -3286,6 +3291,8 @@ function openNesSheet(run, isBest){
   const sh = $('nesSheet');
   if (!sh) return;
   const d = nesRecords();
+  // 第一次玩（哪一级都没成绩）默认选 9 级 —— 说明里也是这么建议的，原来默认 18
+  if (!run && !Object.values(d.best).some(Boolean) && nesPick === 18) nesPick = 9;
   const res = $('nesResult');
   if (res){
     if (run){
@@ -4287,7 +4294,7 @@ function aidOnSpawn(){
     const b0 = fin.b;
     // 后台只看当前这一块、不往后看 NEXT（提示模式才看）：往后看一块要多算三十多倍，WebKit 上出块最慢到 40ms，手机上会掉帧
     const rec = coachRec(b0, game.piece.type, null, game.hold, game.holdUsed);
-    if (rec) shadow = { b0, rec };
+    if (rec) shadow = { b0, rec, next: game.queue[0] };
   }
   aidSlots = aidsOn() && aids.ts ? tsdSlots(simBoard()).filter(s => s.ready).slice(0, 2) : [];
 }
@@ -4351,14 +4358,23 @@ function coachOnLock(p, n, spin){
   const sh = shadow; shadow = null;
   if (!sh || !aidsOn() || !game.run) return;
   const R = game.run, J = judgeCore(sh.rec, sh.b0, p, n, spin);
+  // 后台推荐只看当前块；判成放偏的那一手，再带上 NEXT 比一次（和提示模式同一个口径）：
+  // 你的落点带上下一块看不比推荐差、洞也不比它多，就算放对。只对放偏的块多算两次，不拖慢出块
+  if (!J.good && sh.rec.kind === 'place' && sh.next){
+    const recLa = tsEval(sh.b0, sh.rec.cells, sh.next), mineLa = tsEval(sh.b0, J.cells, sh.next);
+    const recHoles = Math.max(0, hintAdjHoles(simPlace(sh.b0, sh.rec.cells).b) - hintAdjHoles(sh.b0));
+    if (mineLa >= recLa - HINT_TOL && J.holes <= recHoles){ J.good = true; J.r = -1; J.loss = 0; }
+  }
   R.cN++;
   if (J.good) R.cGood++;
   else if (J.r >= 0) R.cRule[J.r]++;
   if (p.type === 'T'){
     R.tN++;
+    // 四类互不重叠，加起来 = T 的总数（暂存是另外数的「进过暂存几次」，不是去向）
     if (J.tsd) R.tTsd++;
-    else if (sh.rec.kind === 'tsd') R.tMiss++;
-    else R.tFlat++;
+    else if (sh.rec.kind === 'tsd') R.tMiss++;          // 有槽没打
+    else if (sh.rec.kind === 'hold') R.tFlat++;         // 没槽、本可以暂存却放掉了
+    else R.tOther = (R.tOther || 0) + 1;                // 没槽也没法暂存（暂存里已经是 T / 这一块刚换出来）
   }
   if (!J.good && J.loss > 0){
     // 存这一手的盘面（只存有东西的行，字符串一行一个）、你放的、推荐放的
@@ -4389,6 +4405,31 @@ function drawWorst(cv, w){
   for (const [x, y] of w.mine) c.fillRect(x * s + .5, y * s + .5, s - 1, s - 1);
   c.strokeStyle = '#5ee08a'; c.lineWidth = Math.max(1.5, s * .18);
   for (const [x, y] of w.rec) c.strokeRect(x * s + 1.5, y * s + 1.5, s - 3, s - 3);
+}
+
+
+// ── 离开这一局？ ──
+// 普通局（含中途开局）打了 10 块以上、还没结束，就算「在打」：点顶栏切去练习 / 提示前先确认
+function liveRun(){
+  return !CRAZY && !assisted() && game.started && !game.over && game.pieces - (mid ? mid.p : 0) >= 10;
+}
+let leaveTo = null;
+function askLeave(m){
+  const sh = $('leaveSheet');
+  if (!sh){ return; }
+  leaveTo = m;
+  $('leaveGo').textContent = m === 'hint' ? '去提示模式' : '去练习';
+  sh.hidden = false;
+  game.frozen = true;
+}
+function closeLeave(go){
+  const sh = $('leaveSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  const m = leaveTo; leaveTo = null;
+  if (!go){ unfreezeIfIdle(); return; }
+  if (m === 'practice'){ startPractice(); openPrSheet(); }
+  else if (m === 'hint') startHint();
 }
 
 // ───────────────────────── 历史记录 ─────────────────────────
@@ -4605,11 +4646,11 @@ function reviewTips(r, pieces, lines, ctx){
     tips.push(['在高处待太久', `${high}% 的块是在盘面过六成时放的（照教练打一般一成多）。堆高了就先消低处、别再攒，降下来再搭槽 —— 灰线一涨就顶死了`]);
   if (pieces >= 100 && tsd100 < COACH_TSD100 / 2)
     tips.push([tsd ? 'T 旋打得少' : '没打出 T 旋', `每 100 块打了 ${tsd100.toFixed(1)} 个 T 旋双消，照教练打大约 ${COACH_TSD100} 个。20 级后一次 T 旋双消 9600 分，比一次四消（6400）还多，只用两行。`
-      + (r.tN ? `这局 ${r.tN} 个 T：${r.tTsd} 个打了 T 旋双消、${r.tMiss} 个有槽没打、${r.tFlat} 个直接平放。` : '') + '没槽时 T 先暂存'] );
+      + (r.tN ? `这局 ${r.tN} 个 T：${r.tTsd} 个打了 T 旋双消、${r.tMiss} 个有槽没打、${r.tFlat} 个能暂存却放掉了。` : '') + '没槽时 T 先暂存'] );
   if (cg >= 0 && r.cN >= 50 && cg < 70 && worstRule >= 0)
     tips.push(['放偏的块多', `只有 ${cg}% 的块放得和教练一样好，最常犯 ${HINT_RULES[worstRule].n}「${HINT_RULES[worstRule].t}」（${r.cRule[worstRule]} 次）。下面列了损失最大的几手；这一条去${DRILL_FOR[worstRule]}练`]);
   if (r.tN >= 20 && r.tFlat / r.tN >= .4)
-    tips.push(['T 用掉了', `${r.tN} 个 T 里有 ${r.tFlat} 个没槽就直接平放了。T 是打 T 旋的，没槽先放进暂存，搭好槽再换出来`]);
+    tips.push(['T 用掉了', `${r.tN} 个 T 里有 ${r.tFlat} 个没槽、暂存也空着，却直接放掉了。T 是打 T 旋的，没槽先放进暂存，搭好槽再换出来`]);
   if (per100 >= 25)
     tips.push(['洞造多了', `这局造了 ${r.holes} 个洞（每 100 块 ${per100.toFixed(0)} 个，T 槽屋檐下那格不算）。洞上面那几行全都消不掉，放之前看一眼会不会盖住空格`]);
   if (r.finN >= 50 && pct(r.faults, r.finN) >= 30)
@@ -4619,6 +4660,16 @@ function reviewTips(r, pieces, lines, ctx){
   if (!tips.length)
     tips.push(['打法对了', `四消 + T 旋拿了 ${pct(r.bigPts, r.bigPts + r.smallPts)}% 的分。下一步是扛得更久：盘面一高就先保命`]);
   return tips.slice(0, 3);
+}
+// 结算卡能往下滑的时候，底边给个「往下滑还有」；滑到底收起
+function syncCardMore(){
+  const card = document.querySelector('#overlay .card');
+  if (!card) return;
+  const upd = () => card.classList.toggle('more', card.scrollHeight - card.scrollTop - card.clientHeight > 6);
+  if (!card.dataset.moreBound){ card.dataset.moreBound = '1'; card.addEventListener('scroll', upd, { passive: true }); }
+  requestAnimationFrame(upd);
+  setTimeout(upd, 900);            // 结算卡是等死亡动画走完才弹出来的
+  setTimeout(upd, 2600);
 }
 function fillReview(){
   const box = $('review');
@@ -4659,7 +4710,7 @@ function fillReview(){
     const wr = r.cRule.indexOf(Math.max(...r.cRule));
     add('跟教练比', `放对 ${pct(r.cGood, r.cN)}%` + (r.cRule[wr] ? ` · 最常犯 ${HINT_RULES[wr].n}${HINT_RULES[wr].t}` : ''), true);
   }
-  if (r.tN) add('T 块去向', `T 旋双消 ${r.tTsd} · 有槽没打 ${r.tMiss} · 暂存 ${r.tHold} · 平放 ${r.tFlat}`, true);
+  if (r.tN) add('T 块去向', `${r.tN} 个 T：T 旋双消 ${r.tTsd} · 有槽没打 ${r.tMiss} · 能暂存却放掉 ${r.tFlat} · 没法暂存 ${r.tOther || 0}（进过暂存 ${r.tHold} 次）`, true);
   $('rvStats').innerHTML = rows.join('');
   $('rvTips').innerHTML = reviewTips(r, pieces, lines, { pps, ppsAvg, ppsN: ppsHist.length })
     .map(([t, d]) => `<li><b>${escHtml(t)}</b><span>${escHtml(d)}</span></li>`).join('');
@@ -4671,6 +4722,7 @@ function fillReview(){
     $('rvWorstList').innerHTML = ws.map((w, i) => `<div class="rv-w"><canvas data-w="${i}"></canvas><span><b>${escHtml(HINT_RULES[w.r] ? HINT_RULES[w.r].n + ' ' + HINT_RULES[w.r].t : '')}</b>${escHtml(w.msg)}<em>第 ${w.at} 行时 · ${w.type} 块</em></span></div>`).join('');
     ws.forEach((w, i) => drawWorst($('rvWorstList').querySelector(`[data-w="${i}"]`), w));
   }
+  syncCardMore();
 }
 
 // 分数关口播报。一局能撞三四个，是频率最高的一条，顺带给「一局之内没有
@@ -4728,7 +4780,7 @@ function newRun(){
            // 后台教练（普通局悄悄跑提示模式那套推荐，不显示）：跟推荐一样好的块数、违反哪条、损失最大的几手
            cN: 0, cGood: 0, cRule: [0, 0, 0, 0], cWorst: [],
            // T 块去向：打成 T 旋双消 / 有槽没打 / 进了暂存 / 平放掉
-           tN: 0, tTsd: 0, tMiss: 0, tHold: 0, tFlat: 0 };
+           tN: 0, tTsd: 0, tMiss: 0, tHold: 0, tFlat: 0, tOther: 0 };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -4924,6 +4976,12 @@ function riseGarbage(){
   }
   game.board.push(row);
   game.garbage++;
+  // 出块时拍的盘面快照（后台教练 / 多余按键 / 提示模式）跟着上移，不然这一手会被当成「留了洞」
+  if (fin.b){
+    fin.b = fin.b.slice(1).concat([row.map(Boolean)]);
+    if (shadow && game.piece) shadow = Object.assign({}, shadow, { b0: fin.b, rec: coachRec(fin.b, game.piece.type, null, game.hold, game.holdUsed) || shadow.rec });
+  }
+  if (hintMode && game.piece) hintCompute();
   delayUsed = false;                                    // 新的一行，缓期额度回来
   lastRiseAt = game.elapsed;
 
@@ -9099,7 +9157,8 @@ function stepOnce(dt){
   if (!clearing && game.piece){
     game.elapsed += dt;
     // FEVER 期间灰线暂停 —— 这比「重力减半」有感知得多（重力本来就不痛）
-    if (feverLeft <= 0 && !evCalm() && zoneLeft <= 0) garbageTimer += dt;   // FEVER / 缓流 / ZONE 都冻结灰线钟
+    // 不涨灰线的时候（练习 / T 旋练习关着灰线）钟也不走：原来照走，T 旋练习中途打开灰线会一下涨好几行
+    if (feverLeft <= 0 && !evCalm() && zoneLeft <= 0 && !game.noGarbage) garbageTimer += dt;   // FEVER / 缓流 / ZONE 都冻结灰线钟
     const period = garbagePeriod();
     // 所有事件都有三秒预告，偏偏真正杀你的灰线是无声的。补一道。
     // 看着像削难度，其实是加紧张感 —— 你会盯着它倒数，然后决定这三秒
@@ -9316,7 +9375,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['midSheet', 'histSheet', 'menuSheet', 'restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['leaveSheet', 'midSheet', 'histSheet', 'menuSheet', 'restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -9341,6 +9400,7 @@ window.addEventListener('keydown', (e) => {
       else if (sheet.id === 'menuSheet') closeMenu();
       else if (sheet.id === 'histSheet') closeHistSheet();
       else if (sheet.id === 'midSheet') closeMidSheet();
+      else if (sheet.id === 'leaveSheet') closeLeave(false);
       else if (sheet.id === 'vsSheet') closeVsSheet();
       else { sheet.hidden = true; unfreezeIfIdle(); }   // 玩法说明 / 段位：从菜单进来时这局是冻着的，关了要接着走
     }
@@ -9914,6 +9974,10 @@ function init(){
       const b = e.target.closest('[data-m]');
       if (!b) return;
       const m = b.dataset.m;
+      // 点的就是现在这一格：不动（NES / 对战里「普通」亮着，但点它是退回普通局，照旧）
+      if (b.classList.contains('on') && !(m === 'practice' && drill) && !(m === 'hint' && tsOn()) && !(m === 'normal' && (nes || vs))) return;
+      // 正经局打到一半点「练习 / 提示」：先问一句（这局会存着）。原来一碰就切走，误触一下就离开了
+      if ((m === 'practice' || m === 'hint') && liveRun()){ askLeave(m); return; }
       if (m === 'practice' && !practice){ startPractice(); openPrSheet(); }
       else if (m === 'practice' && drill){ startPractice(); openPrSheet(); }
       else if (m === 'hint' && (!hintMode || drill || tsOn())) startHint();
@@ -10053,6 +10117,12 @@ function init(){
   });
   $('muteBtn').addEventListener('click', toggleMute);
   bindMenu(); bindHist(); bindMid();
+  const lsh = $('leaveSheet');
+  if (lsh){
+    $('leaveGo').addEventListener('click', () => closeLeave(true));
+    $('leaveStay').addEventListener('click', () => closeLeave(false));
+    lsh.addEventListener('click', e => { if (e.target === lsh) closeLeave(false); });
+  }
   const al = $('aidLineBtn'), at = $('aidTsBtn');
   if (al) al.addEventListener('click', () => setAid('line', !aids.line));
   if (at) at.addEventListener('click', () => setAid('ts', !aids.ts));
@@ -10210,7 +10280,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, COACH_TSD100, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

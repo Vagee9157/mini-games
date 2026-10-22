@@ -41,8 +41,10 @@ JS = r"""async () => {
   ok(r.tTsd === 1, `照路径打 T 旋双消：记上（${r.tTsd}）`);
   load(['..........', '#####.####']); give('T', 'O'); T.holdPiece(); settle();
   ok(r.tHold === 1, `没槽把 T 放进暂存：记上（${r.tHold}）`);
-  load(['..........', '#####.####']); T.game.hold = null; T.game.holdUsed = true; give('T', 'O'); T.game.holdUsed = true; place(0, 0);
-  ok(r.tFlat >= 1, `没槽也没暂存、直接平放：记「平放」（${r.tFlat}）`);
+  load(['..........', '#####.####']); T.game.hold = 'T'; give('T', 'O'); place(0, 0);       // 暂存里已经是 T：这个 T 没法再暂存
+  ok(r.tOther >= 1 && r.tFlat === 0, `没槽、这手也没法暂存：记「没法暂存」，不算「能暂存却放掉」（${r.tOther}）`);
+  load(['..........', '#####.####']); T.game.hold = null; give('T', 'O'); place(0, 0);
+  ok(r.tFlat === 1, `没槽、暂存空着却直接放掉：记「能暂存却放掉」（${r.tFlat}）`);
 
   // ── 第十列也算堆高 ──
   const tall = Array.from({ length: R }, (_, y) => Array.from({ length: 10 }, (_, x) => x === 9 ? y >= R - 16 : y >= R - 2));
@@ -54,7 +56,7 @@ JS = r"""async () => {
   T.endGame('堆到顶了');
   const st = $('rvStats').textContent;
   ok(/跟教练比放对 50% · 最常犯 ②表面要平/.test(st), `复盘：跟教练比（${(st.match(/跟教练比[^T]*/) || [''])[0]}）`);
-  ok(/T 块去向T 旋双消 1 · 有槽没打 1 · 暂存 1 · 平放 \d/.test(st), 'T 块去向一行');
+  ok(/T 块去向\d+ 个 T：T 旋双消 1 · 有槽没打 1 · 能暂存却放掉 1 · 没法暂存 \d+（进过暂存 1 次）/.test(st), `T 块去向一行（${(st.match(/T 块去向[^每]*/) || [''])[0]}）`);
   const cv = $('rvWorstList').querySelector('canvas');
   ok(!$('rvWorst').hidden && cv && cv.width > 0, '损失最大的几手：画出小盘面');
   ok(/放偏的块多/.test($('rvTips').textContent), '建议里提「放偏的块多」');
@@ -70,6 +72,45 @@ JS = r"""async () => {
   }
   ts.sort((a, b) => a - b);
   ok(ts[ts.length >> 1] < 4 && ts[ts.length - 1] < 16, `出块含后台推荐：中位 ${ts[ts.length >> 1].toFixed(1)}ms、最慢 ${ts[ts.length - 1].toFixed(1)}ms（一帧 16ms 以内）`);
+
+  // ── 第二轮检查查出的几条 ──
+  // 暂存换出来的块：教练知道这一手已经暂存过，不会再推荐「先暂存」
+  $('againBtn').click(); T.game.noGarbage = true;
+  load(['..........', '#####.####']); T.game.hold = null; give('O', 'T'); T.holdPiece();
+  ok(T.game.piece.type === 'T' && T.shadow && T.shadow.rec.kind !== 'hold', `暂存 O 换出 T：后台推荐不再是「先暂存」（${T.shadow && T.shadow.rec.kind}）`);
+  // 方块下落途中灰线涨一行：照（新盘面的）推荐放，不算放偏、不记洞
+  load(['##.....###', '##.....###']); give('O', 'O');
+  const c0 = T.game.run.cGood, n0 = T.game.run.cN, h0 = T.game.run.holes;
+  T.riseGarbage();
+  { const rc2 = T.coachRec(T.simBoard(), 'O', null, T.game.hold, T.game.holdUsed); place(rc2.x, rc2.rot); }
+  ok(T.game.run.cN === n0 + 1 && T.game.run.cGood === c0 + 1 && T.game.run.holes === h0, `下落途中涨了一行灰线：照推荐放算放对、不记洞（洞 ${h0} → ${T.game.run.holes}）`);
+  // 照提示模式那套（带 NEXT 看一块）的推荐打 120 块：后台判的放对率要对得上，T 块去向四类加起来 = T 总数
+  $('againBtn').click(); T.game.noGarbage = true;
+  for (let i = 0; i < 120 && !T.game.over; i++){
+    const rc3 = T.coachRec(T.simBoard(), T.game.piece.type, T.game.queue[0], T.game.hold, T.game.holdUsed);
+    if (rc3 && rc3.kind === 'hold'){ T.holdPiece(); continue; }
+    if (rc3 && rc3.kind === 'tsd'){
+      const mm = T.simReach(T.simBoard(), 'T').find(l => l.spin === 'tspin' && l.lines === 2);
+      if (mm){ for (const a of T.parseActs(mm.acts)) T.doAct(a); T.doAct('H'); settle(); continue; }
+    }
+    if (rc3 && rc3.cells){ const p = T.game.piece; p.rot = rc3.rot; p.x = rc3.x; p.y = 0; }
+    T.hardDrop(); settle();
+  }
+  const R3 = T.game.run;
+  ok(R3.cN >= 100 && R3.cGood / R3.cN >= .95, `照提示模式的推荐打：后台判放对 ${Math.round(R3.cGood / R3.cN * 100)}%（${R3.cGood}/${R3.cN}）`);
+  ok(R3.tTsd + R3.tMiss + R3.tFlat + R3.tOther === R3.tN && R3.tFlat === 0,
+     `T 块去向加起来 = T 总数（${R3.tTsd}+${R3.tMiss}+${R3.tFlat}+${R3.tOther} = ${R3.tN}），照教练打不会被说「能暂存却放掉」`);
+  // 续玩时带着当前块：后台教练的快照照拍
+  T.saveGame(true); T.restoreGame(T.readSave());
+  ok(!!T.shadow, '续玩带着当前块：后台教练的快照拍上了');
+  // T 旋练习关着灰线练了一阵再打开：不会一下涨好几行
+  T.startTspin(); T.step(60000);
+  const g0 = T.game.garbage; T.setTsGarbage(true); T.step(500);
+  ok(T.garbageTimer < 1000 && T.game.garbage - g0 <= 1, `关着灰线练了 60 秒再打开：没有一下涨好几行（涨了 ${T.game.garbage - g0}）`);
+  T.setTsGarbage(false);
+  // 提示局结束再退回开局：gameover 标记摘掉
+  T.startHint(); T.endGame('堆到顶了'); T.exitPractice();
+  ok(!document.body.classList.contains('gameover'), '提示局结束后退回开局：gameover 标记摘掉');
 
   // ── 提示模式里不跑后台教练（它自己有教练） ──
   T.startHint(); load([]); give('O', 'O'); place(0, 0);
