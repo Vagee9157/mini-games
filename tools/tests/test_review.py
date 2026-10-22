@@ -36,10 +36,10 @@ JS = r"""async () => {
   ok(!$('review').hidden, '普通局结算页出现复盘');
   ok(/四消1 次/.test(stat()) && /单消 \/ 双消 \/ 三消1 \/ 0 \/ 0 次/.test(stat()) && /造洞1 个/.test(stat()), `复盘的数（${stat()}）`);
   ok(/没打出 T 旋/.test(tips()), `150 块一个 T 旋双消都没有：建议练 T 旋（${tips().slice(0, 30)}…）`);
-  ok(!/上局/.test(stat()) && T.reviewRead().length === 1, '第一局没有「上局」，这局存下来了');
+  ok(!/上局/.test(stat()) && T.histRead().length === 1, '第一局没有「上局」，这局存下来了');
 
   play(); T.game.pieces = 150; T.game.elapsed = 120000; T.endGame('堆到顶了');
-  ok(/上局/.test(stat()) && T.reviewRead().length === 2, '第二局：每行均分后面带上局的数');
+  ok(/上局/.test(stat()) && T.histRead().length === 2, '第二局：每行均分后面带上局的数');
 
   // ── 建议规则 ──
   const base = { clr: [0, 30, 20, 10, 15], tsc: [0, 0, 0, 0], mini: 0, b2bs: 0, bigPts: 0, bigLines: 60, smallPts: 0, smallLines: 100, holes: 10, highLocks: 30 };

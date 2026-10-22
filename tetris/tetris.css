@@ -1850,3 +1850,60 @@ body.tspinning .hint-why{ color: #ff9ce4; }
   }
   body.practising .prbar, body.hinting .hintbar, body.drilling .drbar{ margin-top: 16px; }
 }
+
+/* ── 顶栏菜单 ── */
+.menu-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
+.mi{
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 12px 12px 11px; border-radius: 14px; cursor: pointer; text-align: left;
+  font: inherit; color: var(--ink);
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  -webkit-tap-highlight-color: transparent;
+}
+.mi:active{ background: rgba(127,227,255,.10); }
+.mi svg{ width: 20px; height: 20px; color: #7fe3ff; margin-bottom: 5px; }
+.mi b{ font-size: 14px; font-weight: 600; }
+.mi span{ font-size: 11px; color: var(--ink-dim); line-height: 1.4; }
+.mi .cross{ display: none; }
+.mi.muted svg{ color: var(--ink-dim); }
+.mi.muted .wave{ display: none; }
+.mi.muted .cross{ display: block; }
+
+/* ── 历史记录 ── */
+.hist-sum{ font-size: 12px; line-height: 1.7; color: var(--ink-soft); margin: 0 0 10px; }
+.hist-sum b{ color: var(--ink); font-family: var(--mono); font-weight: 500; }
+.hist-sum b.up{ color: #5ee08a; }
+.hist-sum b.dn{ color: #ff8a8a; }
+.hist-seg{ display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.hist-seg button{
+  font: inherit; font-size: 12px; line-height: 1; padding: 8px 10px; border-radius: 9px; cursor: pointer;
+  color: var(--ink-soft); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+}
+.hist-seg button.on{ color: #7fe3ff; border-color: rgba(127,227,255,.6); background: rgba(127,227,255,.10); }
+.hist-range button{ font-size: 11px; padding: 6px 9px; }
+.hist-tip{ min-height: 18px; margin: 2px 0 4px; font-size: 11.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.hist-chart{ margin: 0 0 6px; }
+.hist-chart svg{ display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+.hist-chart .grid{ stroke: rgba(255,255,255,.08); stroke-width: 1; }
+.hist-chart .ax{ fill: var(--ink-dim); font-size: 9.5px; font-family: var(--mono); }
+.hist-chart .ln{ fill: none; stroke: #22d3ee; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.hist-chart .pt{ fill: #22d3ee; stroke: rgb(11,16,28); stroke-width: 2; }
+.hist-chart .pt.best{ fill: #ffd166; }
+.hist-chart .pt.on{ stroke: #fff; }
+.hist-chart .xh{ stroke: rgba(255,255,255,.3); stroke-width: 1; stroke-dasharray: 3 3; }
+.hist-chart .vl{ fill: var(--ink); font-size: 10px; font-family: var(--mono); }
+.hist-chart .vl.b{ fill: #ffd166; }
+.hist-empty{ margin: 18px 0; font-size: 12.5px; color: var(--ink-dim); text-align: center; }
+.hist-list{ font-size: 11.5px; font-variant-numeric: tabular-nums; margin-bottom: 10px; }
+.hl-row{ display: grid; grid-template-columns: 1.5fr 1.2fr .7fr .6fr .8fr; gap: 4px; padding: 5px 2px; border-bottom: 1px solid rgba(255,255,255,.06); color: var(--ink-soft); }
+.hl-row span:not(:first-child){ text-align: right; }
+.hl-row.hl-h{ color: var(--ink-dim); font-size: 10.5px; }
+.hl-row.best{ color: #ffd166; }
+#histSheet .sheet-done{ position: sticky; bottom: 0; z-index: 1; display: block; width: 100%; box-shadow: 0 -12px 18px rgba(11,16,28,.96), 0 0 26px rgba(34,211,238,.42); }
+#histSheet .sheet-done::after{ content: ''; position: absolute; left: -24px; right: -24px; top: 100%; height: 48px; background: rgba(11, 16, 28, .98); pointer-events: none; }
+
+/* 顶栏只剩暂停和菜单两个按钮，手机上也放得下字（原来五个按钮挤，只留图标） */
+@media (max-width: 480px){
+  .bar:has(.modesw) #pauseBtn span, .bar:has(.modesw) #menuBtn span{ display: inline; }
+  .bar:has(.modesw) #pauseBtn, .bar:has(.modesw) #menuBtn{ padding: 6px 10px 6px 8px; gap: 4px; }
+}

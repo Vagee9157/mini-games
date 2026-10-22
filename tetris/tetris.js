@@ -4023,21 +4023,195 @@ function lockPage(){
   }, { passive: false });
 }
 
+
+// ───────────────────────── 历史记录 ─────────────────────────
+//
+// 每一局正经局存一条：时间、分数、行数、等级、用时、块数、四消 / T 旋双消 / 造洞。
+// 结算页的「每行均分（上局 …）」也从这里读。本机最多留 HIST_KEPT 局，存在 localStorage 里。
+const HIST_KEY = nsKey('hist.v1');
+const HIST_KEPT = 300;
+const OLD_REVIEW_KEY = nsKey('review.v1');   // 局后复盘第一版自己存的最近 20 局（没有等级），第一次读历史时接过来
+function histRead(){
+  try {
+    const a = JSON.parse(localStorage.getItem(HIST_KEY) || 'null');
+    if (Array.isArray(a)) return a.filter(e => e && typeof e.s === 'number' && Number.isFinite(e.s));
+    const r = JSON.parse(localStorage.getItem(OLD_REVIEW_KEY) || '[]');
+    if (Array.isArray(r)) return r.filter(e => e && typeof e.score === 'number')
+      .map(e => ({ d: e.d, s: e.score, l: e.lines, p: e.pieces, t4: e.t4, tsd: e.tsd, h: e.holes }));
+  } catch { /* 坏了就当没有 */ }
+  return [];
+}
+function histPush(e){
+  const a = histRead(); a.push(e);
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(a.slice(-HIST_KEPT))); } catch { /* 存不了就算了 */ }
+}
+function histEntry(){
+  const r = game.run || {};
+  return { d: Date.now(), s: game.score, l: game.lines, lv: game.level, t: Math.round(game.elapsed), p: game.pieces,
+           t4: r.clr ? r.clr[4] : r.tetris || 0, tsd: r.tsc ? r.tsc[2] + r.tsc[3] : 0, h: r.holes || 0 };
+}
+const mmss = ms => { const s = Math.floor((ms || 0) / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+// 看哪一项：键、名字、怎么取值、怎么写
+const HIST_METRICS = [
+  ['s',  '分数',     e => e.s,                               v => fmtScore(v)],
+  ['l',  '行数',     e => e.l || 0,                          v => String(Math.round(v))],
+  ['lv', '等级',     e => e.lv,                              v => String(Math.round(v))],
+  ['pl', '每行均分', e => e.l ? Math.round(e.s / e.l) : null, v => groupInt(Math.round(v))],
+  ['t',  '用时',     e => e.t,                               v => mmss(v)],
+];
+const HIST_RANGES = [[20, '近 20 局'], [50, '近 50 局'], [0, '全部']];
+const HIST_VIEW_KEY = nsKey('hist.view.v1');
+let histView = { m: 's', n: 20, pick: -1 };
+try { const v = JSON.parse(localStorage.getItem(HIST_VIEW_KEY) || 'null');
+      if (v && HIST_METRICS.some(x => x[0] === v.m)) histView.m = v.m;
+      if (v && HIST_RANGES.some(x => x[0] === v.n)) histView.n = v.n; } catch { /* 用默认 */ }
+const histMetric = () => HIST_METRICS.find(x => x[0] === histView.m) || HIST_METRICS[0];
+const dateTx = d => { if (!d) return '—'; const t = new Date(d); return (t.getMonth() + 1) + '/' + t.getDate(); };
+const timeTx = d => { if (!d) return ''; const t = new Date(d); return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0'); };
+// 坐标轴取整：1 / 2 / 5 × 10^k
+function niceCeil(v){
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+// 一条线 + 每局一个点。最高那局标金色，最后一局标数值；点哪里看哪一局
+function histChartSVG(rows, pick){
+  const W = 340, H = 168, L = 44, R = 12, Tp = 12, B = 22;
+  const [, , get, fmt] = histMetric();
+  const pts = rows.map((e, i) => ({ i, e, v: get(e) })).filter(p => p.v != null && Number.isFinite(p.v));
+  if (!pts.length) return '';
+  const top = niceCeil(Math.max(...pts.map(p => p.v)));
+  const n = rows.length, xs = i => n === 1 ? (L + W - R) / 2 : L + (W - L - R) * i / (n - 1);
+  const ys = v => Tp + (H - Tp - B) * (1 - v / top);
+  let h = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escHtml(histMetric()[1])}曲线">`;
+  for (const f of [0, .5, 1]){
+    const y = ys(top * f);
+    h += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y}" y2="${y}"/><text class="ax" x="${L - 6}" y="${y + 3}" text-anchor="end">${escHtml(fmt(top * f))}</text>`;
+  }
+  h += `<text class="ax" x="${xs(0)}" y="${H - 6}" text-anchor="start">${escHtml(dateTx(rows[0].d))}</text>`;
+  if (n > 1) h += `<text class="ax" x="${xs(n - 1)}" y="${H - 6}" text-anchor="end">${escHtml(dateTx(rows[n - 1].d))}</text>`;
+  h += `<path class="ln" d="${pts.map((p, k) => (k ? 'L' : 'M') + xs(p.i).toFixed(1) + ' ' + ys(p.v).toFixed(1)).join('')}"/>`;
+  const best = pts.reduce((a, b) => b.v > a.v ? b : a);
+  const last = pts[pts.length - 1];
+  if (pick >= 0 && pick < n) h += `<line class="xh" x1="${xs(pick)}" x2="${xs(pick)}" y1="${Tp}" y2="${H - B}"/>`;
+  for (const p of pts){
+    const big = p === best || p === last || p.i === pick;
+    if (n > 60 && !big) continue;               // 局数多了只画线，点太密反而糊
+    h += `<circle class="pt${p === best ? ' best' : ''}${p.i === pick ? ' on' : ''}" cx="${xs(p.i)}" cy="${ys(p.v)}" r="${big ? 4.5 : 3.2}"/>`;
+  }
+  const lab = (p, tx, cls) => {
+    const x = xs(p.i), anchor = x > W - 60 ? 'end' : x < L + 40 ? 'start' : 'middle', y = Math.max(Tp + 8, ys(p.v) - 9);
+    return `<text class="vl ${cls}" x="${x}" y="${y}" text-anchor="${anchor}">${escHtml(tx)}</text>`;
+  };
+  h += lab(best, '最高 ' + fmt(best.v), 'b');
+  if (last !== best) h += lab(last, fmt(last.v), '');
+  // 透明的点击层：按在哪个横坐标就选哪一局（比点 4px 的圆好按）
+  h += `<rect class="hit" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>`;
+  return h + '</svg>';
+}
+function histTipText(rows, i, base){
+  const e = rows[i];
+  if (!e) return '';
+  return `第 ${base + i + 1} 局 · ${dateTx(e.d)} ${timeTx(e.d)} · ${fmtScore(e.s)} 分 · ${e.l ?? '—'} 行 · ${e.lv ?? '—'} 级 · ${e.t != null ? mmss(e.t) : '—'}`;
+}
+function renderHist(){
+  const all = histRead();
+  const rows = histView.n ? all.slice(-histView.n) : all;
+  const [, name, get, fmt] = histMetric();
+  $('histMetric').innerHTML = HIST_METRICS.map(([k, t]) => `<button type="button" data-hm="${k}" class="${k === histView.m ? 'on' : ''}">${t}</button>`).join('');
+  $('histRange').innerHTML = HIST_RANGES.map(([k, t]) => `<button type="button" data-hn="${k}" class="${k === histView.n ? 'on' : ''}">${t}</button>`).join('');
+  const sum = $('histSum'), chart = $('histChart'), tip = $('histTip'), list = $('histList');
+  if (!all.length){
+    sum.textContent = '';
+    tip.textContent = '';
+    chart.innerHTML = '<p class="hist-empty">还没有记录。普通局打到 30 块以上，结束后就记在这里。</p>';
+    list.innerHTML = '';
+    return;
+  }
+  const vals = all.map(get).filter(v => v != null && Number.isFinite(v));
+  const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+  const last10 = vals.slice(-10), prev10 = vals.slice(-20, -10);
+  let tr = '';
+  if (prev10.length >= 5 && avg(prev10) > 0){
+    const d = Math.round((avg(last10) / avg(prev10) - 1) * 100);
+    tr = `，比再往前 10 局 <b class="${d >= 0 ? 'up' : 'dn'}">${d >= 0 ? '+' : ''}${d}%</b>`;
+  }
+  sum.innerHTML = `共 <b>${all.length}</b> 局 · ${escHtml(name)}最高 <b>${escHtml(vals.length ? fmt(Math.max(...vals)) : '—')}</b>`
+    + `<br>近 ${last10.length} 局平均 <b>${escHtml(last10.length ? fmt(avg(last10)) : '—')}</b>${tr}`;
+  const pick = histView.pick >= 0 && histView.pick < rows.length ? histView.pick : rows.length - 1;
+  chart.innerHTML = histChartSVG(rows, pick) || '<p class="hist-empty">这一项以前的局没记（等级是后来才开始记的）</p>';
+  tip.textContent = histTipText(rows, pick, all.length - rows.length);
+  const svg = chart.querySelector('svg');
+  if (svg){
+    const choose = ev => {
+      const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * 340;
+      const k = rows.length === 1 ? 0 : Math.round((x - 44) / (340 - 44 - 12) * (rows.length - 1));
+      histView.pick = Math.max(0, Math.min(rows.length - 1, k));
+      renderHist();
+    };
+    svg.addEventListener('pointerdown', choose);
+  }
+  const best = Math.max(...all.map(e => e.s));
+  list.innerHTML = '<div class="hl-row hl-h"><span>时间</span><span>分数</span><span>行</span><span>级</span><span>用时</span></div>'
+    + all.slice(-30).reverse().map(e => `<div class="hl-row${e.s === best ? ' best' : ''}"><span>${dateTx(e.d)} ${timeTx(e.d)}</span>`
+      + `<span>${escHtml(fmtScore(e.s))}${e.s === best ? ' ★' : ''}</span><span>${e.l ?? '—'}</span><span>${e.lv ?? '—'}</span><span>${e.t != null ? mmss(e.t) : '—'}</span></div>`).join('');
+}
+function openHistSheet(){
+  histView.pick = -1;
+  renderHist();
+  $('histSheet').hidden = false;
+  if (game.started && !game.over) game.frozen = true;
+}
+function closeHistSheet(){
+  const sh = $('histSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  unfreezeIfIdle();
+}
+function bindHist(){
+  const sh = $('histSheet');
+  sh.addEventListener('click', e => {
+    if (e.target === sh) return closeHistSheet();
+    const m = e.target.closest('[data-hm]'), n = e.target.closest('[data-hn]');
+    if (!m && !n) return;
+    if (m) histView.m = m.dataset.hm;
+    if (n){ histView.n = +n.dataset.hn; histView.pick = -1; }
+    try { localStorage.setItem(HIST_VIEW_KEY, JSON.stringify({ m: histView.m, n: histView.n })); } catch { /* 记不住就算了 */ }
+    renderHist();
+  });
+  $('histClose').addEventListener('click', closeHistSheet);
+}
+
+// ───────────────────────── 菜单 ─────────────────────────
+// 顶栏只留「暂停」「菜单」。重开 / 历史记录 / 设置 / 音效 / 玩法说明都在这张面板里
+function openMenu(){
+  $('menuSheet').hidden = false;
+  if (game.started && !game.over) game.frozen = true;
+}
+function closeMenu(){
+  const sh = $('menuSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  unfreezeIfIdle();
+}
+function bindMenu(){
+  const sh = $('menuSheet');
+  $('menuBtn').addEventListener('click', openMenu);
+  $('menuClose').addEventListener('click', closeMenu);
+  sh.addEventListener('click', e => { if (e.target === sh) closeMenu(); });
+  // 点了去别的面板：先收起菜单（不解冻），等目标面板开好再看要不要解冻 —— 设置在 FEVER 期间开不了，那时得接着打
+  for (const id of ['restartBtn', 'histBtn', 'skinBtn', 'helpBtn']){
+    $(id).addEventListener('click', () => { sh.hidden = true; setTimeout(unfreezeIfIdle, 0); });
+  }
+  $('histBtn').addEventListener('click', openHistSheet);
+}
+
 // ───────────────────────── 局后复盘（标准版普通局） ─────────────────────────
 //
 // 20 级以后倍率封顶 ×8，同样消一行，单消 800、四消 1600、T 旋双消 3200 —— 分数高低主要看「怎么消的」，
 // 不是消了多少行。结算页只给总分的话，打了 246 行才 24 万，自己看不出差在哪。
 // 这里把这局拆开：消行构成、分数从哪来、造了几个洞、多少块是在高处放的，再挑最要紧的 1~3 条建议。
-const REVIEW_KEY = nsKey('review.v1');
-const REVIEW_KEPT = 20;
 const REVIEW_HIGH = 13;            // 堆到 13 行以上（盘面过六成）放的块算「在高处放」
-function reviewRead(){
-  try { const a = JSON.parse(localStorage.getItem(REVIEW_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
-}
-function reviewSave(e){
-  const a = reviewRead(); a.push(e);
-  try { localStorage.setItem(REVIEW_KEY, JSON.stringify(a.slice(-REVIEW_KEPT))); } catch { /* 存不了就只看这一局 */ }
-}
 function pct(a, b){ return b > 0 ? Math.round(a / b * 100) : 0; }
 function reviewTips(r, pieces, lines){
   const tips = [];
@@ -4068,11 +4242,11 @@ function fillReview(){
   if (!show) return;
   const secs = game.elapsed / 1000, lines = game.lines, pieces = game.pieces;
   const perLine = lines ? Math.round(game.score / lines) : 0;
-  const prev = reviewRead().slice(-1)[0];
+  const prev = histRead().slice(-1)[0];
   const tsd = r.tsc[2] + r.tsc[3], tsOther = r.tsc[1] + r.tsc[0] + r.mini;
   const rows = [];
   const add = (k, v, wide) => rows.push(`<span${wide ? ' class="w"' : ''}><i>${k}</i><b>${v}</b></span>`);
-  add('每行均分', groupInt(perLine) + (prev && prev.lines ? `（上局 ${groupInt(prev.perLine)}）` : ''), true);
+  add('每行均分', groupInt(perLine) + (prev && prev.l ? `（上局 ${groupInt(Math.round(prev.s / prev.l))}）` : ''), true);
   add('四消', r.clr[4] + ' 次');
   add('T 旋双消', tsd + ' 次');
   add('单消 / 双消 / 三消', `${r.clr[1]} / ${r.clr[2]} / ${r.clr[3]} 次`, true);
@@ -4086,7 +4260,6 @@ function fillReview(){
   $('rvStats').innerHTML = rows.join('');
   $('rvTips').innerHTML = reviewTips(r, pieces, lines)
     .map(([t, d]) => `<li><b>${escHtml(t)}</b><span>${escHtml(d)}</span></li>`).join('');
-  if (isRealRun()) reviewSave({ d: Date.now(), score: game.score, lines, perLine, t4: r.clr[4], tsd, holes: r.holes, pieces });
 }
 
 // 分数关口播报。一局能撞三四个，是频率最高的一条，顺带给「一局之内没有
@@ -4438,6 +4611,8 @@ function endGame(why){
   if (lg) $('overLegacy').textContent = groupInt(lg);
   fillRunLog();
   fillReview();
+  // 历史记录：正经局才记（练习 / 提示 / 对战 / NES 不记），门槛和「今日局数」一样，秒死重开不算
+  if (!assisted() && (game.why === '收手' ? isStopRun() : isRealRun())) histPush(histEntry());
   syncRank();
   $('overDied').textContent = DEATH_TEXT[game.why] || '';
   // 「最强」只在够得着的时候才提（低于第一档说什么都是扫兴）。
@@ -8637,7 +8812,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['histSheet', 'menuSheet', 'restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -8659,6 +8834,8 @@ window.addEventListener('keydown', (e) => {
       else if (sheet.id === 'hintSheet') closeHintSheet();
       else if (sheet.id === 'nesSheet') closeNesSheet();
       else if (sheet.id === 'restartSheet') closeRestartSheet();
+      else if (sheet.id === 'menuSheet') closeMenu();
+      else if (sheet.id === 'histSheet') closeHistSheet();
       else if (sheet.id === 'vsSheet') closeVsSheet();
       else sheet.hidden = true;
     }
@@ -9110,6 +9287,8 @@ function syncMuteBtn(){
   b.classList.toggle('muted', muted);
   b.setAttribute('aria-label', muted ? '音效已关' : '音效已开');
   b.setAttribute('aria-pressed', muted ? 'true' : 'false');
+  const t = $('muteTx');
+  if (t) t.textContent = muted ? '关着 · 点一下打开' : '开着 · 点一下关掉';
 }
 
 // 设置面板里的两排三选一
@@ -9162,6 +9341,7 @@ function applyWipe(){
     localStorage.removeItem(STORE_KEY);
     localStorage.removeItem(SAVE_KEY);
     localStorage.removeItem(RECENT_KEY);   // 旧标度的分数留着，线会彻底失真
+    localStorage.removeItem(HIST_KEY);     // 历史曲线同理，新旧标度混在一条线上没法看
     localStorage.setItem(WIPE_KEY, WIPE_TOKEN);
     return had > 0;
   } catch { return false; }   // 隐私模式下读写都会抛，那就当没这回事
@@ -9324,7 +9504,7 @@ function init(){
       else openHelpSheet();
     }
   });
-  const closeHelp = () => { $('helpSheet').hidden = true; };
+  const closeHelp = () => { $('helpSheet').hidden = true; unfreezeIfIdle(); };
   $('helpDone').addEventListener('click', closeHelp);
   $('helpSheet').addEventListener('click', (e) => { if (e.target === $('helpSheet')) closeHelp(); });
   for (const id of ['rankBox', 'careerBox']){
@@ -9356,6 +9536,7 @@ function init(){
     endGame('收手');
   });
   $('muteBtn').addEventListener('click', toggleMute);
+  bindMenu(); bindHist();
   $('skinBtn').addEventListener('click', () => toggleStylePanel());
   $('skinDone').addEventListener('click', () => toggleStylePanel(false));
   $('styleSheet').addEventListener('click', (e) => { if (e.target.id === 'styleSheet') toggleStylePanel(false); });
@@ -9509,7 +9690,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, reviewRead, REVIEW_KEY, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, histRead, histPush, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

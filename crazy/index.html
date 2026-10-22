@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="../tetris/tetris.css?v=c6a3f94b">
+<link rel="stylesheet" href="../tetris/tetris.css?v=30e4ea63">
 </head>
 <body>
 <div class="topline"></div>
@@ -33,11 +33,9 @@
       <a class="back" href="../">←<span> 合集</span></a>
       <h1>疯狂方块<em>CRAZY</em></h1>
       <div class="sp"></div>
-      <button class="tbtn tbtn-ic" id="skinBtn" aria-label="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><circle cx="9" cy="9.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.6" cy="9.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.4" cy="14.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="9.6" cy="14.8" r="1.1" fill="currentColor" stroke="none"/></svg><span>设置</span></button>
-      <button class="tbtn tbtn-sq" id="helpBtn" aria-label="玩法说明" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M9.7 9.4a2.4 2.4 0 1 1 3.2 2.3c-.6.3-.9.8-.9 1.5v.5"/><circle cx="12" cy="17" r="1.05" fill="currentColor" stroke="none"/></svg></button>
-      <button class="tbtn tbtn-sq" id="muteBtn" aria-label="音效开关"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6.5 9H3v6h3.5L11 19z"/><path class="wave" d="M15.6 8.6a5 5 0 0 1 0 6.8"/><path class="wave" d="M18.4 5.8a9 9 0 0 1 0 12.4"/><path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/></svg></button>
       <button class="tbtn tbtn-ic" id="pauseBtn" aria-label="暂停"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path id="pauseIc" d="M9.5 6.5v11M14.5 6.5v11"/></svg><span id="pauseTx">暂停</span></button>
-      <button class="tbtn tbtn-ic" id="restartBtn" aria-label="重开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12a7.4 7.4 0 1 1-2.2-5.3"/><path d="M19.4 4.4v4.5h-4.5"/></svg><span>重开</span></button>
+      <!-- 菜单：重开 / 历史记录 / 设置 / 音效 都收在这里。顶栏只留暂停和它，入口再多也不用挤 -->
+      <button class="tbtn tbtn-ic" id="menuBtn" aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"/></svg><span>菜单</span></button>
     </header>
 
     <div class="board-wrap" id="boardWrap">
@@ -210,6 +208,36 @@
   <!-- 修行三选一。刻意不给关闭按钮、也不进 Esc 的关闭名单 ——
        它是一次必须做的选择，不是一个可以划走的弹窗。 -->
 
+  <!-- 顶栏「菜单」：重开 / 历史记录 / 设置 / 音效 / 玩法说明（疯狂版）。打开时这局停着 -->
+  <div class="sheet" id="menuSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>菜单</h3></div>
+      <div class="menu-grid">
+        <button class="mi" id="restartBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12a7.4 7.4 0 1 1-2.2-5.3"/><path d="M19.4 4.4v4.5h-4.5"/></svg><b>重新开始</b><span>换玩法也在这</span></button>
+        <button class="mi" id="histBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5h16"/><path d="m5.5 15.5 4-4.5 3.5 3 5.5-7"/></svg><b>历史记录</b><span>每局成绩和曲线</span></button>
+        <button class="mi" id="skinBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><circle cx="9" cy="9.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.6" cy="9.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.4" cy="14.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="9.6" cy="14.8" r="1.1" fill="currentColor" stroke="none"/></svg><b>设置</b><span>样式 · 手感 · 音乐</span></button>
+        <button class="mi" id="muteBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6.5 9H3v6h3.5L11 19z"/><path class="wave" d="M15.6 8.6a5 5 0 0 1 0 6.8"/><path class="wave" d="M18.4 5.8a9 9 0 0 1 0 12.4"/><path class="cross" d="m16.5 9.5 5 5m0-5-5 5"/></svg><b>音效</b><span id="muteTx">开着</span></button>
+        <button class="mi" id="helpBtn" type="button" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M9.7 9.4a2.4 2.4 0 1 1 3.2 2.3c-.6.3-.9.8-.9 1.5v.5"/><circle cx="12" cy="17" r="1.05" fill="currentColor" stroke="none"/></svg><b>玩法说明</b><span>机制和计分</span></button>
+      </div>
+      <button class="pbtn ghost rs-close" id="menuClose" type="button">关闭</button>
+    </div>
+  </div>
+
+  <!-- 历史记录：每局一条（普通局 / 疯狂版对局；练习、提示、对战这些不记），看曲线和明细 -->
+  <div class="sheet" id="histSheet" hidden>
+    <div class="sheet-box">
+      <div class="sheet-top"><h3>历史记录</h3></div>
+      <div class="hist-sum" id="histSum"></div>
+      <div class="hist-seg" id="histMetric" role="group" aria-label="看哪一项"></div>
+      <div class="hist-seg hist-range" id="histRange" role="group" aria-label="范围"></div>
+      <div class="hist-tip" id="histTip"></div>
+      <div class="hist-chart" id="histChart"></div>
+      <span class="sheet-lb">最近的局</span>
+      <div class="hist-list" id="histList"></div>
+      <button class="pbtn sheet-done" id="histClose" type="button">关闭</button>
+    </div>
+  </div>
+
   <!-- 右上角「重开」：先问一下。选了才重开，点关闭 / 点外面就接着打这一局 -->
   <div class="sheet" id="restartSheet" hidden>
     <div class="sheet-box">
@@ -268,7 +296,7 @@
 </div>
 
 <script>window.TETRIS_CRAZY = true;</script>
-<script src="../tetris/tetris.js?v=e371907e"></script>
+<script src="../tetris/tetris.js?v=0c53f10d"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
