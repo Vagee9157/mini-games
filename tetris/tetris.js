@@ -5968,6 +5968,16 @@ function syncGoal(){
   if (b) b.textContent = fmtScore(goalNow);
 }
 
+// 不计最高分的局（练习 / 提示 / T 旋练习 / 每日练习 / 中途开局 / 开过标 T 槽）不显示 BEST：
+// 原来照挂着「BEST 0」，中途开局 15 万分旁边一个 0，看着像出了 bug
+function syncBestBox(){
+  const no = !CRAZY && (assisted() || !!mid || !!(game.run && game.run.aidTs));
+  const a = $('best'), b = $('overBest');
+  if (a && a.parentElement.hidden !== no) a.parentElement.hidden = no;
+  if (b && b.parentElement.hidden !== no) b.parentElement.hidden = no;
+  // 结束了就把提示细栏收起来：原来旧推荐和「先自己找 / 规则」还挂在结算页上下
+  document.body.classList.toggle('gameover', !!game.over);
+}
 function syncHud(){
   goalCheck();
   // 破纪录：和过线一样放这里，因为分数有三个增长入口
@@ -5977,6 +5987,7 @@ function syncHud(){
   // 这两个跟分数无关（堆高、连击断掉都不改分），不能挡在下面的缓存早退后面
   syncStreak();
   syncDanger();
+  syncBestBox();
   const key = game.score + '/' + game.lines + '/' + game.level + '/' + game.best;
   if (key === hudCache) return;         // 每帧写 DOM 很浪费
   hudCache = key;

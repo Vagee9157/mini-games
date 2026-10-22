@@ -92,6 +92,28 @@ STD = r"""async () => {""" + PRE + r"""
   ok(/共 1 局，都是中途开局/.test($('histSum').textContent), `历史只有中途局：摘要「${$('histSum').textContent.slice(0, 18)}…」`);
   T.closeHistSheet();
 
+  // ── 界面四条：BEST 只在计最高分的局显示、提示栏结束收起、每日练习四段、复盘长行不截断 ──
+  const bestBox = () => !$('best').parentElement.hidden;
+  T.restart(); await wait(20);
+  ok(bestBox(), '普通局：右栏有 BEST');
+  T.startMid(150); await wait(20);
+  ok(!bestBox(), '中途开局：右栏不挂 BEST（原来 15 万分旁边一个 0）');
+  T.startPractice(); await wait(20);
+  ok(!bestBox(), '练习：不挂 BEST');
+  T.startHint(); await wait(20);
+  ok(!bestBox() && getComputedStyle($('hintBar')).visibility === 'visible', '提示模式打着：提示栏在');
+  T.endGame('堆到顶了'); await wait(20);
+  ok(getComputedStyle($('hintBar')).visibility === 'hidden', '提示模式结束：提示栏收起来，不挂在结算页上');
+  ok(/挖灰线/.test($('prDaily').textContent), `每日练习入口写四段（${$('prDaily').textContent}）`);
+  document.querySelector('#modeSw [data-m="normal"]').click(); await wait(20);
+  $('startBtn').click(); T.game.noGarbage = true;
+  Object.assign(T.game.run, { seg: [[90000, 100], [150000, 100], [200000, 46]] });
+  T.game.pieces = 600; T.game.lines = 246; T.game.score = 440000; T.game.elapsed = 600000;
+  T.endGame('堆到顶了'); await wait(2500);
+  const segB = [...$('rvStats').querySelectorAll('span.w')].find(e => /分段每行/.test(e.textContent));
+  const bb = segB && segB.querySelector('b');
+  ok(bb && /200 后/.test(bb.textContent) && bb.scrollWidth <= bb.clientWidth + 1, `复盘「分段每行」三段都看得到（${bb && bb.textContent}）`);
+
   // ── 中途开局一开局不能「收手」 ──
   T.startMid(200); await wait(20); $('pauseBtn').click(); await wait(20);
   ok($('stopBtn').hidden, '中途开局刚开就暂停：没有「收手」（开局送的块不算）');

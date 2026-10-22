@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=3b8257dd">
+<link rel="stylesheet" href="tetris.css?v=a59083d6">
 </head>
 <body>
 <div class="topline"></div>
@@ -295,7 +295,7 @@
   <div class="sheet" id="prSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>练习</h3></div>
-      <button class="pr-b dr-entry" id="prDaily" type="button">每日练习 · 热身 / 堆叠 / 冲刺</button>
+      <button class="pr-b dr-entry" id="prDaily" type="button">每日练习 · 热身 / 堆叠 / 挖灰线 / 冲刺</button>
       <p class="pr-tip" id="prTip"></p>
       <div class="pr-levels" id="prLevels"></div>
       <span class="sheet-lb">指定下一块</span>
@@ -353,7 +353,7 @@
       <button class="pbtn sheet-done" id="vsGo">开打</button>
     </div>
   </div>
-  <!-- 每日练习面板：三段的状态和成绩 + 最近 7 天。开着时方块停住 -->
+  <!-- 每日练习面板：四段的状态和成绩 + 最近 7 天。开着时方块停住 -->
   <div class="sheet" id="drSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>每日练习</h3></div>
@@ -475,7 +475,7 @@
 
 </div>
 
-<script src="tetris.js?v=9430047a"></script>
+<script src="tetris.js?v=76924de5"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

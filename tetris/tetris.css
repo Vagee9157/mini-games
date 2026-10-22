@@ -1948,3 +1948,9 @@ body.tspinning .hint-why{ color: #ff9ce4; }
 .rv-w span{ font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
 .rv-w b{ display: block; color: #ffd166; font-weight: 600; }
 .rv-w em{ display: block; font-style: normal; color: var(--ink-dim); font-size: 10.5px; }
+
+/* 复盘里占一整行的那几条（分段每行、跟教练比、T 块去向…）允许折行：原来一行放不下就省略号，「200 后」那段被切掉 */
+.review .runstats span.w{ flex-wrap: wrap; }
+.review .runstats span.w b{ white-space: normal; text-align: right; overflow: visible; }
+/* 局结束：提示细栏收起来（占位留着，盘面不跳） */
+body.gameover .hintbar{ visibility: hidden; }
