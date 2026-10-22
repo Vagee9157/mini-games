@@ -655,6 +655,7 @@ function saveGame(force){
       upNext,                   // 不存的话续玩会拿 lines 去比默认值，连环弹面板
       zoneCharge,
       delayUsed,
+      mid,                      // 中途开局：不存的话续玩后这局会被当成从头打的，分数进最高分
       // 不存 zoneLeft：ZONE 是十秒的窗口，隔一次重开再接着倒计时没有意义。
       // 盘底那几行死行靠 restoreGame 直接从盘面数出来再结算，见那边。
       at: Date.now(),
@@ -718,6 +719,8 @@ function restoreGame(d){
   if (typeof d.upNext === 'number') upNext = d.upNext; else upRoll(game.lines);
   zoneCharge = CRAZY ? (+d.zoneCharge || 0) : 0;
   delayUsed = !!d.delayUsed;
+  mid = d.mid && typeof d.mid.L === 'number' ? d.mid : null;
+  syncModeTag();
   // ZONE 的死行：**从盘面数出来**，不信任存档字段。
   // 这样连这次改动之前存的那些坏档也能自愈 —— 它们盘面里有死行但没有计数，
   // 于是 zoneEnd 看到 zoneRows=0 直接早退，那几行永久卡在盘底、地板一直被顶高。
@@ -1489,7 +1492,7 @@ function syncResume(){
 function syncModeTag(){
   const t = $('modeTag');
   if (!t) return;
-  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习 · ' + tsSpeedName() : '';
+  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习 · ' + tsSpeedName() : mid ? '中途开局 · ' + mid.L + ' 行起' : '';
   t.textContent = txt;
   t.hidden = !txt;
 }
@@ -4024,6 +4027,127 @@ function lockPage(){
 }
 
 
+
+// ───────────────────────── 中途开局 ─────────────────────────
+//
+// 普通局前面一两百行是在攒倍率（20 级才封顶 ×8），每局都从头打很磨。中途开局直接从第 150 / 180 / 200 行开始：
+// 等级、分数、已用时间、灰线钟都按「你平时打到这里大概是什么样」铺好，盘面垫几行灰线、堆一层方块。
+// 分数和用时按你最近从头打完的局估（每行底分 × 一路的等级倍率；每行平均几秒），没记录时按 246 行 24 万、10 分 40 秒那种水平。
+// 不进最高分（有一截分是送的）；历史记录里单独标「N 行起」，曲线只画从头打的局。
+const MID_TIERS = [150, 180, 200];
+const MID_SHAPE = { 150: { h: 7, g: 3 }, 180: { h: 8, g: 3 }, 200: { h: 8, g: 4 } };   // 堆多高、其中几行是灰线
+const MID_DEF = { b: 153, tpl: 2600 };   // 没记录时：每行底分 153（246 行 ≈ 24 万）、每行 2.6 秒
+let mid = null;          // { L, s, p, e }：这局从第 L 行开起，开局送了 s 分、p 块、e 毫秒
+let midPick = 150;
+function multSum(L){
+  let a = 0;
+  for (let i = 0; i < L; i++) a += levelMult(Math.floor(i / LINES_PER_LEVEL) + 1);
+  return a;
+}
+function midRates(){
+  const full = histRead().filter(e => !e.mid && e.l >= 60 && e.t > 0).slice(-10);
+  if (full.length < 3) return Object.assign({ from: 0 }, MID_DEF);
+  const med = a => { const b = a.slice().sort((x, y) => x - y); return b[b.length >> 1]; };
+  return { b: med(full.map(e => e.s / multSum(e.l))), tpl: med(full.map(e => e.t / e.l)), from: full.length };
+}
+// 行数固定；分数、已用时间、等级每次开局在平均水平附近随机一点，同一档每局不完全一样
+const MID_JIT = { s: .12, e: .15, lv: 2 };
+function midPlan(L, roll){
+  const r = midRates(), lv = Math.floor(L / LINES_PER_LEVEL) + 1, s = r.b * multSum(L), e = L * r.tpl;
+  const u = () => roll ? Math.random() * 2 - 1 : 0;
+  const dl = Math.round(u() * MID_JIT.lv);
+  return { L, lv: lv + dl, dl, s: Math.round(s * (1 + u() * MID_JIT.s)), e: Math.round(e * (1 + u() * MID_JIT.e)),
+           p: Math.round(L * COLS / 4), from: r.from,
+           lvLo: lv - MID_JIT.lv, lvHi: lv + MID_JIT.lv, sLo: s * (1 - MID_JIT.s), sHi: s * (1 + MID_JIT.s),
+           eLo: e * (1 - MID_JIT.e), eHi: e * (1 + MID_JIT.e) };
+}
+// 先让堆叠提示的老机器人在空盘上放块，堆到 h - g 行高，再从底下顶上来 g 行灰线（缺口随机、上下两行不同列）——
+// 和普通局里灰线涨上来的样子一样。反过来先垫灰线的话，机器人放块时会把灰线补满消掉，盘面上就看不到了
+function midBoard(h, g){
+  const R = TOTAL_ROWS;
+  let tb = newBoard();
+  const bag = [];
+  const next = () => { if (!bag.length) bag.push(...'IJLOSTZ'.split('').sort(() => Math.random() - .5)); return bag.pop(); };
+  let cur = next();
+  for (let k = 0; k < 80; k++){
+    const b = tb.map(r => r.map(Boolean));
+    const top = b.findIndex(r => r.some(Boolean));
+    if (top >= 0 && R - top >= h - g) break;
+    const nx = next();
+    const res = hintBest(b, cur, nx);
+    if (!res) break;
+    for (const [X, Y] of res.best.cells) if (Y >= 0) tb[Y][X] = cur;
+    for (let y = R - 1; y >= 0; y--) if (tb[y].every(c => c)){ tb.splice(y, 1); tb.unshift(new Array(COLS).fill(null)); y++; }
+    cur = nx;
+  }
+  let last = -1;
+  for (let i = 0; i < g; i++){
+    let hole = (Math.random() * COLS) | 0;
+    if (hole === last) hole = (hole + 1 + ((Math.random() * (COLS - 1)) | 0)) % COLS;
+    last = hole;
+    tb.shift();
+    tb.push(Array.from({ length: COLS }, (_, x) => x === hole ? null : GARBAGE));
+  }
+  return tb;
+}
+function midPlayed(){
+  return !!mid && (game.pieces - mid.p >= RUSH_MIN_PIECES || game.elapsed - mid.e >= RUSH_MIN_MS);
+}
+function startMid(L){
+  if (!MID_TIERS.includes(L)) return;
+  closeMidSheet(true);
+  if (assisted()) exitPractice();
+  restart();
+  const P = midPlan(L, true), sh = MID_SHAPE[L];
+  game.board = midBoard(sh.h, sh.g);
+  game.lines = L; game.level = P.lv; game.score = P.s; game.elapsed = P.e; game.pieces = P.p;
+  shownScore = P.s;
+  garbageTimer = Math.random() * garbagePeriod() * .6;     // 灰线钟从半路走起，别一开局就涨
+  mid = { L, s: P.s, p: P.p, e: P.e, dl: P.dl };
+  midPick = L;
+  staticDirty = true; previewDirty = true; needsDraw = true;
+  syncEdge(); syncHud(); syncModeTag();
+  saveGame(true);                // 马上存：这之后关掉页面再续玩，也知道是中途开局
+}
+function renderMidSheet(){
+  const box = $('midTiers');
+  if (!box) return;
+  const r = midRates(), h = histRead();
+  box.innerHTML = MID_TIERS.map(L => {
+    const P = midPlan(L), done = h.filter(e => e.mid === L);
+    const best = done.length ? Math.max(...done.map(e => e.l)) : 0;
+    return `<button type="button" class="mid-t${L === midPick ? ' on' : ''}" data-ml="${L}"><b>${L} 行起</b>`
+      + `<span>${P.lvLo}~${P.lvHi} 级 · ${escHtml(fmtScore(P.sLo))}~${escHtml(fmtScore(P.sHi))} 分 · 已用 ${mmss(P.eLo)}~${mmss(P.eHi)}</span>`
+      + `<em>${done.length ? `打过 ${done.length} 次 · 最远 ${best} 行` : '还没打过'}</em></button>`;
+  }).join('');
+  const src = $('midSrc');
+  if (src) src.textContent = (r.from ? `分数和用时按你最近 ${r.from} 局从头打完的局估` : '你从头打完的局还不到 3 局，先按 246 行 24 万、10 分 40 秒的水平估')
+    + '，每次开局在这个范围里随机。';
+}
+function openMidSheet(){
+  renderMidSheet();
+  $('midSheet').hidden = false;
+  if (game.started && !game.over) game.frozen = true;
+}
+function closeMidSheet(silent){
+  const sh = $('midSheet');
+  if (!sh || sh.hidden) return;
+  sh.hidden = true;
+  if (!silent) unfreezeIfIdle();
+}
+function bindMid(){
+  const sh = $('midSheet');
+  if (!sh) return;
+  sh.addEventListener('click', e => {
+    if (e.target === sh) return closeMidSheet();
+    const t = e.target.closest('[data-ml]');
+    if (t){ midPick = +t.dataset.ml; renderMidSheet(); }
+  });
+  $('midGo').addEventListener('click', () => startMid(midPick));
+  $('midClose').addEventListener('click', () => closeMidSheet());
+  const mb = $('midBtn'); if (mb) mb.addEventListener('click', () => openMidSheet());
+}
+
 // ───────────────────────── 历史记录 ─────────────────────────
 //
 // 每一局正经局存一条：时间、分数、行数、等级、用时、块数、四消 / T 旋双消 / 造洞。
@@ -4048,7 +4172,8 @@ function histPush(e){
 function histEntry(){
   const r = game.run || {};
   return { d: Date.now(), s: game.score, l: game.lines, lv: game.level, t: Math.round(game.elapsed), p: game.pieces,
-           t4: r.clr ? r.clr[4] : r.tetris || 0, tsd: r.tsc ? r.tsc[2] + r.tsc[3] : 0, h: r.holes || 0 };
+           t4: r.clr ? r.clr[4] : r.tetris || 0, tsd: r.tsc ? r.tsc[2] + r.tsc[3] : 0, h: r.holes || 0,
+           ...(mid ? { mid: mid.L, s0: mid.s, l0: mid.L, t0: mid.e } : {}) };
 }
 const mmss = ms => { const s = Math.floor((ms || 0) / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 // 看哪一项：键、名字、怎么取值、怎么写
@@ -4115,13 +4240,14 @@ function histTipText(rows, i, base){
   return `第 ${base + i + 1} 局 · ${dateTx(e.d)} ${timeTx(e.d)} · ${fmtScore(e.s)} 分 · ${e.l ?? '—'} 行 · ${e.lv ?? '—'} 级 · ${e.t != null ? mmss(e.t) : '—'}`;
 }
 function renderHist(){
-  const all = histRead();
+  const every = histRead();
+  const all = every.filter(e => !e.mid);          // 曲线和摘要只算从头打的局：中途开局的分数里有一截是送的
   const rows = histView.n ? all.slice(-histView.n) : all;
   const [, name, get, fmt] = histMetric();
   $('histMetric').innerHTML = HIST_METRICS.map(([k, t]) => `<button type="button" data-hm="${k}" class="${k === histView.m ? 'on' : ''}">${t}</button>`).join('');
   $('histRange').innerHTML = HIST_RANGES.map(([k, t]) => `<button type="button" data-hn="${k}" class="${k === histView.n ? 'on' : ''}">${t}</button>`).join('');
   const sum = $('histSum'), chart = $('histChart'), tip = $('histTip'), list = $('histList');
-  if (!all.length){
+  if (!every.length){
     sum.textContent = '';
     tip.textContent = '';
     chart.innerHTML = '<p class="hist-empty">还没有记录。普通局打到 30 块以上，结束后就记在这里。</p>';
@@ -4129,6 +4255,7 @@ function renderHist(){
     return;
   }
   const vals = all.map(get).filter(v => v != null && Number.isFinite(v));
+  if (!all.length){ sum.textContent = `共 ${every.length} 局，都是中途开局`; tip.textContent = ''; }
   const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
   const last10 = vals.slice(-10), prev10 = vals.slice(-20, -10);
   let tr = '';
@@ -4139,7 +4266,8 @@ function renderHist(){
   sum.innerHTML = `共 <b>${all.length}</b> 局 · ${escHtml(name)}最高 <b>${escHtml(vals.length ? fmt(Math.max(...vals)) : '—')}</b>`
     + `<br>近 ${last10.length} 局平均 <b>${escHtml(last10.length ? fmt(avg(last10)) : '—')}</b>${tr}`;
   const pick = histView.pick >= 0 && histView.pick < rows.length ? histView.pick : rows.length - 1;
-  chart.innerHTML = histChartSVG(rows, pick) || '<p class="hist-empty">这一项以前的局没记（等级是后来才开始记的）</p>';
+  chart.innerHTML = !rows.length ? '<p class="hist-empty">还没有从头打完的局（中途开局不画进曲线，只列在下面）</p>'
+    : histChartSVG(rows, pick) || '<p class="hist-empty">这一项以前的局没记（等级是后来才开始记的）</p>';
   tip.textContent = histTipText(rows, pick, all.length - rows.length);
   const svg = chart.querySelector('svg');
   if (svg){
@@ -4151,10 +4279,10 @@ function renderHist(){
     };
     svg.addEventListener('pointerdown', choose);
   }
-  const best = Math.max(...all.map(e => e.s));
+  const best = all.length ? Math.max(...all.map(e => e.s)) : -1;
   list.innerHTML = '<div class="hl-row hl-h"><span>时间</span><span>分数</span><span>行</span><span>级</span><span>用时</span></div>'
-    + all.slice(-30).reverse().map(e => `<div class="hl-row${e.s === best ? ' best' : ''}"><span>${dateTx(e.d)} ${timeTx(e.d)}</span>`
-      + `<span>${escHtml(fmtScore(e.s))}${e.s === best ? ' ★' : ''}</span><span>${e.l ?? '—'}</span><span>${e.lv ?? '—'}</span><span>${e.t != null ? mmss(e.t) : '—'}</span></div>`).join('');
+    + every.slice(-30).reverse().map(e => `<div class="hl-row${!e.mid && e.s === best ? ' best' : ''}${e.mid ? ' mid' : ''}"><span>${dateTx(e.d)} ${timeTx(e.d)}${e.mid ? `<em>${e.mid} 行起</em>` : ''}</span>`
+      + `<span>${escHtml(fmtScore(e.s))}${!e.mid && e.s === best ? ' ★' : ''}</span><span>${e.l ?? '—'}</span><span>${e.lv ?? '—'}</span><span>${e.t != null ? mmss(e.t) : '—'}</span></div>`).join('');
 }
 function openHistSheet(){
   histView.pick = -1;
@@ -4237,16 +4365,19 @@ function fillReview(){
   const box = $('review');
   if (!box) return;
   const r = game.run;
-  const show = !CRAZY && !!r && !assisted() && game.pieces >= 10;
+  // 中途开局只看开局之后你自己打的那一段：行、块、用时、分数都减掉开局送的
+  const m0 = mid || { L: 0, s: 0, p: 0, e: 0 };
+  const show = !CRAZY && !!r && !assisted() && game.pieces - m0.p >= 10;
   box.hidden = !show;
   if (!show) return;
-  const secs = game.elapsed / 1000, lines = game.lines, pieces = game.pieces;
-  const perLine = lines ? Math.round(game.score / lines) : 0;
-  const prev = histRead().slice(-1)[0];
+  const secs = (game.elapsed - m0.e) / 1000, lines = game.lines - m0.L, pieces = game.pieces - m0.p;
+  const perLine = lines ? Math.round((game.score - m0.s) / lines) : 0;
+  // 「上局」跟同一种开局比：从头打的比从头打的，中途开局比同一档
+  const prev = histRead().filter(e => (e.mid || 0) === (mid ? mid.L : 0)).slice(-1)[0];
   const tsd = r.tsc[2] + r.tsc[3], tsOther = r.tsc[1] + r.tsc[0] + r.mini;
   const rows = [];
   const add = (k, v, wide) => rows.push(`<span${wide ? ' class="w"' : ''}><i>${k}</i><b>${v}</b></span>`);
-  add('每行均分', groupInt(perLine) + (prev && prev.l ? `（上局 ${groupInt(Math.round(prev.s / prev.l))}）` : ''), true);
+  add('每行均分', groupInt(perLine) + (prev && prev.l - (prev.l0 || 0) > 0 ? `（上局 ${groupInt(Math.round((prev.s - (prev.s0 || 0)) / (prev.l - (prev.l0 || 0))))}）` : ''), true);
   add('四消', r.clr[4] + ' 次');
   add('T 旋双消', tsd + ' 次');
   add('单消 / 双消 / 三消', `${r.clr[1]} / ${r.clr[2]} / ${r.clr[3]} 次`, true);
@@ -4429,7 +4560,7 @@ function scoreFor(n, spin, perfect){
     // 等级本身不封顶，一直往上涨；封顶的是它驱动的三件事：
     // 速度在 gravityFor 里 clamp、倍率在 levelMult 里 clamp、
     // 只有灰线在满级之后继续被它推快，所以再强的人也一定会撞墙。
-    const newLevel = Math.floor(game.lines / LINES_PER_LEVEL) + 1;
+    const newLevel = Math.floor(game.lines / LINES_PER_LEVEL) + 1 + (mid ? mid.dl || 0 : 0);   // 中途开局随机多/少的那几级一直带着
     // 每日练习不升级：三段每天同一个速度，数字才能跨天比
     if (newLevel > game.level && !drill && !tsOn()){ game.level = newLevel; flashLevel(); syncEdge(); }
   }
@@ -4571,7 +4702,8 @@ function endGame(why){
   const prevCareer = careerOf(readTotal());   // 「段位」看累计总分
   // 练习局一个字都不写：最高分、累计、今日、狂欢局保底计数全部跳过。
   // 练习是可以无限撤销、可以指定出块的，它的分数不能和正经局放一个榜上。
-  if (!assisted() && game.score > game.best){ game.best = game.score; writeBest(game.best); }
+  // 中途开局的分数里有一截是「按你的平均水平估出来」送的，不进最高分
+  if (!assisted() && !mid && game.score > game.best){ game.best = game.score; writeBest(game.best); }
   if (CRAZY && !assisted()) addTotal(game.score);
   if (CRAZY && !assisted()){
     // 有效局才推进狂欢局的计数、才算今日一局 —— 秒死重开刷不出狂欢局，
@@ -4612,7 +4744,7 @@ function endGame(why){
   fillRunLog();
   fillReview();
   // 历史记录：正经局才记（练习 / 提示 / 对战 / NES 不记），门槛和「今日局数」一样，秒死重开不算
-  if (!assisted() && (game.why === '收手' ? isStopRun() : isRealRun())) histPush(histEntry());
+  if (!assisted() && (mid ? midPlayed() : game.why === '收手' ? isStopRun() : isRealRun())) histPush(histEntry());
   syncRank();
   $('overDied').textContent = DEATH_TEXT[game.why] || '';
   // 「最强」只在够得着的时候才提（低于第一档说什么都是扫兴）。
@@ -8812,7 +8944,7 @@ const KEYMAP = {
 // 它映射到 pause，于是背后偷偷暂停，面板还留在原地。
 // 手机上没键盘所以一直没撞到，但桌面按 Esc 关弹窗是肌肉记忆。
 function topSheet(){
-  for (const id of ['histSheet', 'menuSheet', 'restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
+  for (const id of ['midSheet', 'histSheet', 'menuSheet', 'restartSheet', 'nesSheet', 'vsSheet', 'hintSheet', 'drSheet', 'prSheet', 'helpSheet', 'rankSheet', 'styleSheet']){
     const el = $(id);
     if (el && !el.hidden) return el;
   }
@@ -8836,6 +8968,7 @@ window.addEventListener('keydown', (e) => {
       else if (sheet.id === 'restartSheet') closeRestartSheet();
       else if (sheet.id === 'menuSheet') closeMenu();
       else if (sheet.id === 'histSheet') closeHistSheet();
+      else if (sheet.id === 'midSheet') closeMidSheet();
       else if (sheet.id === 'vsSheet') closeVsSheet();
       else sheet.hidden = true;
     }
@@ -8878,6 +9011,7 @@ function modeRestart(){
   if (nes) startNes(nes.start);
   else if (vs) startVs(vs.bot.lv);
   else if (drill) drillRedo();
+  else if (mid) startMid(mid.L);
   else restart();
 }
 
@@ -8890,6 +9024,7 @@ function restartLabel(){
   if (practice) return '重新开始 · 练习';
   if (tsOn()) return '重新开始 · T 旋练习';
   if (hintMode) return '重新开始 · 提示';
+  if (mid) return '重新开始 · 从第 ' + mid.L + ' 行起';
   return '重新开始';
 }
 function openRestartSheet(){
@@ -8923,6 +9058,7 @@ function restartPick(m){
   if (m === 'practice'){ startPractice(); openPrSheet(); return; }
   if (m === 'hint') return startHint();
   if (m === 'tspin') return startTspin();
+  if (m === 'mid') return openMidSheet();
   if (m === 'drill') return startDrill();
 }
 
@@ -9192,6 +9328,7 @@ function restart(){
   deepSaid = false;
   gwarnStep = -1;
   game.run = newRun();
+  mid = null;                        // 中途开局由 startMid 在 restart 之后再铺
   game.queue = [];
   game.mods = [];
   game.holdMod = null;
@@ -9487,7 +9624,7 @@ function init(){
   if (dsh) dsh.addEventListener('click', (e) => { if (e.target === dsh) closeDrSheet(); });
   const psh = $('prSheet');
   if (psh) psh.addEventListener('click', (e) => { if (e.target === psh) closePrSheet(); });
-  $('againBtn').addEventListener('click', () => restart());
+  $('againBtn').addEventListener('click', () => mid ? startMid(mid.L) : restart());
   const openRank = () => openRankSheet();
   $('rankChip').addEventListener('click', openRank);
   const openHelpSheet = () => openHelp();
@@ -9536,7 +9673,7 @@ function init(){
     endGame('收手');
   });
   $('muteBtn').addEventListener('click', toggleMute);
-  bindMenu(); bindHist();
+  bindMenu(); bindHist(); bindMid();
   $('skinBtn').addEventListener('click', () => toggleStylePanel());
   $('skinDone').addEventListener('click', () => toggleStylePanel(false));
   $('styleSheet').addEventListener('click', (e) => { if (e.target.id === 'styleSheet') toggleStylePanel(false); });
@@ -9690,7 +9827,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, histRead, histPush, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, histRead, histPush, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

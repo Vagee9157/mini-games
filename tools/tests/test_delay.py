@@ -2,7 +2,7 @@ import os, http.server, socketserver, threading, functools, json
 ROOT=os.getcwd()
 H=functools.partial(http.server.SimpleHTTPRequestHandler, directory=ROOT); H.log_message=lambda *a,**k:None
 socketserver.TCPServer.allow_reuse_address=True
-srv=socketserver.TCPServer(("127.0.0.1",0),H); srv.RequestHandlerClass.log_message=lambda *a,**k:None
+socketserver.ThreadingTCPServer.daemon_threads=True; srv=socketserver.ThreadingTCPServer(("127.0.0.1",0),H); srv.RequestHandlerClass.log_message=lambda *a,**k:None
 port=srv.server_address[1]; threading.Thread(target=srv.serve_forever,daemon=True).start()
 from playwright.sync_api import sync_playwright
 JS = r"""() => {
