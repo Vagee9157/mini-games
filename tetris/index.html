@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=e08736ad">
+<link rel="stylesheet" href="tetris.css?v=3b8257dd">
 </head>
 <body>
 <div class="topline"></div>
@@ -147,6 +147,10 @@
               <div class="runstats" id="rvStats"></div>
               <span class="rv-lb">下一局试试</span>
               <ul class="rv-tips" id="rvTips"></ul>
+              <div class="rv-worst" id="rvWorst" hidden>
+                <span class="rv-lb">损失最大的几手 · 红是你放的，绿框是教练推荐</span>
+                <div id="rvWorstList"></div>
+              </div>
             </div><!-- std-only:end -->
           </div>
 
@@ -471,7 +475,7 @@
 
 </div>
 
-<script src="tetris.js?v=291422df"></script>
+<script src="tetris.js?v=9430047a"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

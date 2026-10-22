@@ -1941,3 +1941,10 @@ body.tspinning .hint-why{ color: #ff9ce4; }
 #palOpts .pal-grp:first-child{ margin-top: 0; }
 #palOpts .seg-btn{ padding: 7px 4px 6px; gap: 4px; font-size: 10.5px; }
 #palOpts .seg-btn canvas{ height: 14px; }
+
+/* 复盘：损失最大的几手 */
+.rv-w{ display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.06); }
+.rv-w canvas{ flex: none; border-radius: 4px; background: rgba(0,0,0,.25); }
+.rv-w span{ font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
+.rv-w b{ display: block; color: #ffd166; font-weight: 600; }
+.rv-w em{ display: block; font-style: normal; color: var(--ink-dim); font-size: 10.5px; }

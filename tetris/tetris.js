@@ -1074,6 +1074,7 @@ function holdPiece(){
   if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
+  if (cur === 'T' && aidsOn() && game.run && game.run.tHold !== undefined) game.run.tHold++;   // T 块去向：进了暂存
   if (game.hold){
     const h = game.hold, hm = game.holdMod || null;
     game.hold = cur; game.holdMod = curMod;
@@ -1192,7 +1193,7 @@ const LEVELS = [
     solution:['CL2d19CH'] },
   { k:'tetris', n:'四消井', group:'basic', queue:['I'],
     goals:[{ n:4 }],
-    tip:'九列铺平、留一列井，等 I 块。每行 200 分，接上 B2B 是 300',
+    tip:'技能练习：九列铺平、留一列井，等 I 块打四消。普通局里优先搭 T 槽（T 旋双消每行的分是四消的三倍），四消留给 I 正好有地方的时候',
     rows:['#########.',
           '#########.',
           '#########.',
@@ -1564,7 +1565,7 @@ function syncResume(){
 function syncModeTag(){
   const t = $('modeTag');
   if (!t) return;
-  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习 · ' + tsSpeedName() : mid ? '中途开局 · ' + mid.L + ' 行起' : '';
+  const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习 · ' + tsSpeedName() + (tsGarbage ? ' · 灰线' : '') : mid ? '中途开局 · ' + mid.L + ' 行起' : '';
   t.textContent = txt;
   t.hidden = !txt;
 }
@@ -1857,49 +1858,56 @@ let hintReveal = null;      // 「先自己找」时，放下之后把推荐亮�
 // 你放下之后（锁定、消行判定之后）：和推荐一样好就算对；不对就说违反了哪一条
 function hintAdjHoles(b){ return simFeatures(b).holes - (tsBestSlot(b) ? 1 : 0); }   // 槽屋檐下那一格不算洞
 function hintSlotScore(b){ const s = tsBestSlot(b); return s ? (s.ready ? 100 : Math.max(0, 50 - s.miss * 10)) : 0; }
-function hintJudge(p, n, spin){
-  if (!hintMode || tsOn() || !tsRec || !tsBase) return;
-  hintReveal = null;          // 上一块亮着的推荐作废，不然连着放两块会叠在一起
-  const rec = tsRec, b0 = tsBase;
+// 判一手：和推荐比，好不好、违反哪条、差多少（loss，推荐的估值减你的）。提示模式和普通局的后台教练共用
+function judgeCore(rec, b0, p, n, spin){
   const cells = cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]);
   const key = cs => cs.map(c => c.join(',')).sort().join(';');
-  hintStats.total++;
   const h0 = hintAdjHoles(b0), mineB = simPlace(b0, cells).b, hm = hintAdjHoles(mineB);
-  hintStats.holes = (hintStats.holes || 0) + Math.max(0, hm - h0);
-  let good = false, exact = false, r = -1, msg = '';
+  const out = { cells, good: false, exact: false, r: -1, msg: '', loss: 0, holes: Math.max(0, hm - h0), tsd: false };
   if (p.type === 'T' && spin === 'tspin' && n === 2){
-    tsStats.tsd++; good = true; exact = rec.kind === 'tsd';
-    showToast('✓ T 旋双消', 1200);
+    out.good = true; out.exact = rec.kind === 'tsd'; out.tsd = true;
   } else if (rec.kind === 'tsd'){
-    r = 2; msg = '槽在这：' + rec.path;
+    out.r = 2; out.msg = '槽在这：' + rec.path; out.loss = 60;
   } else if (rec.kind === 'hold'){
-    r = 2; msg = p.type === 'T' ? '还没有槽，T 先暂存' : '槽好了、暂存里有 T，先换出来';
+    out.r = 2; out.msg = p.type === 'T' ? '还没有槽，T 先暂存' : '槽好了、暂存里有 T，先换出来'; out.loss = 30;
   } else {
-    exact = key(cells) === key(rec.cells);
+    out.exact = key(cells) === key(rec.cells);
     const recB = simPlace(b0, rec.cells).b, hr = hintAdjHoles(recB);
     const mine = tsEval(b0, cells, rec.next);
-    if (exact || (rec.score - mine <= HINT_TOL && hm <= hr)) good = true;
+    out.loss = Math.max(0, rec.score - mine);
+    if (out.exact || (rec.score - mine <= HINT_TOL && hm <= hr)) out.good = true;
     else {
       const recLines = simPlace(b0, rec.cells).lines, myLines = simPlace(b0, cells).lines;
       // 把搭好的槽填了放最前：填槽时屋檐下那格会变成真洞，但这时候该说的是「槽没了」，不是「留了洞」
       if (rec.readyBefore > 0 && tsReadyCount(mineB) < rec.readyBefore){
-        r = 2; msg = '把 T 槽填了，槽留给 T';
+        out.r = 2; out.msg = '把 T 槽填了，槽留给 T';
       } else if (hm > hr){
         const gaps = fitGaps(b0, cells);
-        r = 0; msg = gaps > 0 ? '留了 ' + gaps + ' 个洞，有能贴合的地方' : '这一块造了 ' + (hm - h0) + ' 个洞';
+        out.r = 0; out.msg = gaps > 0 ? '留了 ' + gaps + ' 个洞，有能贴合的地方' : '这一块造了 ' + (hm - h0) + ' 个洞';
       } else if (rec.danger && recLines > 0 && myLines === 0){
-        r = 3; msg = '堆高了，先消行';
+        out.r = 3; out.msg = '堆高了，先消行';
       } else if (hintSlotScore(recB) > hintSlotScore(mineB)){
-        r = 2; msg = '推荐那里在搭 T 槽';
+        out.r = 2; out.msg = '推荐那里在搭 T 槽';
       } else {
         const fm = simFeatures(mineB), fr = simFeatures(recB);
-        r = 1;
-        msg = pitCount(fm) > pitCount(fr) ? '挖出了只有 I 能填的深坑'
+        out.r = 1;
+        out.msg = pitCount(fm) > pitCount(fr) ? '挖出了只有 I 能填的深坑'
             : !(fm.accept.O && fm.accept.S && fm.accept.Z) && (fr.accept.O && fr.accept.S && fr.accept.Z) ? '放完 O/S/Z 有块没地方放了'
             : fm.bump > fr.bump ? '台阶变陡了' : '推荐那里放完更低更平';
       }
     }
   }
+  return out;
+}
+function hintJudge(p, n, spin){
+  if (!hintMode || tsOn() || !tsRec || !tsBase) return;
+  hintReveal = null;          // 上一块亮着的推荐作废，不然连着放两块会叠在一起
+  const rec = tsRec, b0 = tsBase;
+  hintStats.total++;
+  const J = judgeCore(rec, b0, p, n, spin);
+  const { cells, good, exact, r, msg } = J;
+  hintStats.holes = (hintStats.holes || 0) + J.holes;
+  if (J.tsd){ tsStats.tsd++; showToast('✓ T 旋双消', 1200); }
   if (exact) hintStats.same++;
   if (good) hintStats.good++;
   // 放偏了，或者藏着推荐自己找的时候，放完把推荐亮一下对照
@@ -2134,7 +2142,7 @@ function tsScore(b){
 // 普通消行：堆高了就放开消（保命），平时别为了一两行去消，留着两行给 T 旋
 function tsLineValue(lines, b){
   if (!lines) return 0;
-  return lines * (simFeatures(b).maxH >= HINT_DANGER ? HW.burnDanger : HW.burn);
+  return lines * (maxHAll(b) >= HINT_DANGER ? HW.burnDanger : HW.burn);
 }
 function tsEval(b0, cells, nextType){
   const r1 = simPlace(b0, cells);
@@ -2170,16 +2178,22 @@ function tsNextT(){
   return i < 0 ? 'T 还没进 NEXT' : 'T 还有 ' + (i + 1) + ' 块';
 }
 
-function tsCompute(){
-  tsRec = null; hintMove = null;
-  const p = game.piece;
-  if (!hintMode || !p || game.over) return syncHint();
-  const b0 = simBoard();
-  tsBase = b0;
+// 盘面最高的那一列（十列都算）。simFeatures 的 maxH 只看前九列（老教练留第十列当井），不留井的教练用它判堆高会漏掉第十列
+function maxHAll(b){ return Math.max(...simFeatures(b).h); }
+// 不留井时的落点理由（原来兜底借用老教练的 hintWhy，会冒出「别处会堵井」「进井 · 等四消」这种留井的说法）
+function tsPlainWhy(b0, cells){
+  const r = simPlace(b0, cells), f0 = simFeatures(b0), f1 = simFeatures(r.b);
+  if (r.lines) return '消 ' + r.lines + ' 行' + (maxHAll(b0) >= HINT_DANGER ? ' · 先保命' : '');
+  if (f1.holes > f0.holes) return '没处贴合 · 选洞最少的';
+  const low = Math.min(...f0.h);
+  if (cells.some(([x]) => f0.h[x] === low)) return '填低处 · 放完更平';
+  return '贴合台阶 · 放完更平';
+}
+// 教练推荐：给定盘面、当前块、下一块、暂存状态，算出这一块该怎么放（提示模式显示它；普通局在后台悄悄算，局后复盘用）
+function coachRec(b0, type, next, hold, holdUsed){
   const readyBefore = tsReadyCount(b0);
-  const danger = simFeatures(b0).maxH >= HINT_DANGER;
-  const key = cs => cs.map(c => c.join(',')).sort().join(';');
-  if (p.type === 'T'){
+  const danger = maxHAll(b0) >= HINT_DANGER;
+  if (type === 'T'){
     const locks = simReach(b0, 'T', kbUsed);
     const tsd = locks.filter(l => l.spin === 'tspin' && l.lines === 2);
     if (tsd.length){
@@ -2187,35 +2201,37 @@ function tsCompute(){
       // 原来按总长度挑，软降每格都算一下，结果挑出「变换 ×3 → 软降 → 变换 ×3」这种绕远的
       const presses = a => a.acts.replace(/d/g, '').length;
       const m = tsd.sort((a, c) => presses(a) - presses(c) || a.acts.length - c.acts.length)[0];
-      tsRec = { kind: 'tsd', cells: m.cells, rot: m.rot, x: m.x, path: tsPathText(m.acts), readyBefore,
-                why: 'T 来了：' + tsPathText(m.acts) };     // 「最后一下必须是变换」写在要领卡里，细栏放不下
-    } else if (!game.holdUsed && game.hold !== 'T'){
-      tsRec = { kind: 'hold', readyBefore, why: '还没有槽 —— 先暂存 T，留着打 T 旋' };
+      return { kind: 'tsd', cells: m.cells, rot: m.rot, x: m.x, path: tsPathText(m.acts), readyBefore,
+               why: 'T 来了：' + tsPathText(m.acts) };     // 「最后一下必须是变换」写在要领卡里，细栏放不下
     }
-  } else if (game.hold === 'T' && !game.holdUsed && readyBefore){
-    tsRec = { kind: 'hold', readyBefore, why: '槽好了、暂存里有 T —— 点暂存把 T 换出来' };
+    if (!holdUsed && hold !== 'T') return { kind: 'hold', readyBefore, why: '还没有槽 —— 先暂存 T，留着打 T 旋' };
+  } else if (hold === 'T' && !holdUsed && readyBefore){
+    return { kind: 'hold', readyBefore, why: '槽好了、暂存里有 T —— 点暂存把 T 换出来' };
   }
-  if (!tsRec){
-    // 普通落点：哪个最有利于把槽搭起来
-    const next = game.queue[0];
-    let best = null;
-    for (const m of simDrops(b0, p.type)){
-      const v = tsEval(b0, m.cells, next);
-      if (!best || v > best.v) best = Object.assign({ v }, m);
-    }
-    if (best){
-      const before = tsBestSlot(b0), after = tsBestSlot(simPlace(b0, best.cells).b);
-      let why;
-      if (after && after.ready && !(before && before.ready))
-        why = ((p.type === 'L' || p.type === 'J') ? '搭屋檐' : '这块') + ' —— 槽搭好了' + (after.roof < 0 ? '（屋檐在左，顺时针好转）' : '');
-      else if (after && before && after.miss < before.miss) why = '补槽两边 —— 还差 ' + after.miss + ' 格就能等 T';
-      else if (after && !before) why = (p.type === 'L' || p.type === 'J' || p.type === 'S' || p.type === 'Z') ? '起个槽：这块做屋檐' : '起个槽';
-      else if (before && before.ready) why = '槽留着别碰 · ' + tsNextT();
-      else why = hintWhy(b0, Object.assign({ score: best.v }, best), simDrops(b0, p.type).map(m => Object.assign({ score: tsEval(b0, m.cells, null), gaps: fitGaps(b0, m.cells) }, m)), false);
-      tsRec = { kind: 'place', cells: best.cells, rot: best.rot, x: best.x, readyBefore, why,
-                score: best.v, next, danger };
-    }
+  // 普通落点：哪个最有利于把槽搭起来
+  let best = null;
+  for (const m of simDrops(b0, type)){
+    const v = tsEval(b0, m.cells, next);
+    if (!best || v > best.v) best = Object.assign({ v }, m);
   }
+  if (!best) return null;
+  const before = tsBestSlot(b0), after = tsBestSlot(simPlace(b0, best.cells).b);
+  let why;
+  if (after && after.ready && !(before && before.ready))
+    why = ((type === 'L' || type === 'J') ? '搭屋檐' : '这块') + ' —— 槽搭好了' + (after.roof < 0 ? '（屋檐在左，顺时针好转）' : '');
+  else if (after && before && after.miss < before.miss) why = '补槽两边 —— 还差 ' + after.miss + ' 格就能等 T';
+  else if (after && !before) why = (type === 'L' || type === 'J' || type === 'S' || type === 'Z') ? '起个槽：这块做屋檐' : '起个槽';
+  else if (before && before.ready) why = '槽留着别碰 · ' + tsNextT();
+  else why = tsPlainWhy(b0, best.cells);
+  return { kind: 'place', cells: best.cells, rot: best.rot, x: best.x, readyBefore, why, score: best.v, next, danger };
+}
+function tsCompute(){
+  tsRec = null; hintMove = null;
+  const p = game.piece;
+  if (!hintMode || !p || game.over) return syncHint();
+  const b0 = simBoard();
+  tsBase = b0;
+  tsRec = coachRec(b0, p.type, game.queue[0], game.hold, game.holdUsed);
   if (tsRec && tsRec.cells) hintMove = { type: p.type, cells: tsRec.cells, rot: tsRec.rot, x: tsRec.x, why: tsRec.why };
   else if (tsRec) hintMove = { type: p.type, cells: null, why: tsRec.why };   // 建议暂存：没有落点，细栏照样有话
   needsDraw = true;
@@ -2300,6 +2316,17 @@ const TS_SPEED_KEY = nsKey('ts.speed.v1');
 const TS_SPEEDS = [[1, '慢'], [10, '中'], [20, '快']];
 let tsSpeed = 1;
 try { const v = +localStorage.getItem(TS_SPEED_KEY); if (TS_SPEEDS.some(([l]) => l === v)) tsSpeed = v; } catch { /* 读不到就慢速 */ }
+// 灰线：默认关（专心练槽）；开了就跟普通局一样涨灰线 —— 实战里是在灰线顶着的时候打 T 旋
+const TS_GARB_KEY = nsKey('ts.garbage.v1');
+let tsGarbage = false;
+try { tsGarbage = localStorage.getItem(TS_GARB_KEY) === '1'; } catch { /* 默认关 */ }
+function setTsGarbage(on){
+  tsGarbage = !!on;
+  try { localStorage.setItem(TS_GARB_KEY, tsGarbage ? '1' : '0'); } catch { /* 存不了就这一次 */ }
+  if (tsOn()) game.noGarbage = !tsGarbage;
+  syncModeTag();
+  renderHintSheet();
+}
 function tsSpeedName(){ return (TS_SPEEDS.find(([l]) => l === tsSpeed) || TS_SPEEDS[0])[1]; }
 function setTsSpeed(lv){
   if (!TS_SPEEDS.some(([l]) => l === lv)) return;
@@ -2312,7 +2339,10 @@ function setTsSpeed(lv){
 function tsRenderSheet(body){
   let h = '<span class="sheet-lb">速度</span><div class="seg seg-3">'
         + TS_SPEEDS.map(([l, n]) => '<button class="seg-btn' + (l === tsSpeed ? ' on' : '') + '" type="button" data-tsv="' + l + '">'
-                                   + n + ' · ' + l + ' 级</button>').join('') + '</div>';
+                                   + n + ' · ' + l + ' 级</button>').join('') + '</div>'
+        + '<span class="sheet-lb">灰线</span><div class="seg">'
+        + [[false, '关 · 专心练槽'], [true, '开 · 跟普通局一样涨']].map(([v, n]) => '<button class="seg-btn' + (v === tsGarbage ? ' on' : '')
+          + '" type="button" data-tsg="' + (v ? 1 : 0) + '">' + n + '</button>').join('') + '</div>';
   h += '<span class="sheet-lb">要领（来自 tetris.wiki 等公开攻略的共识）</span>';
   TS_RULES.forEach(([t, d], i) => {
     h += '<div class="hr-rule"><b>' + (i + 1) + ' ' + escHtml(t) + '</b><span>' + escHtml(d) + '</span></div>';
@@ -2323,6 +2353,7 @@ function tsRenderSheet(body){
      + '有槽没打 ' + s.miss + ' 次 · 把槽填了 ' + s.filled + ' 次 · 没槽用掉 T ' + s.waste + ' 次</span></div>';
   body.innerHTML = h;
   body.querySelectorAll('[data-tsv]').forEach(b => b.onclick = () => setTsSpeed(+b.dataset.tsv));
+  body.querySelectorAll('[data-tsg]').forEach(b => b.onclick = () => setTsGarbage(b.dataset.tsg === '1'));
   const tg = $('hintHideSw');
   if (tg) tg.hidden = true;
 }
@@ -2330,7 +2361,7 @@ function tsRenderSheet(body){
 function startTspin(){
   startHint();
   hintKind = 'tspin';
-  game.noGarbage = true;            // T 旋练习专心练槽：不涨灰线
+  game.noGarbage = !tsGarbage;      // 默认不涨灰线专心练槽；开了灰线就是实战
   game.level = tsSpeed;             // 等级不涨（见锁定后升级那里），停在选的速度
   syncEdge();
   tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
@@ -3669,8 +3700,9 @@ function lockPiece(){
       const m = finesseMin(fin.b, p.type, cellsOf(p.type, p.rot).map(([cx, cy]) => [p.x + cx, p.y + cy]), fin.kb || kbUsed);
       if (m !== null){ game.run.finN++; if (fin.keys > m){ game.run.faults++; game.run.extra += fin.keys - m; } }
     }
+    // 洞按提示模式的口径算：T 槽屋檐底下那一格是留给 T 的，不算洞（原来照教练搭槽，复盘反说你洞多）
+    const made = fin.b ? hintAdjHoles(simBoard()) - hintAdjHoles(fin.b) : countHoles() - holesBefore;
     fin.b = null;
-    const made = countHoles() - holesBefore;
     if (made > 0) game.run.holes += made;
     const top = topFilledRow();
     if (top >= 0 && TOTAL_ROWS - top >= REVIEW_HIGH) game.run.highLocks++;
@@ -3709,6 +3741,7 @@ function lockPiece(){
   lastClearRows = full.slice();      // 必须在 scoreFor 之前，飘字要靠它定位
   lastLockY = p.y + 1;               // 空转 T-spin 没有消除行，飘字落在 T 的中心
   scoreFor(full.length, spin, perfect);
+  coachOnLock(p, full.length, spin);
   practiceCheck(full.length, spin, perfect);
   drillOnLock(p, full.length, spin);
   if (tsOn()) tsOnLock(p, full.length, spin);
@@ -4246,8 +4279,16 @@ let fin = { b: null, keys: 0, soft: false, kb: false };    // 这一块从出生
 let aidSlots = [];
 let paceB = MID_DEF.b;                                       // 每行底分的平均水平，开局时定一次
 function aidsOn(){ return !CRAZY && game.started && !assisted(); }
+let shadow = null;          // 后台教练这一块的推荐 { b0, rec }
 function aidOnSpawn(){
   fin = { b: aidsOn() && game.run ? simBoard() : null, keys: 0, soft: false, kb: fin.kb };
+  shadow = null;
+  if (aidsOn() && game.run && game.piece){
+    const b0 = fin.b;
+    // 后台只看当前这一块、不往后看 NEXT（提示模式才看）：往后看一块要多算三十多倍，WebKit 上出块最慢到 40ms，手机上会掉帧
+    const rec = coachRec(b0, game.piece.type, null, game.hold, game.holdUsed);
+    if (rec) shadow = { b0, rec };
+  }
   aidSlots = aidsOn() && aids.ts ? tsdSlots(simBoard()).filter(s => s.ready).slice(0, 2) : [];
 }
 function setAid(k, on){
@@ -4301,6 +4342,53 @@ function syncPace(){
   for (let i = L0; i < game.lines; i++) expect += levelMult(Math.floor(i / LINES_PER_LEVEL) + 1 + (mid ? mid.dl || 0 : 0));
   const ok = game.score - s0 >= paceB * expect;
   box.classList.toggle('up', ok); box.classList.toggle('dn', !ok);
+}
+
+
+// 后台教练：这一块放下之后跟推荐比。只在普通局（aidsOn）跑，局后复盘报「放对几成 / 最常犯哪条 / 损失最大的 3 手 / T 块去向」
+const COACH_WORST = 3;
+function coachOnLock(p, n, spin){
+  const sh = shadow; shadow = null;
+  if (!sh || !aidsOn() || !game.run) return;
+  const R = game.run, J = judgeCore(sh.rec, sh.b0, p, n, spin);
+  R.cN++;
+  if (J.good) R.cGood++;
+  else if (J.r >= 0) R.cRule[J.r]++;
+  if (p.type === 'T'){
+    R.tN++;
+    if (J.tsd) R.tTsd++;
+    else if (sh.rec.kind === 'tsd') R.tMiss++;
+    else R.tFlat++;
+  }
+  if (!J.good && J.loss > 0){
+    // 存这一手的盘面（只存有东西的行，字符串一行一个）、你放的、推荐放的
+    const rows = [];
+    for (let y = 0; y < TOTAL_ROWS; y++) rows.push(sh.b0[y].map(v => v ? '#' : '.').join(''));
+    const top = rows.findIndex(r => r.includes('#'));
+    const keep = Math.min(top < 0 ? TOTAL_ROWS - 4 : top, TOTAL_ROWS - 4) - 2;
+    const from = Math.max(0, Math.min(keep, ...J.cells.map(c => c[1]), ...(sh.rec.cells || []).map(c => c[1])));
+    const w = { loss: Math.round(J.loss), r: J.r, msg: J.msg, type: p.type, from, rows: rows.slice(from),
+                mine: J.cells.map(([x, y]) => [x, y - from]), rec: (sh.rec.cells || []).map(([x, y]) => [x, y - from]),
+                at: game.lines };
+    R.cWorst.push(w);
+    R.cWorst.sort((a, b) => b.loss - a.loss);
+    R.cWorst.length = Math.min(R.cWorst.length, COACH_WORST);
+  }
+}
+// 损失最大的几手：小盘面，灰的是当时的盘面，红的是你放的，绿框是推荐
+function drawWorst(cv, w){
+  const rows = w.rows.length, s = Math.max(4, Math.floor(Math.min(110 / COLS, 150 / rows)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = COLS * s * dpr; cv.height = rows * s * dpr;
+  cv.style.width = COLS * s + 'px'; cv.style.height = rows * s + 'px';
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.fillStyle = 'rgba(255,255,255,.03)'; c.fillRect(0, 0, COLS * s, rows * s);
+  w.rows.forEach((r, y) => { for (let x = 0; x < COLS; x++) if (r[x] === '#'){ c.fillStyle = '#5d6b86'; c.fillRect(x * s + .5, y * s + .5, s - 1, s - 1); } });
+  c.fillStyle = '#ff6b6b';
+  for (const [x, y] of w.mine) c.fillRect(x * s + .5, y * s + .5, s - 1, s - 1);
+  c.strokeStyle = '#5ee08a'; c.lineWidth = Math.max(1.5, s * .18);
+  for (const [x, y] of w.rec) c.strokeRect(x * s + 1.5, y * s + 1.5, s - 3, s - 3);
 }
 
 // ───────────────────────── 历史记录 ─────────────────────────
@@ -4492,29 +4580,42 @@ function bindMenu(){
 
 // ───────────────────────── 局后复盘（标准版普通局） ─────────────────────────
 //
-// 20 级以后倍率封顶 ×8，同样消一行，单消 800、四消 1600、T 旋双消 3200 —— 分数高低主要看「怎么消的」，
+// 20 级以后倍率封顶 ×8，同样消一行，单消 800、四消 1600、T 旋双消 4800 —— 分数高低主要看「怎么消的」，
 // 不是消了多少行。结算页只给总分的话，打了 246 行才 24 万，自己看不出差在哪。
 // 这里把这局拆开：消行构成、分数从哪来、造了几个洞、多少块是在高处放的，再挑最要紧的 1~3 条建议。
 const REVIEW_HIGH = 13;            // 堆到 13 行以上（盘面过六成）放的块算「在高处放」
 function pct(a, b){ return b > 0 ? Math.round(a / b * 100) : 0; }
-function reviewTips(r, pieces, lines){
-  const tips = [];
+// 建议按「拉不拉得开分数」排。阈值是拿真实引擎上的机器人对局定的（约 400 局，每秒 1 块、带灰线）：
+//   · 堆高：放偏率 0 / 3% / 10% 时高处放块 10% / 13% / 28%，留井打四消 49% —— 区分度最好，排第一
+//   · T 旋双消：同节奏的教练每 100 块约 3 个；分数差距主要来自这里（教练 50 万 vs 留井 32 万 vs 见行就消 16 万）
+//   · 放偏：放偏率 10% → 3% 分数 +45%，后台教练「放对几成」直接量它
+//   · 洞：按提示模式口径（槽屋檐下不算），零失误也有十几个 / 100 块，所以门槛放高
+//   · 「消得太碎」删了：零失误的教练也有八成多的行是 1~3 行消的，攒着不消反而 -18%
+const COACH_TSD100 = 3;
+function reviewTips(r, pieces, lines, ctx){
+  const tips = [], c = ctx || {};
   const per100 = pieces ? r.holes / pieces * 100 : 0;
   const high = pct(r.highLocks, pieces);
-  const small = pct(r.smallLines, r.smallLines + r.bigLines);
   const tsd = r.tsc[2] + r.tsc[3];
-  if (per100 >= 8)
-    tips.push(['洞造多了', `这局造了 ${r.holes} 个洞（每 100 块 ${per100.toFixed(0)} 个）。洞上面那几行全都消不掉，堆高就是这么来的。放之前看一眼会不会盖住空格，宁可放高一格也别盖`]);
+  const tsd100 = pieces ? tsd / pieces * 100 : 0;
+  const cg = r.cN ? pct(r.cGood, r.cN) : -1;
+  const worstRule = r.cRule ? r.cRule.indexOf(Math.max(...r.cRule)) : -1;
+  const DRILL_FOR = ['每日练习的「堆叠」段', '每日练习的「堆叠」段', '「T 旋练习」', '中途开局 200 行起'];
   if (high >= 25)
-    tips.push(['在高处待太久', `${high}% 的块是在盘面过六成时放的。堆高了就先消低处、别再攒，降下来再搭槽 —— 灰线一涨就顶死了`]);
-  if (lines >= 30 && small >= 50)
-    tips.push(['消得太碎', `${small}% 的行是 1~3 行一次消掉的。20 级后单消一行 800 分，四消一行 1600、T 旋双消一行 3200。盘面不高时先别急着消，攒着打四消或 T 旋`]);
+    tips.push(['在高处待太久', `${high}% 的块是在盘面过六成时放的（照教练打一般一成多）。堆高了就先消低处、别再攒，降下来再搭槽 —— 灰线一涨就顶死了`]);
+  if (pieces >= 100 && tsd100 < COACH_TSD100 / 2)
+    tips.push([tsd ? 'T 旋打得少' : '没打出 T 旋', `每 100 块打了 ${tsd100.toFixed(1)} 个 T 旋双消，照教练打大约 ${COACH_TSD100} 个。20 级后一次 T 旋双消 9600 分，比一次四消（6400）还多，只用两行。`
+      + (r.tN ? `这局 ${r.tN} 个 T：${r.tTsd} 个打了 T 旋双消、${r.tMiss} 个有槽没打、${r.tFlat} 个直接平放。` : '') + '没槽时 T 先暂存'] );
+  if (cg >= 0 && r.cN >= 50 && cg < 70 && worstRule >= 0)
+    tips.push(['放偏的块多', `只有 ${cg}% 的块放得和教练一样好，最常犯 ${HINT_RULES[worstRule].n}「${HINT_RULES[worstRule].t}」（${r.cRule[worstRule]} 次）。下面列了损失最大的几手；这一条去${DRILL_FOR[worstRule]}练`]);
+  if (r.tN >= 20 && r.tFlat / r.tN >= .4)
+    tips.push(['T 用掉了', `${r.tN} 个 T 里有 ${r.tFlat} 个没槽就直接平放了。T 是打 T 旋的，没槽先放进暂存，搭好槽再换出来`]);
+  if (per100 >= 25)
+    tips.push(['洞造多了', `这局造了 ${r.holes} 个洞（每 100 块 ${per100.toFixed(0)} 个，T 槽屋檐下那格不算）。洞上面那几行全都消不掉，放之前看一眼会不会盖住空格`]);
   if (r.finN >= 50 && pct(r.faults, r.finN) >= 30)
     tips.push(['按键绕远了', `${pct(r.faults, r.finN)}% 的块按的比最少按法多（这局多按了 ${r.extra} 下）。后期块掉得快，多按一下就可能放错：横着贴墙的块直接按住到墙，转向先想好再按`]);
-  if (pieces >= 100 && tsd === 0)
-    tips.push(['没打出 T 旋', 'T 旋双消一次 = 两行拿四消的分。T 来了没槽就先暂存，等槽搭好再换出来；手生的话先去「T 旋练习」中速练两把']);
-  else if (pieces >= 100 && tsd > 0 && tsd < r.clr[4] / 2)
-    tips.push(['T 旋还能多打', `T 旋双消 ${tsd} 次、四消 ${r.clr[4]} 次。T 旋双消只要两行就拿四消的分，还不用留井，多搭槽`]);
+  if (c.pps > 0 && c.ppsAvg > 0 && c.pps < c.ppsAvg * .9)
+    tips.push(['比平时慢', `每秒 ${c.pps.toFixed(2)} 块，你近 ${c.ppsN} 局平均 ${c.ppsAvg.toFixed(2)}。平常块要快（每秒 1 块提到 1.25 块，模拟里分数 +26%），T 旋那一下慢点没关系`]);
   if (!tips.length)
     tips.push(['打法对了', `四消 + T 旋拿了 ${pct(r.bigPts, r.bigPts + r.smallPts)}% 的分。下一步是扛得更久：盘面一高就先保命`]);
   return tips.slice(0, 3);
@@ -4545,14 +4646,31 @@ function fillReview(){
   add('造洞', r.holes + ' 个');
   add('高处放块', pct(r.highLocks, pieces) + '%');
   add('用时', Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0'));
-  add('每秒', (secs > 0 ? pieces / secs : 0).toFixed(2) + ' 块');
+  // 手速跟自己近 10 局（从头打的、不开标槽）比
+  const pps = secs > 0 ? pieces / secs : 0;
+  const ppsHist = histRead().filter(e => !e.mid && !e.aid && e.t > 60000 && e.p > 0).slice(-10).map(e => e.p / (e.t / 1000));
+  const ppsAvg = ppsHist.length >= 3 ? ppsHist.reduce((a, b) => a + b, 0) / ppsHist.length : 0;
+  add('每秒', pps.toFixed(2) + ' 块' + (ppsAvg ? `（近 ${ppsHist.length} 局 ${ppsAvg.toFixed(2)}）` : ''), !!ppsAvg);
   // 分段看每行均分：分是在哪一段丢的
   const segTx = (r.seg || []).map(([pt, ln], k) => ln ? `${['0~100', '100~200', '200 后'][k]} ${groupInt(Math.round(pt / ln))}` : '').filter(Boolean);
   if (segTx.length > 1) add('分段每行', segTx.join(' · '), true);
   if (r.finN >= 10) add('多余按键', `${pct(r.faults, r.finN)}% 的块（多按 ${r.extra} 下）`, true);
+  if (r.cN >= 10){
+    const wr = r.cRule.indexOf(Math.max(...r.cRule));
+    add('跟教练比', `放对 ${pct(r.cGood, r.cN)}%` + (r.cRule[wr] ? ` · 最常犯 ${HINT_RULES[wr].n}${HINT_RULES[wr].t}` : ''), true);
+  }
+  if (r.tN) add('T 块去向', `T 旋双消 ${r.tTsd} · 有槽没打 ${r.tMiss} · 暂存 ${r.tHold} · 平放 ${r.tFlat}`, true);
   $('rvStats').innerHTML = rows.join('');
-  $('rvTips').innerHTML = reviewTips(r, pieces, lines)
+  $('rvTips').innerHTML = reviewTips(r, pieces, lines, { pps, ppsAvg, ppsN: ppsHist.length })
     .map(([t, d]) => `<li><b>${escHtml(t)}</b><span>${escHtml(d)}</span></li>`).join('');
+  // 损失最大的几手：当时的盘面 + 你放的（红）+ 推荐（绿框）
+  const wb = $('rvWorst');
+  if (wb){
+    const ws = (r.cWorst || []).filter(w => w && Array.isArray(w.rows));
+    wb.hidden = !ws.length;
+    $('rvWorstList').innerHTML = ws.map((w, i) => `<div class="rv-w"><canvas data-w="${i}"></canvas><span><b>${escHtml(HINT_RULES[w.r] ? HINT_RULES[w.r].n + ' ' + HINT_RULES[w.r].t : '')}</b>${escHtml(w.msg)}<em>第 ${w.at} 行时 · ${w.type} 块</em></span></div>`).join('');
+    ws.forEach((w, i) => drawWorst($('rvWorstList').querySelector(`[data-w="${i}"]`), w));
+  }
 }
 
 // 分数关口播报。一局能撞三四个，是频率最高的一条，顺带给「一局之内没有
@@ -4606,7 +4724,11 @@ function newRun(){
            clr: [0, 0, 0, 0, 0], tsc: [0, 0, 0, 0], mini: 0, b2bs: 0, maxCombo: 0,
            bigPts: 0, bigLines: 0, smallPts: 0, smallLines: 0, holes: 0, highLocks: 0,
            seg: [[0, 0], [0, 0], [0, 0]],          // 按行数分三段（0~99 / 100~199 / 200 行以后）各拿了多少分、消了几行
-           finN: 0, faults: 0, extra: 0, aidTs: false };
+           finN: 0, faults: 0, extra: 0, aidTs: false,
+           // 后台教练（普通局悄悄跑提示模式那套推荐，不显示）：跟推荐一样好的块数、违反哪条、损失最大的几手
+           cN: 0, cGood: 0, cRule: [0, 0, 0, 0], cWorst: [],
+           // T 块去向：打成 T 旋双消 / 有槽没打 / 进了暂存 / 平放掉
+           tN: 0, tTsd: 0, tMiss: 0, tHold: 0, tFlat: 0 };
 }
 
 // 按打法给个称号。从最有辨识度的往下判，第一个命中的就是它 ——
@@ -10077,7 +10199,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, histRead, histPush, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, COACH_TSD100, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 
