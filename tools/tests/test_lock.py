@@ -39,6 +39,19 @@ JS = r"""async (eng) => {
     T.closeHintSheet(); await wait(300);
   }
 
+  // ── 弹出面板只许上下滚：横向锁住（历史记录面板原来比自己宽 6px，斜着一划就左右漂） ──
+  const a = []; for (let i = 0; i < 40; i++) a.push({ d: Date.now() - i * 36e5, s: 1234567, l: 246, lv: 42, t: 640000, p: 600, ...(i % 3 ? {} : { mid: 180, s0: 1 }) });
+  localStorage.setItem(T.HIST_KEY, JSON.stringify(a));
+  T.openHistSheet(); await wait(300);
+  const hb = document.querySelector('#histSheet .sheet-box'), cs = getComputedStyle(hb);
+  ok(cs.overflowX === 'hidden' && cs.overflowY === 'auto' && cs.touchAction === 'pan-y' && cs.overscrollBehaviorY === 'contain',
+     `历史记录面板：横向锁住、只能上下滚、滚到头不带动后面（overflow-x ${cs.overflowX} / touch-action ${cs.touchAction}）`);
+  ok(hb.scrollHeight > hb.clientHeight, '记录多的时候面板能上下滚');
+  ok(getComputedStyle($('histChart').querySelector('svg')).touchAction === 'pan-y', '在曲线上也能上下划着滚');
+  const bad = [...document.querySelectorAll('.sheet-box')].filter(b => getComputedStyle(b).overflowX !== 'hidden').length;
+  ok(bad === 0, `所有弹出面板都横向锁住（没锁的 ${bad} 个）`);
+  T.closeHistSheet(); await wait(200);
+
   // ── 细栏在最底下，和按键排隔开 ──
   for (const [name, start, bar] of [['提示', () => T.startHint(), 'hintBar'], ['练习', () => T.startPractice(), 'prBar']]){
     start(); await wait(400);
