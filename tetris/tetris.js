@@ -26,39 +26,105 @@ const ROWS = 20;        // 可见行
 const BUFFER = 2;       // 顶部隐藏行，方块在这里出生
 const TOTAL_ROWS = ROWS + BUFFER;
 
-// 两套配色。clear 那套把青/蓝/紫的明度拉开、红橙黄错开，
-// 相邻色块更好分，整体饱和度略降，久看不累。
+// 配色。每套给七种块各一个颜色；mono 的七个一样（只看形状），画格子时会强制补一道描边，免得糊成一片。
+// 分五组：主流经典 / NES 各等级 / 主题 / 同色系（一个色相七种深浅）/ 单色。
+// 盘面底色很深（#0a1020 上下），原版里最暗的那几级（Game Boy 的墨绿、NES 的深色）照搬会看不见，都往亮处提过。
 const mono = (c) => ({ mono: true, I:c, O:c, T:c, S:c, Z:c, J:c, L:c });
+// NES：每一级只有两个颜色。T / O / I 是白芯带边（这里取偏白的那个），J、Z 用第一色，L、S 用第二色
+const nesPal = (a, b) => ({ I: mix(a, '#ffffff', .78), O: mix(a, '#ffffff', .78), T: mix(a, '#ffffff', .78), J: a, Z: a, L: b, S: b });
+// 同色系：一个色相，七种明度错开排，常挨在一起的块（S/Z、J/L）深浅拉得最开
+const tone = (h, sat) => {
+  const L = { I: 78, O: 66, T: 48, S: 72, Z: 54, J: 42, L: 60 };
+  const o = {};
+  for (const k in L) o[k] = hslHex(h, sat, L[k]);
+  return o;
+};
+function hslHex(h, s, l){
+  s /= 100; l /= 100;
+  const f = n => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(c * 255).toString(16).padStart(2, '0'); };
+  return '#' + f(0) + f(8) + f(4);
+}
 
 const PALETTES = {
-  classic: { I:'#22d3ee', O:'#fbbf24', T:'#a855f7', S:'#4ade80', Z:'#f43f5e', J:'#3b82f6', L:'#fb923c' },
-  clear:   { I:'#5ee7f5', O:'#f2c14e', T:'#a463dd', S:'#56c877', Z:'#e8546b', J:'#3f6fd0', L:'#ef8f4a' },
-  // 原版：Tetris Guideline 规定的七色，街机厅里那套。
-  // 纯 #0000F0 在深色底上太沉，J 往上提了一点，其余照搬。
+  // ── 主流经典 ──
+  // 原版：Tetris Guideline 规定的七色，街机厅里那套。纯 #0000F0 在深色底上太沉，J 往上提了一点，其余照搬
   guide:   { I:'#00f0f0', O:'#f0f000', T:'#a000f0', S:'#00f000', Z:'#f00000', J:'#2b3df0', L:'#f0a000' },
+  // 主机亮色：近几年主机 / 手机版（同一套色相，更亮更饱和）
+  console: { I:'#2fd9ff', O:'#ffe133', T:'#c04fff', S:'#4dee4d', Z:'#ff3d3d', J:'#3d6cff', L:'#ff9a1f' },
+  // TGM 街机：I 红、T 青、S 紫、Z 绿 —— 和 Guideline 对不上的那一派
+  tgm:     { I:'#e0342c', O:'#f2d021', T:'#1fc6e0', S:'#d23fd0', Z:'#3bcf3b', J:'#2f5fe0', L:'#f08a1c' },
+  // Jstris：网页对战圈最常见的那套，颜色沉一点
+  jstris:  { I:'#0f9bd7', O:'#e39f02', T:'#af298a', S:'#59b101', Z:'#d70f37', J:'#2141c6', L:'#e35b02' },
+  // Game Boy：四级墨绿，提亮到深底上看得见
+  gb:      { I:'#c7dc7a', O:'#9bbc0f', T:'#8bac0f', S:'#b5cf4a', Z:'#7c9e1e', J:'#a6c43c', L:'#6b8e23' },
+  // Game Boy Pocket：灰阶
+  gbp:     { I:'#e6e6e6', O:'#c8c8c8', T:'#b0b0b0', S:'#d6d6d6', Z:'#9a9a9a', J:'#bcbcbc', L:'#a4a4a4' },
+  // ── NES：红白机每一级换一套 ──
+  nes0: nesPal('#3c7cfc', '#3cbcfc'), nes1: nesPal('#00b800', '#b8f818'), nes2: nesPal('#d800cc', '#f878f8'),
+  nes3: nesPal('#3c7cfc', '#58d854'), nes4: nesPal('#e40058', '#58f898'), nes5: nesPal('#58f898', '#6888fc'),
+  nes6: nesPal('#f83800', '#9c9c9c'), nes7: nesPal('#6844fc', '#d82848'), nes8: nesPal('#3c7cfc', '#f83800'),
+  nes9: nesPal('#f83800', '#fca044'),
+  // ── 主题 ──
+  // 高区分：青/蓝/紫的明度拉开、红橙黄错开，相邻色块更好分，饱和度略降，久看不累（默认）
+  clear:   { I:'#5ee7f5', O:'#f2c14e', T:'#a463dd', S:'#56c877', Z:'#e8546b', J:'#3f6fd0', L:'#ef8f4a' },
+  classic: { I:'#22d3ee', O:'#fbbf24', T:'#a855f7', S:'#4ade80', Z:'#f43f5e', J:'#3b82f6', L:'#fb923c' },
   // 马卡龙：同一套色相，明度拉高饱和度压低，久看不刺眼
   candy:   { I:'#7fe3e8', O:'#f5d77a', T:'#c49be8', S:'#93dda1', Z:'#f2938f', J:'#8faee8', L:'#f0b87e' },
-  // 单色：只看形状，不看颜色
+  // 色盲友好：Okabe–Ito 那套七色，红绿色弱也分得开
+  okabe:   { I:'#56b4e9', O:'#f0e442', T:'#cc79a7', S:'#009e73', Z:'#d55e00', J:'#3a8fd6', L:'#e69f00' },
+  fog:     { I:'#7fb3bf', O:'#cbb67a', T:'#a08fbf', S:'#86b394', Z:'#c48a8a', J:'#7f93bf', L:'#c9a27c' },
+  retro:   { I:'#5fa8a0', O:'#e0b84f', T:'#9b6fa8', S:'#7aa65a', Z:'#c75b4a', J:'#5a7fb0', L:'#d98a4a' },
+  sakura:  { I:'#f6b4c8', O:'#ffd6a5', T:'#e3a6e8', S:'#bfe3b4', Z:'#f08aa0', J:'#b8b8f0', L:'#f7c08a' },
+  ocean:   { I:'#7fe0f0', O:'#a8e6cf', T:'#5b8def', S:'#3fc1c9', Z:'#4a6fb5', J:'#2e86de', L:'#8fb3ff' },
+  sunset:  { I:'#ffcf6b', O:'#ffe29a', T:'#c4568f', S:'#ff9f68', Z:'#e2435c', J:'#9a5fb8', L:'#ff7a45' },
+  forest:  { I:'#a3d977', O:'#e5d36b', T:'#7f9f5e', S:'#4caf50', Z:'#c0753a', J:'#2e8d6b', L:'#d4a24c' },
+  cyber:   { I:'#00f5ff', O:'#f9f871', T:'#bd00ff', S:'#00ff9f', Z:'#ff2079', J:'#6f6fff', L:'#ff8b3d' },
+  // ── 同色系 ──
+  tBlue: tone(212, 78), tPurple: tone(268, 70), tGreen: tone(145, 55), tWarm: tone(24, 85), tPink: tone(330, 72), tTeal: tone(185, 70),
+  // ── 单色：只看形状，不看颜色 ──
   cyan:  mono('#4fd8e8'),   // 和界面同一个调子
   mint:  mono('#5fd99a'),   // 老绿屏终端的味道
+  white: mono('#dfe6f0'), gold: mono('#f2c14e'), pink: mono('#f48fb1'), violet: mono('#a78bfa'),
+  orange: mono('#fb923c'), red: mono('#f87171'), blue: mono('#60a5fa'), gray: mono('#94a3b8'),
 };
 
 const PAL_NAMES = {
-  clear: '高区分', classic: '霓虹', guide: '原版', candy: '马卡龙',
-  cyan: '青', mint: '薄荷',
+  guide: '原版', console: '主机亮色', tgm: 'TGM 街机', jstris: 'Jstris', gb: 'Game Boy', gbp: 'GB 灰',
+  nes0: 'NES 0 级', nes1: 'NES 1 级', nes2: 'NES 2 级', nes3: 'NES 3 级', nes4: 'NES 4 级',
+  nes5: 'NES 5 级', nes6: 'NES 6 级', nes7: 'NES 7 级', nes8: 'NES 8 级', nes9: 'NES 9 级',
+  clear: '高区分', classic: '霓虹', candy: '马卡龙', okabe: '色盲友好', fog: '雾灰', retro: '复古',
+  sakura: '樱花', ocean: '海洋', sunset: '日落', forest: '森林', cyber: '赛博',
+  tBlue: '蓝调', tPurple: '紫调', tGreen: '绿调', tWarm: '暖橙', tPink: '粉调', tTeal: '青调',
+  cyan: '青', mint: '薄荷', white: '白', gold: '金', pink: '粉', violet: '紫', orange: '橙', red: '红', blue: '蓝', gray: '灰',
 };
-const PAL_ORDER = ['clear', 'classic', 'guide', 'candy', 'cyan', 'mint'];
+const PAL_GROUPS = [
+  ['主流经典', ['guide', 'console', 'tgm', 'jstris', 'gb', 'gbp']],
+  ['NES 红白机 · 每一级的配色', ['nes0', 'nes1', 'nes2', 'nes3', 'nes4', 'nes5', 'nes6', 'nes7', 'nes8', 'nes9']],
+  ['主题', ['clear', 'classic', 'candy', 'okabe', 'fog', 'retro', 'sakura', 'ocean', 'sunset', 'forest', 'cyber']],
+  ['同色系 · 一个颜色七种深浅', ['tBlue', 'tPurple', 'tGreen', 'tWarm', 'tPink', 'tTeal']],
+  ['单色 · 只看形状', ['cyan', 'mint', 'white', 'gold', 'pink', 'violet', 'orange', 'red', 'blue', 'gray']],
+];
+const PAL_ORDER = PAL_GROUPS.flatMap(g => g[1]);
 
-// 四种画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
+// 画法。gap 缝隙 / fill 填充压暗 / edge 描边提亮(0 不描) / lw 线宽 / rad 圆角 / ring 暗外圈
 // gap 是每格四边各内缩多少（占格宽的比例），两格之间的缝 = 2 × gap。
 // 原来默认的「纯色」是 .08，缝占了格宽的 16%，堆起来像一格一格的瓷砖、不像一整块。
-// 统一收到 .03 上下（缝 6%），圆角也跟着收一点 —— 圆角越大，四个角漏出的底色越多，
-// 同样显得空。四套样式之间的相对差别保留。
+// 统一收到 .03 上下（缝 6%），圆角也跟着收一点 —— 圆角越大，四个角漏出的底色越多，同样显得空。
+// 带 kind 的是另画的几种（立体 / 玻璃 / 宝石 / 红白机 / 掌机 / 空心 / 方砖 / 霓虹光），见 drawKind
 const STYLES = {
   gap:   { name:'标准',  gap:.03,  fill:.14, edge:.30, lw:.07, rad:.15 },
   soft:  { name:'柔和',  gap:.035, fill:.22, edge:.40, lw:.06, rad:.20 },
   ring:  { name:'暗圈',  gap:.025, fill:.14, edge:.32, lw:.07, rad:.15, ring:.40 },
   plain: { name:'纯色',  gap:.035, fill:.10, edge:0,   lw:0,   rad:.16 },
+  bevel: { name:'立体',  gap:.02,  rad:.04, kind:'bevel' },
+  gloss: { name:'玻璃',  gap:.03,  rad:.18, kind:'gloss' },
+  gem:   { name:'宝石',  gap:.03,  rad:.12, kind:'gem' },
+  nes:   { name:'红白机', gap:.04, rad:0,   kind:'nes' },
+  gbpx:  { name:'掌机',  gap:.04,  rad:0,   kind:'gb' },
+  hollow:{ name:'空心',  gap:.06,  rad:.14, kind:'hollow' },
+  flat:  { name:'方砖',  gap:.015, rad:0,   kind:'flat' },
+  neon:  { name:'霓虹光', gap:.07, rad:.18, kind:'neon' },
 };
 
 const skin = { pal: 'clear', style: 'plain' };
@@ -4942,6 +5008,71 @@ function layout(){
   draw();
 }
 
+// 另画的几种画法。都只用填充 / 描边 / 渐变，不逐帧加滤镜：盘面是缓存进 bgCv 的，只有当前块每帧重画
+function drawKind(c, kind, x, y, d, R, color){
+  const lite = mix(color, '#ffffff', .45), dark = mix(color, '#05080f', .45);
+  if (kind === 'bevel'){                     // 立体：左上亮、右下暗的斜面，中间本色（街机 / 主机最常见的那种）
+    const b = Math.max(2, d * .16);
+    c.fillStyle = dark; c.fillRect(x, y, d, d);
+    c.fillStyle = lite;
+    c.beginPath(); c.moveTo(x, y); c.lineTo(x + d, y); c.lineTo(x + d - b, y + b); c.lineTo(x + b, y + d - b); c.lineTo(x, y + d); c.closePath(); c.fill();
+    c.fillStyle = color; c.fillRect(x + b, y + b, d - b * 2, d - b * 2);
+    return;
+  }
+  if (kind === 'gloss'){                     // 玻璃：上亮下暗的渐变 + 上半一道高光
+    const g = c.createLinearGradient(0, y, 0, y + d);
+    g.addColorStop(0, mix(color, '#ffffff', .25)); g.addColorStop(.55, color); g.addColorStop(1, mix(color, '#05080f', .3));
+    c.fillStyle = g; roundRect(c, x, y, d, d, R); c.fill();
+    c.globalAlpha *= .38; c.fillStyle = '#ffffff';
+    roundRect(c, x + d * .12, y + d * .08, d * .76, d * .34, R * .8); c.fill();
+    return;
+  }
+  if (kind === 'gem'){                       // 宝石：中心亮、四周暗的放射渐变 + 一道细边
+    const g = c.createRadialGradient(x + d * .38, y + d * .34, d * .05, x + d / 2, y + d / 2, d * .72);
+    g.addColorStop(0, mix(color, '#ffffff', .6)); g.addColorStop(.45, color); g.addColorStop(1, mix(color, '#05080f', .5));
+    c.fillStyle = g; roundRect(c, x, y, d, d, R); c.fill();
+    c.strokeStyle = mix(color, '#ffffff', .3); c.lineWidth = Math.max(1, d * .05);
+    roundRect(c, x + c.lineWidth / 2, y + c.lineWidth / 2, d - c.lineWidth, d - c.lineWidth, R); c.stroke();
+    return;
+  }
+  if (kind === 'nes'){                       // 红白机：方格、黑缝，左上角一个白色反光点
+    c.fillStyle = color; c.fillRect(x, y, d, d);
+    const p = Math.max(1, d * .13);
+    c.fillStyle = '#ffffff';
+    c.fillRect(x + p * .6, y + p * .6, p, p);
+    c.fillRect(x + p * 1.6, y + p * 1.6, p * 1.4, p * .9);
+    c.fillRect(x + p * 1.6, y + p * 1.6, p * .9, p * 1.4);
+    return;
+  }
+  if (kind === 'gb'){                        // 掌机：一圈深色外框、本色内芯、中间一个深色小方块（Game Boy 那种回字格）
+    c.fillStyle = dark; c.fillRect(x, y, d, d);
+    const b = Math.max(1.5, d * .14);
+    c.fillStyle = color; c.fillRect(x + b, y + b, d - b * 2, d - b * 2);
+    const q = d * .3;
+    c.fillStyle = mix(color, '#05080f', .3); c.fillRect(x + (d - q) / 2, y + (d - q) / 2, q, q);
+    return;
+  }
+  if (kind === 'hollow'){                    // 空心：只描边，芯里一点点底色
+    const lw = Math.max(1.5, d * .13);
+    c.globalAlpha *= 1; c.fillStyle = mix(color, '#0a1020', .82); roundRect(c, x, y, d, d, R); c.fill();
+    c.strokeStyle = color; c.lineWidth = lw;
+    roundRect(c, x + lw / 2, y + lw / 2, d - lw, d - lw, Math.max(0, R - lw / 2)); c.stroke();
+    return;
+  }
+  if (kind === 'flat'){                      // 方砖：纯色直角、细缝，堆起来是一整面墙
+    c.fillStyle = color; c.fillRect(x, y, d, d);
+    return;
+  }
+  if (kind === 'neon'){                      // 霓虹光：暗芯 + 发光的边
+    c.fillStyle = mix(color, '#0a1020', .78); roundRect(c, x, y, d, d, R); c.fill();
+    c.shadowColor = color; c.shadowBlur = d * .35;
+    c.strokeStyle = mix(color, '#ffffff', .15); c.lineWidth = Math.max(1.5, d * .09);
+    roundRect(c, x + c.lineWidth / 2, y + c.lineWidth / 2, d - c.lineWidth, d - c.lineWidth, Math.max(0, R - c.lineWidth / 2)); c.stroke();
+    c.shadowBlur = 0;
+    return;
+  }
+}
+
 // 画一个方块格。具体长相由当前 skin.style 决定，见上面的 STYLES。
 function drawCell(c, px, py, size, color, opts = {}){
   const { ghost = false, alpha = 1, garbage = false, glow = 0 } = opts;
@@ -4984,6 +5115,8 @@ function drawCell(c, px, py, size, color, opts = {}){
     return;
   }
 
+  if (v.kind) drawKind(c, v.kind, x, y, d, R, color);
+  else {
   c.fillStyle = mix(color, '#0a1020', v.fill);
   roundRect(c, x, y, d, d, R);
   c.fill();
@@ -5007,6 +5140,7 @@ function drawCell(c, px, py, size, color, opts = {}){
     c.lineWidth = lw;
     roundRect(c, x + o, y + o, d - o * 2, d - o * 2, Math.max(0, R - o));
     c.stroke();
+  }
   }
 
   // 贴底待锁定：沿边一圈同色光边 + 外扩辉光，越接近锁定越亮越粗。
@@ -9236,9 +9370,9 @@ function paintSwatch(cv, pal, style, mode){
       drawCell(c, ox + gx * s, oy + gy * s, s, colorOf(t));
     });
   } else {
-    const s = Math.min(h, w / 4);
-    ['I', 'J', 'T', 'Z'].forEach((t, i) => {
-      drawCell(c, i * s + (w - s * 4) / 2, (h - s) / 2, s, colorOf(t));
+    const s = Math.min(h, w / 7);        // 七种块一排，整套配色一眼看全
+    ['I', 'O', 'T', 'S', 'Z', 'J', 'L'].forEach((t, i) => {
+      drawCell(c, i * s + (w - s * 7) / 2, (h - s) / 2, s, colorOf(t));
     });
   }
   skin.pal = keep.pal; skin.style = keep.style;
@@ -9248,16 +9382,20 @@ function buildStylePanel(){
   const palWrap = $('palOpts'), stWrap = $('styleOpts');
   palWrap.innerHTML = ''; stWrap.innerHTML = '';
 
-  PAL_ORDER.forEach((k) => {
-    const label = PAL_NAMES[k] || k;
-    const b = document.createElement('button');
-    b.className = 'seg-btn' + (skin.pal === k ? ' on' : '');
-    b.dataset.pal = k;
-    b.innerHTML = `<canvas></canvas><span>${label}</span>`;
-    b.addEventListener('click', () => { skin.pal = k; applySkin(); });
-    palWrap.appendChild(b);
-    paintSwatch(b.querySelector('canvas'), k, skin.style, 'row');
-  });
+  for (const [gname, keys] of PAL_GROUPS){
+    const lb = document.createElement('span');
+    lb.className = 'pal-grp'; lb.textContent = gname;
+    palWrap.appendChild(lb);
+    for (const k of keys){
+      const b = document.createElement('button');
+      b.className = 'seg-btn' + (skin.pal === k ? ' on' : '');
+      b.dataset.pal = k;
+      b.innerHTML = `<canvas></canvas><span>${PAL_NAMES[k] || k}</span>`;
+      b.addEventListener('click', () => { skin.pal = k; applySkin(); });
+      palWrap.appendChild(b);
+      paintSwatch(b.querySelector('canvas'), k, skin.style, 'row');
+    }
+  }
 
   Object.keys(STYLES).forEach(k => {
     const b = document.createElement('button');
@@ -9924,7 +10062,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, histRead, histPush, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, canScroll, reviewTips, histRead, histPush, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

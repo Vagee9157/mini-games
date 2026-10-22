@@ -7,6 +7,13 @@ bad = 0
 for f in ['tools/audit.py'] + sorted(glob.glob('tools/tests/test_*.py')):
     r = subprocess.run([sys.executable, f], capture_output=True, text=True)
     out = r.stdout + r.stderr
+    # 页面根本没打开（Page.goto 超时）是这台机器跑全套时偶发的卡顿，不是断言错 —— 单独跑从没出过。
+    # 只有这一种情况重跑一次，并标出来；断言失败照样算红，不重跑
+    retried = False
+    if r.returncode != 0 and 'Page.goto: Timeout' in out and not re.search(r'^\s+FAIL', out, re.M):
+        r = subprocess.run([sys.executable, f], capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        retried = True
     p = len(re.findall(r'^\s+PASS', out, re.M))
     fl = re.findall(r'^\s+FAIL.*$', out, re.M)
     err = re.findall(r'^\s+!.*$', out, re.M)
@@ -16,7 +23,7 @@ for f in ['tools/audit.py'] + sorted(glob.glob('tools/tests/test_*.py')):
     status = 'FAIL' if (fl or err or broken) else ' ok '
     if broken and not fl and not err:
         fl = ['整个文件没跑起来，退出码 ' + str(r.returncode)] + out.strip().split('\n')[-3:]
-    print(f'[{status}] {f:34s} 通过 {p}')
+    print(f'[{status}] {f:34s} 通过 {p}' + ('　（页面加载超时，重跑过一次）' if retried else ''))
     for l in fl + err: print('        ' + l.strip())
     if status != ' ok ': bad += 1
 print('\n全部通过' if not bad else f'\n{bad} 个文件有问题')
