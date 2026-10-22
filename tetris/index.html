@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=28a69788">
+<link rel="stylesheet" href="tetris.css?v=cfba1ca9">
 </head>
 <body>
 <div class="topline"></div>
@@ -209,6 +209,8 @@
         <div class="stat"><span>LINES</span><b id="lines">0</b></div>
         <div class="stat" id="levelBox"><span>LEVEL</span><b id="level">1</b></div>
         <div class="stat"><span>BEST</span><b id="best">0</b></div>
+        <!-- std-only:start --><!-- 每行均分：和你平均水平在同样行数时比，高了绿、低了红。普通局才显示 -->
+        <div class="stat pace" id="paceBox" hidden><span>每行</span><b id="pace">—</b></div><!-- std-only:end -->
         <!-- 两条梯子各占一格，点哪个都开称号面板。
              「最强」= 单局最高分那条，「段位」= 累计总分那条。
              标准版 syncRank 早退，两格一直藏着。 -->
@@ -443,6 +445,14 @@
         <button class="row-btn" id="musicBtn">音乐：开</button>
         <button class="row-btn" id="buzzBtn">震动：开</button>
       </div>
+      <!-- std-only:start -->
+      <span class="sheet-lb">普通局辅助（默认都关）</span>
+      <div class="aid-row">
+        <button class="row-btn off" id="aidLineBtn" type="button">保命线：关</button>
+        <button class="row-btn off" id="aidTsBtn" type="button">标 T 槽：关</button>
+      </div>
+      <p class="pr-tip aid-tip">保命线：盘面六成高画一条淡线，堆过线先消低处，只是参考，照常记成绩。<br>标 T 槽：把搭好的 T 旋双消槽圈出来、不推荐落点；开着打的局不进最高分，历史记录里单独标「标槽」。</p>
+      <!-- std-only:end -->
       <!-- 手感：左右按住多久开始连发、连发多快。默认「快」 -->
       <span class="sheet-lb">手感 · 左右按住移动的快慢</span>
       <div class="seg seg-3" id="handOpts"></div>
@@ -461,7 +471,7 @@
 
 </div>
 
-<script src="tetris.js?v=ddb76f70"></script>
+<script src="tetris.js?v=ba9a22b3"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

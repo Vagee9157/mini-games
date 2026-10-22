@@ -1928,3 +1928,9 @@ body.tspinning .hint-why{ color: #ff9ce4; }
 /* 弹出面板只许上下滚：钉底按钮后面那块遮挡底左右各伸出 24px，把面板撑宽了 6px，
    手指斜着一划整块面板就左右漂。横向裁掉，滚到头也不带动后面的页面 */
 .sheet-box{ overflow-x: hidden; overscroll-behavior: contain; touch-action: pan-y; }
+
+/* 右栏「每行」：和平均水平比，高了绿、低了红 */
+.stat.pace.up b{ color: #5ee08a; }
+.stat.pace.dn b{ color: #ff8a8a; }
+.aid-row{ display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 6px; }
+.aid-tip{ font-size: 11.5px; margin-bottom: 12px; }
