@@ -722,6 +722,7 @@ function saveGame(force){
       zoneCharge,
       delayUsed,
       mid,                      // 中途开局：不存的话续玩后这局会被当成从头打的，分数进最高分
+      run: game.run,            // 复盘的计数（四消 / T 旋 / 洞 / 分段 / 标槽…）：不存的话续玩后全归零，建议也给错
       // 不存 zoneLeft：ZONE 是十秒的窗口，隔一次重开再接着倒计时没有意义。
       // 盘底那几行死行靠 restoreGame 直接从盘面数出来再结算，见那边。
       at: Date.now(),
@@ -752,7 +753,8 @@ function restoreGame(d){
   // 但这是个隐式前提，哪天续玩入口挪到暂停页，就会带着上一局的 FEVER 复活。
   crazyReset();
   game.board = d.board;
-  game.run = newRun();
+  game.run = Object.assign(newRun(), d.run && typeof d.run === 'object' ? d.run : {});
+  if (!d.run) game.run.aidTs = !CRAZY && !!aids.ts;   // 老存档没有 run：按现在的开关算
   game.queue = d.queue || [];
   // 旧存档没有 mods 字段，或者长度对不上，就地补齐 —— 两条数组必须严格同长，
   // 错位一格会让所有方块的变异都跟着错
@@ -786,6 +788,7 @@ function restoreGame(d){
   zoneCharge = CRAZY ? (+d.zoneCharge || 0) : 0;
   delayUsed = !!d.delayUsed;
   mid = d.mid && typeof d.mid.L === 'number' ? d.mid : null;
+  paceB = midRates().b;
   syncModeTag();
   // ZONE 的死行：**从盘面数出来**，不信任存档字段。
   // 这样连这次改动之前存的那些坏档也能自愈 —— 它们盘面里有死行但没有计数，
@@ -961,8 +964,10 @@ function spawn(type, mod){
   if (!armPre) return;
   armPre = false;
   if (preHeld.hold && !game.holdUsed){ holdPiece(); return; }
-  if (preHeld.cw) tryRotate(1);
-  else if (preHeld.ccw) tryRotate(-1);
+  // 消行动画里按下的那一下已经进了缓冲（flushInputs 会转），按住不放的话 IRS 再转一次就成了 180°
+  const bufRot = inputBuf.some(a => a === 'C' || a === 'A');
+  if (preHeld.cw && !bufRot) tryRotate(1);
+  else if (preHeld.ccw && !bufRot) tryRotate(-1);
 }
 
 // 消行动画那 0.26 秒没有当前块，原来这期间的点按（左右 / 旋转 / 暂存）全被吞掉 ——
@@ -2611,8 +2616,9 @@ function drillWarmLoad(){
   game.piece = null; spawnNext();
   drill.clock = true;
   staticDirty = true; previewDirty = true; needsDraw = true;
-  game.frozen = false;
-  syncHud(); syncDrill(); resumeLoop();
+  syncHud(); syncDrill();
+  // 题间停顿的定时器到点时可能正开着菜单：那就等面板关了再走（unfreezeIfIdle）
+  if (!topSheet()){ game.frozen = false; resumeLoop(); }
 }
 // 题与题之间停一下：先冻住，看清这一下的结果再换
 function drillPause(ms, fn){
@@ -3214,6 +3220,7 @@ function startNes(level, seed){
   if (CRAZY) return;
   const lv = Math.max(0, Math.min(19, level | 0));
   if (!assisted() && game.started && !game.over) saveGame(true);
+  mid = null;                        // NES 不走 restart，中途开局的状态得自己清
   closePrSheet(); closeHintSheet(); drillEnd(); vsEnd();
   const sh = $('nesSheet'); if (sh) sh.hidden = true;
   practice = false; practiceLevel = null; hintMode = false; hintMove = null; demoRunning = false;
@@ -3529,6 +3536,7 @@ function startVs(lv, seed){
   if (CRAZY) return;
   const L = Math.max(1, Math.min(VS_LEVELS.length, lv | 0));
   if (!assisted() && game.started && !game.over) saveGame(true);
+  mid = null;
   closePrSheet(); closeHintSheet(); drillEnd(); nesEnd();
   const sh = $('vsSheet'); if (sh) sh.hidden = true;
   practice = false; practiceLevel = null; hintMode = false; hintMove = null; demoRunning = false;
@@ -4029,6 +4037,7 @@ function fillHelp(){
 function openHelp(){
   fillHelp();
   $('helpSheet').hidden = false;
+  if (game.started && !game.over) game.frozen = true;    // 看说明时方块别在后面掉（键盘这时也被面板拦着）
 }
 
 function openRankSheet(){
@@ -4038,6 +4047,7 @@ function openRankSheet(){
   fillLadder($('careerList'), CAREER, total);
   $('rankFoot').textContent = `最强 ${fmtScore(best)}　累计 ${fmtScore(total)}`;
   $('rankSheet').hidden = false;
+  if (game.started && !game.over) game.frozen = true;
 }
 
 function fillRunLog(){
@@ -4118,7 +4128,7 @@ function multSum(L){
   return a;
 }
 function midRates(){
-  const full = histRead().filter(e => !e.mid && e.l >= 60 && e.t > 0).slice(-10);
+  const full = histRead().filter(e => !e.mid && !e.aid && e.l >= 60 && e.t > 0).slice(-10);
   if (full.length < 3) return Object.assign({ from: 0 }, MID_DEF);
   const med = a => { const b = a.slice().sort((x, y) => x - y); return b[b.length >> 1]; };
   return { b: med(full.map(e => e.s / multSum(e.l))), tpl: med(full.map(e => e.t / e.l)), from: full.length };
@@ -4178,6 +4188,7 @@ function startMid(L){
   garbageTimer = Math.random() * garbagePeriod() * .6;     // 灰线钟从半路走起，别一开局就涨
   mid = { L, s: P.s, p: P.p, e: P.e, dl: P.dl };
   midPick = L;
+  aidOnSpawn();                  // restart 里第一块出生时盘面还是空的，换上铺好的盘面后重拍一次（多余按键 / 标槽）
   staticDirty = true; previewDirty = true; needsDraw = true;
   syncEdge(); syncHud(); syncModeTag();
   saveGame(true);                // 马上存：这之后关掉页面再续玩，也知道是中途开局
@@ -4399,7 +4410,7 @@ function renderHist(){
     return;
   }
   const vals = all.map(get).filter(v => v != null && Number.isFinite(v));
-  if (!all.length){ sum.textContent = `共 ${every.length} 局，都是中途开局或开了标槽`; tip.textContent = ''; }
+  const onlyOdd = !all.length;
   const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
   const last10 = vals.slice(-10), prev10 = vals.slice(-20, -10);
   let tr = '';
@@ -4407,7 +4418,8 @@ function renderHist(){
     const d = Math.round((avg(last10) / avg(prev10) - 1) * 100);
     tr = `，比再往前 10 局 <b class="${d >= 0 ? 'up' : 'dn'}">${d >= 0 ? '+' : ''}${d}%</b>`;
   }
-  sum.innerHTML = `共 <b>${all.length}</b> 局 · ${escHtml(name)}最高 <b>${escHtml(vals.length ? fmt(Math.max(...vals)) : '—')}</b>`
+  if (onlyOdd) sum.textContent = `共 ${every.length} 局，都是中途开局或开了标槽（曲线只画从头、不开辅助打的局）`;
+  else sum.innerHTML = `共 <b>${all.length}</b> 局 · ${escHtml(name)}最高 <b>${escHtml(vals.length ? fmt(Math.max(...vals)) : '—')}</b>`
     + `<br>近 ${last10.length} 局平均 <b>${escHtml(last10.length ? fmt(avg(last10)) : '—')}</b>${tr}`;
   const pick = histView.pick >= 0 && histView.pick < rows.length ? histView.pick : rows.length - 1;
   chart.innerHTML = !rows.length ? '<p class="hist-empty">还没有从头打完的局（中途开局、开了标槽的局不画进曲线，只列在下面）</p>'
@@ -4663,6 +4675,7 @@ function scoreFor(n, spin, perfect){
     if (n === 4) game.run.tetris++;
     if (spin === 'tspin') game.run.tspin++;
     if (perfect) game.run.perfect++;
+    if (n === 0 && spin && game.run.tsc){ if (spin === 'tspin') game.run.tsc[0]++; else game.run.mini++; }   // 不消行的 T 旋也记上
     if (n > 0){
       const R = game.run, big = n >= 4 || spin === 'tspin';
       if (spin === 'tspin') R.tsc[Math.min(n, 3)]++;
@@ -4726,7 +4739,8 @@ function scoreFor(n, spin, perfect){
   checkMilestone();
   // 练习局不刷最高分。endGame 那条早就挡了，但这里是**每次锁定**都会走的实时刷新，
   // 原来没挡：练习里落两块就把纪录改了（实测 0 → 76）。
-  if (!assisted() && game.score > game.best){
+  // 中途开局（开局送了分）和开过标 T 槽的局也不刷：endGame 那条挡了，这条实时刷新原来没挡，消一行就写进纪录
+  if (!assisted() && !mid && !(game.run && game.run.aidTs) && game.score > game.best){
     // 破纪录的检测挪到 syncHud 了 —— 分数有三个增长入口（scoreFor /
     // clearFullNow / 软降），只在这里判会漏：道具消行把你推过纪录线时不响。
     game.best = game.score; writeBest(game.best);
@@ -9195,7 +9209,7 @@ window.addEventListener('keydown', (e) => {
       else if (sheet.id === 'histSheet') closeHistSheet();
       else if (sheet.id === 'midSheet') closeMidSheet();
       else if (sheet.id === 'vsSheet') closeVsSheet();
-      else sheet.hidden = true;
+      else { sheet.hidden = true; unfreezeIfIdle(); }   // 玩法说明 / 段位：从菜单进来时这局是冻着的，关了要接着走
     }
     return;
   }
@@ -9220,7 +9234,7 @@ window.addEventListener('keydown', (e) => {
 }, { passive: false });
 
 window.addEventListener('keyup', (e) => {
-  if (topSheet()) return;
+  // 面板开着也要处理松手：原来直接 return，按住 ← 弹面板、在面板里松手，关掉后方块自己滑到墙边
   const act = KEYMAP[e.code];
   if (!act) return;
   if (act === 'left')  release('left');
@@ -9258,7 +9272,7 @@ function openRestartSheet(){
   const a = $('rsAgain');
   if (a) a.textContent = restartLabel();
   const nb = document.querySelector('#rsModes [data-rs="normal"]');
-  if (nb) nb.hidden = !assisted();
+  if (nb) nb.hidden = !assisted() && !mid;         // 中途开局里也给「普通」：不然回不到从头打的普通局
   sh.hidden = false;
   if (game.started && !game.over) game.frozen = true;
 }
@@ -9277,7 +9291,7 @@ function restartPick(m){
   const sh = $('restartSheet');
   if (sh) sh.hidden = true;
   if (m === 'again') return modeRestart();
-  if (m === 'normal'){ if (assisted()) exitPractice(); restart(); return; }
+  if (m === 'normal'){ if (assisted()) exitPractice(); restart(); return; }   // restart 会清掉 mid
   if (m === 'vs') return openVsSheet();
   if (m === 'nes') return openNesSheet();
   if (m === 'practice'){ startPractice(); openPrSheet(); return; }
@@ -9567,7 +9581,8 @@ function restart(){
   game.holdUsed = false;
   game.score = 0;
   game.lines = 0;
-  game.level = 1;
+  game.level = tsOn() ? tsSpeed : 1;   // T 旋练习重开：停在选的速度（原来掉回 1 级，角标还写着「快」）
+  if (tsOn()) tsStats = { tsd: 0, built: 0, miss: 0, filled: 0, waste: 0 };
   game.combo = -1;
   game.b2b = false;
   game.over = false;
@@ -9633,7 +9648,7 @@ function togglePause(){
     ov.dataset.mode = 'pause';
     // 只在够得上有效局之后给「收手」—— 秒开秒收会污染今日局数和狂欢局保底
     const sb = $('stopBtn');
-    if (sb) sb.hidden = !isRealRun();
+    if (sb) sb.hidden = !(mid ? midPlayed() : isRealRun());   // 中途开局送的那几百块不算
     ov.classList.add('show');
     needsDraw = true;
   } else {
@@ -9881,7 +9896,7 @@ function init(){
       if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openRank(); }
     });
   }
-  const closeRank = () => { $('rankSheet').hidden = true; };
+  const closeRank = () => { $('rankSheet').hidden = true; unfreezeIfIdle(); };
   $('rankDone').addEventListener('click', closeRank);
   // 点抽屉外面也关掉，免得非得够到底部那个按钮
   $('rankSheet').addEventListener('click', (e) => { if (e.target === $('rankSheet')) closeRank(); });
