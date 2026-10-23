@@ -1985,3 +1985,20 @@ body.gameover .hintbar{ visibility: hidden; }
   padding-top: 14px; font-size: 10.5px; color: var(--ink-dim); text-align: center; pointer-events: none;
   background: linear-gradient(rgba(8,11,20,0), rgba(8,11,20,.96) 55%);
 }
+
+/* 提示模式：细栏下面三行详细说明（为什么 / 别处 / 按法） */
+.hintbar{ flex-wrap: wrap; }
+.hint-more{ flex-basis: 100%; display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.4; color: var(--ink-soft); padding: 0 2px 2px; }
+.hint-more span{ display: block; }
+.hint-more span:last-child{ color: #9fe6b8; }
+.wc-fits{ grid-template-columns: 1fr; }
+/* 暂停：遮罩变半透明、「继续」缩到上面一条，盘面和提示都看得见（照着推荐想一想再接着打） */
+.overlay[data-mode="pause"]{ background: rgba(8, 11, 20, .32); place-items: start center; }
+.overlay[data-mode="pause"] .card{ padding: 8px 12px; border-radius: 14px; background: rgba(11, 16, 28, .88); margin-top: 8px; }
+.overlay[data-mode="pause"] .card h2{ font-size: 15px; margin: 0 0 4px; }
+.overlay[data-mode="pause"] .card p{ display: none; }
+.overlay[data-mode="pause"] .card .pbtn{ padding: 8px 18px; font-size: 12px; margin: 2px 4px; }
+
+/* 说明每条一行：折行会把盘面挤小一大截，宁可末尾省略（点「规则」看完整原则） */
+.hint-more span{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hint-more{ font-size: 10.5px; line-height: 1.35; }

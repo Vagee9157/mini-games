@@ -102,7 +102,7 @@ JS = r"""async () => {
   $('modeSw').querySelector('[data-m="hint"]').click();
   ok(T.hintMode && !T.tsOn() && T.hintKind === 'stack' && !document.body.classList.contains('tspinning'), '顶栏点「提示」：切回堆叠提示');
   T.openHintSheet();
-  ok($('hintSheetTitle').textContent === '堆叠规则' && !$('hintSheetIntro').hidden, '回到堆叠提示：规则卡标题和介绍换回来');
+  ok(/留井四消/.test($('hintSheetTitle').textContent) && !$('hintSheetIntro').hidden, '回到堆叠提示：规则卡标题和介绍换回来');
   T.closeHintSheet();
   $('modeSw').querySelector('[data-m="normal"]').click();
   ok(!T.hintMode && !T.tsOn(), '点「普通」退出');

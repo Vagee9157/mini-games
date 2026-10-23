@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=6322a3b7">
+<link rel="stylesheet" href="tetris.css?v=3d19c7bf">
 </head>
 <body>
 <div class="topline"></div>
@@ -262,6 +262,8 @@
       <span class="hint-score" id="hintScore"></span>
       <button class="pr-s" id="hintHide" type="button">先自己找</button>
       <button class="pr-s pr-menu hint-rules" id="hintRules" type="button">规则</button>
+      <!-- 推荐的详细说明：为什么 / 别处为什么不行 / 最少按法（细栏第一行是「放这里 · 用的哪条定式」） -->
+      <div class="hint-more" id="hintMore"></div>
     </div>
     <!-- 每日练习细栏：这一段在练什么 + 计时/进度。堆叠段的推荐理由也写在这里，
          提示细栏那时候收起来 —— 两条一起挂盘面要少两行 -->
@@ -310,7 +312,7 @@
   <div class="sheet" id="hintSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3 id="hintSheetTitle">堆叠规则</h3></div>
-      <p class="pr-tip" id="hintSheetIntro">高手不是每块都在想，是每种块来了都有默认去处：先找和它底面一样的台阶。推荐的落点里九成以上就是这么来的。</p>
+      <p class="pr-tip" id="hintSheetIntro">打法固定一套：左边九列堆平，最右一列留井，等长条（I）竖进去打四消。每种块来了都有默认去处（下面的定式），放之前按 ①~⑥ 的顺序问自己。不教 T 旋 —— T 旋去「T 旋练习」单练。</p>
       <div class="hr-body" id="hintRulesBody"></div>
       <button class="pr-b hr-switch" id="hintHideSw" type="button"></button>
       <button class="pbtn sheet-done" id="hintDone">接着放</button>
@@ -484,7 +486,7 @@
 
 </div>
 
-<script src="tetris.js?v=80bddcaf"></script>
+<script src="tetris.js?v=309c9002"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

@@ -84,8 +84,8 @@ JS = r"""async () => {
   ok(T.hintMode && T.drill.stage === 'stack', '堆叠段借用提示模式');
   ok(getComputedStyle($('hintBar')).display === 'none' && getComputedStyle($('drBar')).display !== 'none',
      '只挂每日练习那一条细栏，提示细栏收起');
-  ok(T.hintHidden() && /^[IOTSZJL] 找/.test($('drLabel').textContent),
-     `推荐藏着，细栏只说这块找哪种台阶（「${$('drLabel').textContent}」）`);
+  ok(T.hintHidden() && /^先自己找：[IOTSZJL] /.test($('drLabel').textContent),
+     `推荐藏着，细栏只说这块的定式（「${$('drLabel').textContent}」）`);
   ok(T.hintMove && !T.hintReveal, '出块时不亮推荐');
   // 推荐有三种：落点 / 暂存 / T 旋路径（提示模式现在用教练那套），三种都照做
   const prs = a => a.acts.replace(/d/g, '').length;

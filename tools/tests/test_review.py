@@ -35,40 +35,38 @@ JS = r"""async () => {
   T.endGame('堆到顶了');
   ok(!$('review').hidden, '普通局结算页出现复盘');
   ok(/四消1 次/.test(stat()) && /单消 \/ 双消 \/ 三消1 \/ 0 \/ 0 次/.test(stat()) && /造洞1 个/.test(stat()), `复盘的数（${stat()}）`);
-  ok(/没打出 T 旋/.test(tips()), `150 块一个 T 旋双消都没有：建议练 T 旋（${tips().slice(0, 30)}…）`);
+  ok(tips().length > 0 && !/T 旋/.test(tips()), `有建议、不再劝 T 旋（${tips().slice(0, 30)}…）`);
   ok(!/上局/.test(stat()) && T.histRead().length === 1, '第一局没有「上局」，这局存下来了');
 
   play(); T.game.pieces = 150; T.game.elapsed = 120000; T.endGame('堆到顶了');
   ok(/上局/.test(stat()) && T.histRead().length === 2, '第二局：每行均分后面带上局的数');
 
-  // ── 建议规则（按机器人模拟定的阈值：堆高 / T 旋双消频率 / 放偏 / T 用掉 / 洞 / 按键 / 手速） ──
-  const base = { clr: [0, 30, 20, 10, 15], tsc: [0, 0, 0, 0], mini: 0, b2bs: 0, bigPts: 0, bigLines: 60, smallPts: 0, smallLines: 100,
-                 holes: 10, highLocks: 30, cN: 0, cGood: 0, cRule: [0, 0, 0, 0], tN: 0, tTsd: 0, tMiss: 0, tHold: 0, tFlat: 0 };
+  // ── 建议规则（留井四消口径，阈值按机器人模拟：高处放块 / 四消占比 / 放偏 / I 用掉 / 洞 / 按键 / 手速） ──
+  const base = { clr: [0, 30, 20, 10, 30], tsc: [0, 0, 0, 0], mini: 0, b2bs: 0, bigPts: 0, bigLines: 120, smallPts: 0, smallLines: 100,
+                 holes: 30, highLocks: 60, cN: 0, cGood: 0, cRule: [0, 0, 0, 0, 0, 0], iN: 0, iTet: 0, iWaste: 0, iOther: 0, iHold: 0 };
   const names = (r, ctx) => T.reviewTips(Object.assign({}, base, r), 600, 246, ctx).map(t => t[0]);
   let n = names({});
-  ok(n.length === 1 && n[0] === '没打出 T 旋', `600 块一个 T 旋双消都没有、洞少不高：只说 T 旋（${n.join(' / ')}）`);
-  ok(!T.reviewTips(Object.assign({}, base, { smallLines: 500, bigLines: 10 }), 600, 246).some(t => t[0] === '消得太碎'), '不再有「消得太碎」（零失误的教练也八成多是 1~3 行消的）');
+  ok(n.length === 1 && n[0] === '打法对了', `四消占一半、洞少不高：打法对了（${n.join(' / ')}）`);
+  n = names({ clr: [0, 120, 40, 20, 4] });
+  ok(n.includes('四消打得少') && !n.some(t => /T 旋/.test(t)), `246 行里只有 4 次四消：提四消打得少，不再提 T 旋（${n.join(' / ')}）`);
   n = names({ highLocks: 200 });
   ok(n[0] === '在高处待太久', `三成多的块在高处放：排第一（${n.join(' / ')}）`);
+  ok(!names({ highLocks: 120 }).includes('在高处待太久'), '两成在高处：不提（照教练打也有一成多）');
   n = names({ holes: 160 });
   ok(n.includes('洞造多了'), `每 100 块 27 个洞：提洞（${n.join(' / ')}）`);
-  ok(!names({ holes: 100 }).includes('洞造多了'), '每 100 块 17 个洞：不提（零失误也有这么多）');
-  n = names({ cN: 300, cGood: 150, cRule: [10, 80, 5, 5] });
-  ok(n.includes('放偏的块多') && /②「表面要平」/.test(T.reviewTips(Object.assign({}, base, { cN: 300, cGood: 150, cRule: [10, 80, 5, 5] }), 600, 246).find(t => t[0] === '放偏的块多')[1]),
-     `后台教练：只有一半放对、最常犯 ②：提出来（${n.join(' / ')}）`);
-  n = names({ tN: 80, tFlat: 40, tsc: [0, 0, 20, 0] });
-  ok(n.includes('T 用掉了') && !n.includes('没打出 T 旋'), `80 个 T 里 40 个平放：提 T 用掉了（${n.join(' / ')}）`);
-  n = names({ tsc: [0, 0, 20, 0], holes: 50, highLocks: 60 });
-  ok(n.length === 1 && n[0] === '打法对了', `每 100 块 3.3 个 T 旋双消、洞少不高：打法对了（${n.join(' / ')}）`);
-  n = names({ tsc: [0, 0, 20, 0] }, { pps: .8, ppsAvg: 1, ppsN: 10 });
+  ok(!names({ holes: 100 }).includes('洞造多了'), '每 100 块 17 个洞：不提（照教练打也有十几个）');
+  const big = T.reviewTips(Object.assign({}, base, { cN: 300, cGood: 150, cRule: [0, 10, 80, 5, 5, 0] }), 600, 246).find(t => t[0] === '放偏的块多');
+  ok(!!big && /③「井只给 I」/.test(big[1]), `后台教练：只有一半放对、最常犯 ③：提出来（${big && big[1].slice(0, 40)}…）`);
+  n = names({ iN: 40, iWaste: 20, iTet: 10, iOther: 10 });
+  ok(n.includes('I 用掉了'), `40 个 I 里 20 个井不够深就放掉：提 I 用掉了（${n.join(' / ')}）`);
+  n = names({}, { pps: .8, ppsAvg: 1, ppsN: 10 });
   ok(n.includes('比平时慢'), `每秒 0.8 块、平时 1.0：说比平时慢（${n.join(' / ')}）`);
-  const tt = T.reviewTips(Object.assign({}, base), 600, 246)[0][1];
-  ok(/9600/.test(tt) && !/3200/.test(tt), 'T 旋双消的分值写对了（20 级后一次 9600）');
-  ok(T.reviewTips(Object.assign({}, base, { holes: 300, highLocks: 300, cN: 300, cGood: 10, cRule: [100, 0, 0, 0], tN: 80, tFlat: 60 }), 600, 246, { pps: .5, ppsAvg: 1, ppsN: 5 }).length <= 3, '建议最多 3 条');
+  ok(!T.reviewTips(Object.assign({}, base, { smallLines: 500, bigLines: 10 }), 600, 246).some(t => t[0] === '消得太碎'), '没有「消得太碎」');
+  ok(T.reviewTips(Object.assign({}, base, { holes: 300, highLocks: 300, cN: 300, cGood: 10, cRule: [100, 0, 0, 0, 0, 0], iN: 40, iWaste: 30, clr: [0, 200, 0, 0, 0] }), 600, 246, { pps: .5, ppsAvg: 1, ppsN: 5 }).length <= 3, '建议最多 3 条');
 
   // ── 复盘写满（3 条建议）时，「再来一局」不用滑就点得到，复盘在它下面 ──
   play();
-  Object.assign(T.game.run, { holes: 200, highLocks: 180, smallLines: 185, bigLines: 61 });
+  Object.assign(T.game.run, { holes: 200, highLocks: 220, smallLines: 185, bigLines: 61 });   // 高处 35% + 四消少 + 洞多 = 三条
   T.game.pieces = 620; T.game.elapsed = 640000; T.game.lines = 246; T.endGame('堆到顶了');
   await new Promise(r => setTimeout(r, 2500));                   // 结算卡等死亡动画走完才弹
   const ab = $('againBtn').getBoundingClientRect(), rv = $('review').getBoundingClientRect();
