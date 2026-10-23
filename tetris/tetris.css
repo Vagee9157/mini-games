@@ -2031,3 +2031,12 @@ body.gameover .hintbar{ visibility: hidden; }
 .hint-more .hm-alt b{ color: #ffd166; }
 .hint-more .hm-how b{ color: #7fe3ff; }
 .hint-more span:last-child{ color: var(--ink); }
+
+/* 游戏页面：长按不出「拷贝 / 选中 / 放大镜」，整页不能缩放、不能拖动。
+   只给 body 设 user-select:none 的话，iOS 上按钮里的字、底部提示照样能长按选中 —— 一律给到每个元素。
+   touch-action:none 让浏览器不做任何拖动 / 缩放（双击、双指、单指拖都不行）；
+   只有真要滚的弹层、结算卡、历史曲线放开上下滑 */
+/* 只给元素本身，别带 ::before / ::after：带上的话 WebKit 每帧重算样式变慢，计时一卡，轻点 60ms 被当成长按滑出好几格（实测） */
+*{ -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html, body{ touch-action: none; }
+.sheet-box, .overlay .card, .hist-chart svg{ touch-action: pan-y; }

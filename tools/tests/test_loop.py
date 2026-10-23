@@ -24,7 +24,8 @@ JS = r"""async (eng) => {
 
   // ── 轻点（比连发门槛短）：只走 1 格。按下时机错开 40 次 ──
   const bad = [];
-  for (const hold of [60, T.DAS - 30]){
+  // 第二档离连发门槛留 50ms：留 30ms 时跑全套机器一忙计时器晚到就越线，偶发「走了 2 格」（单独跑从来不红）
+  for (const hold of [60, T.DAS - 50]){
     for (let k = 0; k < 20; k++){
       fresh(); T.game.piece.x = 2;
       await sleep(250 + k * 13);
@@ -34,7 +35,7 @@ JS = r"""async (eng) => {
       if (T.game.piece.x - x0 !== 1) bad.push(hold + 'ms→' + (T.game.piece.x - x0));
     }
   }
-  ok(!bad.length, `轻点右 40 次（60ms / ${T.DAS - 30}ms，时机错开）：每次只走 1 格${bad.length ? '；走多了：' + bad.join(' ') : ''}`);
+  ok(!bad.length, `轻点右 40 次（60ms / ${T.DAS - 50}ms，时机错开）：每次只走 1 格${bad.length ? '；走多了：' + bad.join(' ') : ''}`);
 
   // ── 按住：到门槛开始连发，走到墙 ──
   fresh(); T.game.piece.x = 2; await sleep(200);

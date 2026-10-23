@@ -20,7 +20,14 @@ JS = r"""async (eng) => {
     const e = new TouchEvent('touchmove', { bubbles: true, cancelable: true, touches: ts, targetTouches: ts, changedTouches: ts });
     el.dispatchEvent(e); return e.defaultPrevented;
   };
-  ok(getComputedStyle(document.body).touchAction === 'manipulation', `body 关掉双击放大（touch-action: ${getComputedStyle(document.body).touchAction}）`);
+  ok(getComputedStyle(document.body).touchAction === 'none', `整页不让浏览器拖动 / 缩放（touch-action: ${getComputedStyle(document.body).touchAction}）`);
+  const us = el => getComputedStyle(el).webkitUserSelect || getComputedStyle(el).userSelect;
+  ok(['btnCw', 'hintWhy', 'score'].every(id => !$(id) || us($(id)) === 'none') && us(document.querySelector('#btnLeft em') || $('btnLeft')) === 'none',
+     '按钮里的字、提示文字、分数：都不能长按选中');
+  const cm = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); $('btnCw').dispatchEvent(cm);
+  const ss = new Event('selectstart', { bubbles: true, cancelable: true }); $('hintWhy').dispatchEvent(ss);
+  ok(cm.defaultPrevented && ss.defaultPrevented, '长按菜单、开始选字：都拦住');
+  ok(getComputedStyle(document.querySelector('.overlay .card')).touchAction === 'pan-y', '开局 / 结算卡还能上下滑');
   const dbl = new MouseEvent('dblclick', { bubbles: true, cancelable: true }); document.body.dispatchEvent(dbl);
   ok(dbl.defaultPrevented, '双击被拦住');
   const g = new Event('gesturestart', { bubbles: true, cancelable: true }); document.dispatchEvent(g);

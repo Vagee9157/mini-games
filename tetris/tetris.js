@@ -4453,6 +4453,10 @@ function lockPage(){
   const stop = e => e.preventDefault();
   for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, stop, { passive: false });
   document.addEventListener('dblclick', stop, { passive: false });
+  document.addEventListener('contextmenu', stop);            // 长按弹「拷贝 / 存储图像」菜单
+  document.addEventListener('selectstart', stop);            // 长按开始选字
+  // 两根手指一按下就拦：不等 touchmove，iOS 有时在第一下 move 之前就开始缩放
+  document.addEventListener('touchstart', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
   document.addEventListener('touchmove', e => {
     if (e.touches.length > 1 || !canScroll(e.target)) e.preventDefault();
   }, { passive: false });
