@@ -133,8 +133,8 @@ JS = r"""() => {
   const hm2 = T.hintMove, more = () => [...document.querySelectorAll('#hintMore span')].map(e => e.textContent);
   ok(!!hm2.cells && T.fitGaps(T.simBoard(), hm2.cells) === 0 && /^S：/.test(hm2.why), `推荐贴合，第一行说定式（「${hm2.why}」）`);
   const m3 = more();
-  ok(m3.length === 3 && /^为什么：/.test(m3[0]) && /^(别处：|.*也一样好|只有这一处)/.test(m3[1]) && /^按法：.*（\d 下）$/.test(m3[2]),
-     `底下三行：为什么 / 别处 / 按法（${m3.join(' | ')}）`);
+  ok(m3.length === 2 && /^为什么：/.test(m3[0]) && /^(别处：|.*一样好)/.test(m3[1]) && !m3.some(l => /按法/.test(l)),
+     `底下两行：为什么 / 别处，不写按法（${m3.join(' | ')}）`);
   ok(!T.hintMove.cells.some(c => c[0] === 9), '推荐不碰井（第 10 列）');
 
   // 一样好时先低后左：空盘 O 推荐最左边

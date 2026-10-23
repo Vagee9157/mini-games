@@ -1975,10 +1975,10 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   if (type === 'I' && !tet && canHold && hold !== 'I' && !danger && garbRows(b0) < WC_GARB_DIG)   // 灰线积多了 I 先拿去挖，不收
     return { kind: 'hold', type, holdType: 'I', next, danger,
              why: ['暂存 I —— 留着打四消', '为什么：井只有 ' + depth + ' 行，不够 4 行，现在放 I 是浪费',
-                   hold ? '换出来的 ' + hold + ' 照常放，井够 4 行再换回 I' : '井够 4 行再换出来', '按法：点 HOLD（1 下）'] };
+                   hold ? '换出来的 ' + hold + ' 照常放，井够 4 行再换回 I' : '井够 4 行再换出来'] };
   if (type !== 'I' && hold === 'I' && canHold && depth >= 4)
     return { kind: 'hold', type, holdType: type, next, danger,
-             why: ['换出 I —— 井够 4 行了', '为什么：I 竖进第 10 列就是四消', '当前的 ' + type + ' 收进暂存，下一手再放', '按法：点 HOLD（1 下）'] };
+             why: ['换出 I —— 井够 4 行了', '为什么：I 竖进第 10 列就是四消', '当前的 ' + type + ' 收进暂存，下一手再放'] };
   // 选点：分最高的那一组里（差 WC_TOL 以内算一样好），先低后左
   let best = tet;
   let ties = [];
@@ -1994,7 +1994,7 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   // ⑥ 放哪都留洞的 S / Z / O，暂存空着就先收起来
   if (bf.holes > 0 && canHold && !hold && (type === 'S' || type === 'Z' || type === 'O') && !danger)
     return { kind: 'hold', type, holdType: type, next, danger,
-             why: ['暂存 ' + type + ' —— 放哪都会留洞', '为什么：最好的位置也要留 ' + bf.holes + ' 个洞，等有合适的台阶再放', '下一块 ' + (next || '') + ' 先放', '按法：点 HOLD（1 下）'] };
+             why: ['暂存 ' + type + ' —— 放哪都会留洞', '为什么：最好的位置也要留 ' + bf.holes + ' 个洞，等有合适的台阶再放', '下一块 ' + (next || '') + ' 先放'] };
   if (lite) return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger, why: [] };
   // 四行说明
   const l1 = (garbRows(b0) >= WC_GARB_DIG && bf.garb < garbRows(b0) ? '挖灰线 · ' : '') + wcShape(best, best.lines, danger) + ' · ' + colsOf(best.cells);
@@ -2026,9 +2026,8 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
     }
     l3 = bits.length ? '别处：' + bits.join('；') : '别处：只有这一处能放';
   }
-  const l4 = '按法：' + pathText(finessePath(b0, type, best.cells, kbUsed));
   return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger,
-           why: [l1, l2, l3, l4] };
+           why: [l1, l2, l3] };      // 按法那一行去掉了（用户：不需要），最少按法还在复盘「多余按键」里用
 }
 // 判一手（提示模式、后台教练、每日练习堆叠段都用）：和 judgeCore 同一个返回形状
 function wcJudge(rec, b0, p, n, spin){
@@ -2208,7 +2207,7 @@ function syncHint(){
   if (!hintMode) return;
   const w = $('hintWhy');
   if (w) w.innerHTML = stepsHTML(!hintMove ? '' : hintHidden() ? pieceHintText(hintMove.type) : '推荐　' + hintMove.why);
-  // 下面三行：为什么 / 别处 / 按法。先自己找的时候藏着，放完会在提示里说差在哪
+  // 下面两行：为什么 / 别处。先自己找的时候藏着，放完会在提示里说差在哪
   const mo = $('hintMore');
   if (mo){
     const ls = hintMove && hintMove.lines && !hintHidden() ? hintMove.lines.slice(1) : [];
@@ -4921,7 +4920,7 @@ function reviewTips(r, pieces, lines, ctx){
   if (per100 >= 25)
     tips.push(['洞造多了', `这局造了 ${r.holes} 个洞（每 100 块 ${per100.toFixed(0)} 个，照教练打约 ${WC_REF.holes} 个）。洞上面那几行全都消不掉，放之前看一眼会不会盖住空格`]);
   if (r.finN >= 50 && pct(r.faults, r.finN) >= 30)
-    tips.push(['按键绕远了', `${pct(r.faults, r.finN)}% 的块按的比最少按法多（这局多按了 ${r.extra} 下）。提示模式底下那行「按法」就是最少按法，照着练`]);
+    tips.push(['按键绕远了', `${pct(r.faults, r.finN)}% 的块按的比最少按法多（这局多按了 ${r.extra} 下）。横着贴墙的块直接按住到墙，转向先想好再按`]);
   if (c.pps > 0 && c.ppsAvg > 0 && c.pps < c.ppsAvg * .9)
     tips.push(['比平时慢', `每秒 ${c.pps.toFixed(2)} 块，你近 ${c.ppsN} 局平均 ${c.ppsAvg.toFixed(2)}。先放对再放快：每块按最少按法、看着 NEXT 提前想好下一块`]);
   if (!tips.length)
