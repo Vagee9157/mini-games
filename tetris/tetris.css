@@ -2002,3 +2002,12 @@ body.gameover .hintbar{ visibility: hidden; }
 /* 说明每条一行：折行会把盘面挤小一大截，宁可末尾省略（点「规则」看完整原则） */
 .hint-more span{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hint-more{ font-size: 10.5px; line-height: 1.35; }
+
+/* 提示模式多了三行说明，盘面会矮一截（iPhone 17 实测 310 → 270）。说明一行不少、和按键排的 16px 间距也不动
+   （贴着「变换」会误点），只收细栏自己：按钮矮一点、说明 10.5px、细栏底下只留安全区 —— 收回一档到 280 */
+@media (orientation: portrait){
+  body.hinting .hintbar{ min-height: 28px; }
+  body.hinting .hintbar .pr-s{ padding: 5px 8px; }
+  .hint-more{ font-size: 10.5px; line-height: 1.25; padding: 0; }
+  body.hinting .game, body.immersive.hinting .game{ padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+}
