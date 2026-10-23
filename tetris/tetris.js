@@ -1072,7 +1072,7 @@ function holdPiece(){
   if (nes) return;                 // NES 没有暂存
   if (!game.piece){ bufferInput('X'); return; }
   if (game.holdUsed) return;
-  if (drill && drill.stage === 'warm') return;     // 题目只给 T，暂存了就没题了
+  if (drill && drill.stage === 'warm') return;     // 热身题就给两块（补缺口那块 + I），暂存了就没题了
   if (upNever('hold')){ showToast('断舍　这局不能用 HOLD'); return; }
   const cur = game.piece.type, curMod = game.piece.mod || null;
   if (cur === 'I' && aidsOn() && game.run) game.run.iHold = (game.run.iHold || 0) + 1;   // I 块去向：进过暂存
@@ -1867,10 +1867,16 @@ function wellDepth(b){
 }
 // ③ 井只给 I：安全时非 I 块碰井就扣（simScore 只在井比九列最低处还高时才扣，井还很深时塞一块进去不扣）。
 // 比留洞（100）扣得轻：真的别处都要留洞，宁可先占井 —— ② 排在 ③ 前面
-const WC_WELL_PEN = 95;        // 比洞（100）轻、比「不平 / 深坑 / 没台阶」那几项重：② > ③ > ④
+// 盘面低（hiH 行以下）时碰井就扣；堆到 hiH 行以上不扣 —— 那时借井消几行减压是对的。
+// 真实引擎上每秒 1 块、开灰线、同 4 个种子比过（平均）：
+//   低 60 / 6 行以上 0   46.5 万 · 高处放块 22% · 四消占消行 43% · 洞 12.1/100   ← 用这个
+//   一律 0（只靠 simScore 的堵井项） 40.1 万 · 37% · 31% · 15.0
+//   一律 60 / 一律 95 / 低 95 高 40（8 行）  36.9~39.4 万 · 35~46% · 28~33%   —— 护井护太死，堆高了也不借井，越堆越高
+const WC_WELL = { base: 60, high: 0, hiH: 6 };
 // 只罚「放完井真被垫高了」：进井顺手消掉几行、消完井还空着的不算堵（右边低的时候用 L / J 这么消很常见）
 const wellH = b => { for (let y = 0; y < TOTAL_ROWS; y++) if (b[y][HINT_WELL]) return TOTAL_ROWS - y; return 0; };
-const wellPen = (type, cells, danger, b0, b1) => !danger && type !== 'I' && inWell(cells) && wellH(b1) > wellH(b0) ? WC_WELL_PEN : 0;
+const wellPen = (type, cells, danger, b0, b1) => !danger && type !== 'I' && inWell(cells) && wellH(b1) > wellH(b0)
+  ? (simFeatures(b0).maxH >= WC_WELL.hiH ? WC_WELL.high : WC_WELL.base) : 0;
 function wcEval(b0, cells, next, danger, type){
   const r1 = simPlace(b0, cells);
   const p1 = type ? wellPen(type, cells, danger, b0, r1.b) : 0;
@@ -2083,7 +2089,7 @@ const HINT_TOL = 3;
 const HINT_RULES = [
   { n: '①', t: '保命', d: '九列最高的堆到盘面六成（13 行）就切保命：能消就消，I 也不用等四消，直接拿来救命 —— 灰线会越涨越快' },
   { n: '②', t: '不留洞', d: '先找和这块底面一样的台阶，严丝合缝放下去。宁可放高一格，也别盖住空格 —— 洞上面那几行全都消不掉' },
-  { n: '③', t: '井只给 I', d: '最右一列（第 10 列）是井，谁都不放，只等 I 竖着进去打四消。别的块放进去就是把井堵了' },
+  { n: '③', t: '井只给 I', d: '最右一列（第 10 列）是井，只等 I 竖着进去打四消。盘面低（6 行以下）时别的块一格都别碰；堆到 6 行以上，借井消几行减压可以' },
   { n: '④', t: '九列堆平、留台阶', d: '左边九列相邻高低差尽量不超过 2；表面随时给 S、Z 留一个高低差一格的台阶；除了井，别挖只有 I 能填的深坑。安全时别消零碎行，攒着四消' },
   { n: '⑤', t: '灰线积多了先挖', d: '灰线积到 3 行以上就先挖：把盖在灰线缺口上的块消掉，让缺口露出来再填掉。灰线别越积越多，不然光打四消也会被顶死' },
   { n: '⑥', t: '暂存', d: 'I 来了、井还不够 4 行：先把 I 放进暂存，井够了再换出来四消。暂存空着时，放哪都会留洞的 S / Z / O 也先收起来' },
@@ -2151,6 +2157,7 @@ function hintJudge(p, n, spin){
   hintStats.total++;
   const J = wcJudge(rec, b0, p, n, spin);
   const { cells, good, exact, r, msg } = J;
+  if (!good && J.loss > 0 && !drill) pushWorst(hintStats.worst || (hintStats.worst = []), b0, J, rec, p);   // 局后小结「损失最大的几手」
   hintStats.holes = (hintStats.holes || 0) + J.holes;
   if (J.tsd){ tsStats.tsd++; showToast('✓ T 旋双消', 1200); }
   if (exact) hintStats.same++;
@@ -2642,8 +2649,9 @@ function startTspin(){
 // 练习关是固定盘面，练几遍就背下来了；提示模式和普通局又都不留记录 ——
 // 天天练，有没有变强自己说不出来。每日练习把三段串成十分钟左右，每段出一个
 // 能跨天比的数，按北京时间归日存下来（每天每项只留最好的那次）：
-//   ① T 槽热身：5 道**随机生成**的 T 旋双消题。盘面每次都不同，练的是「认出槽」
-//      而不是背按键。每道题生成后用 BFS 验过「只用顺时针能打出来」
+//   ① 四消热身：5 道**随机生成**的题。底下 4 行左边九列快满、最右一列是井，第 4 行留一个缺口，
+//      形状正好是这题给的那块：先把它补平，再把 I 竖进井打四消。练的是提示模式那套定式的两个核心动作
+//      （找底面一样的台阶 / I 进井），和提示模式同一个方向。原来是 T 槽热身，提示模式改成留井四消后就对不上了
 //   ② 堆叠：提示模式放 100 块（推荐藏着，放完才亮），看放对几成、造了几个洞、最常犯哪条规则
 //   ③ 40 行冲刺：标准计时赛。看用时、每秒几块（PPS）、每块按几下键（KPP），
 //      和「多余按键」—— 同一个落点，按的次数比最少按法多的块数
@@ -2659,10 +2667,10 @@ const DRILL_DAYS_KEPT = 60;
 const DRILL_DIG_ROWS = 8;
 const DRILL_DIG_LEVEL = 10;
 const DRILL_STAGES = ['warm', 'stack', 'dig', 'sprint'];
-const DRILL_NAME = { warm: '① T 槽热身', stack: '② 堆叠', dig: '③ 挖灰线', sprint: '④ 40 行冲刺' };
+const DRILL_NAME = { warm: '① 四消热身', stack: '② 堆叠', dig: '③ 挖灰线', sprint: '④ 40 行冲刺' };
 const DRILL_SHORT = { warm: '热身', stack: '堆叠', dig: '挖灰线', sprint: '冲刺' };
 const DRILL_DESC = {
-  warm: DRILL_WARM_N + ' 道随机 T 旋双消题，看一次过几道',
+  warm: DRILL_WARM_N + ' 道随机题：先把这块补进缺口，再把 I 竖进井打四消，看一次过几道',
   stack: '自己找位置放 ' + DRILL_STACK_N + ' 块，放完对照推荐，看放对几成、最常犯哪条',
   dig: '底下垫 ' + DRILL_DIG_ROWS + ' 行灰线，挖光计时 —— 普通局就是被灰线顶死的',
   sprint: '消 ' + DRILL_SPRINT_LINES + ' 行计时，看用时、PPS、多余按键',
@@ -2754,6 +2762,35 @@ function simReach(b, type, ccw){
 // 标准 T 旋双消的槽：最底一行只空槽口那一格，上一行空三格，再上面一侧有屋檐。
 // 屋檐朝左朝右、槽在哪一列、两边堆多高、底下垫几行灰线，全随机。
 // 生成后用 simReach 验一遍：只用顺时针、能打出 T 旋双消，才算一道题。
+// 四消热身出题：底下 4 行左边九列铺满、井空着，再从第 4 行（最上面那行）挖掉一块 X 的底面 ——
+// 挖法是「X 放在那里时落在第 4 行的那几格」，所以 X 从顶上直接落下去正好补平。出完用 simDrops 验一遍落得到
+function drillGenTetris(rand){
+  const rnd = rand || Math.random;
+  const ri = n => (rnd() * n) | 0;
+  const R = TOTAL_ROWS - 1, top = R - 3;
+  for (let t = 0; t < 200; t++){
+    const X = 'LJOTSZ'[ri(6)];
+    const b = Array.from({ length: TOTAL_ROWS }, (_, y) => Array.from({ length: COLS }, (_, x) => y >= top && x < HINT_WELL));
+    // 上面再随机垫几格（不碰井），盘面不至于每题都是平的
+    for (let x = 0; x < HINT_WELL; x++) if (rnd() < .35) b[top - 1][x] = true;
+    const rot = ri(X === 'O' ? 1 : 4);
+    const cs = cellsOf(X, rot), low = Math.max(...cs.map(c => c[1]));
+    const x0 = ri(COLS);
+    const cells = cs.map(([cx, cy]) => [x0 + cx, top + cy - low]);
+    if (cells.some(([x, y]) => x < 0 || x >= HINT_WELL || y < 0)) continue;
+    for (const [x, y] of cells) b[y][x] = false;      // X 的位置全空出来（第 4 行那几格就是缺口）
+    // 落下去正好是这组格子、放完井够 4 行
+    const key = cs2 => cs2.map(c => c.join(',')).sort().join(';');
+    if (!simDrops(b, X).some(d => key(d.cells) === key(cells))) continue;
+    const after = simPlace(b, cells).b;
+    if (wellDepth(after) < 4) continue;
+    // 盖在缺口上面的垫格挪掉了的话，补平之后表面还是会有坑 —— 不要紧，题目只看第 4 行
+    let first = 0;
+    while (first < TOTAL_ROWS && !b[first].some(Boolean)) first++;
+    return { rows: b.slice(first).map(r => r.map(v => v ? '#' : '.').join('')), X };
+  }
+  return null;
+}
 function drillGenPuzzle(rand){
   const rnd = rand || Math.random;
   const ri = n => (rnd() * n) | 0;
@@ -2892,7 +2929,7 @@ function drillBegin(stage){
 }
 
 function drillWarmNext(){
-  drill.puz = drillGenPuzzle();
+  drill.puz = drillGenTetris();
   drill.tries = 0;
   drill.ms = 0;
   drillWarmLoad();
@@ -2906,9 +2943,9 @@ function drillWarmLoad(){
   });
   game.combo = -1; game.b2b = false;
   game.hold = null; game.holdUsed = false;
-  // 题目只出 T。队列也全塞 T —— 锁定后到重摆之间那一瞬会先出一块，别露出随机块。
+  // 先出补缺口的那块，再全是 I —— 锁定后到重摆之间那一瞬会先出一块，别露出随机块。
   // 塞 6 个：出生拿走一个还剩 5，fillQueue 就不会往队尾补 bag 里的随机块
-  game.queue = new Array(6).fill('T'); game.mods = new Array(6).fill(null);
+  game.queue = [drill.puz ? drill.puz.X : 'O', 'I', 'I', 'I', 'I', 'I']; game.mods = new Array(6).fill(null);
   clearing = null; game.over = false; softDropping = false;
   game.piece = null; spawnNext();
   drill.clock = true;
@@ -2931,6 +2968,7 @@ function drillStackRes(dead){
            rules: hintStats.rules.slice(), dead };
 }
 function drillOnSpawn(){
+  if (drill && drill.stage === 'warm') syncDrill();      // 热身：补平之后 I 出来，细栏换成「I 进井四消」
   if (!drill || drill.stage !== 'sprint' || !game.piece) return;
   drill.pk = { keys: 0, soft: false };
   drill.spawnB = simBoard();
@@ -2947,7 +2985,16 @@ function drillKey(soft, kb){
 function drillOnLock(p, n, spin){
   if (!drill || !drill.stage) return;
   if (drill.stage === 'warm'){
-    if (spin === 'tspin' && n === 2){
+    // 第一块：补进缺口。补完第 4 行就满了（井够 4 行）才算对，接着等 I
+    if (p.type !== 'I'){
+      if (wellDepth(simBoard()) >= 4){ syncDrill(); return; }
+      drill.tries++;
+      showToast('第 4 行还没补满 —— 同一题再来' + (drill.tries >= 2 ? '。找和 ' + p.type + ' 底面一样的缺口，严丝合缝放进去' : ''), drill.tries >= 2 ? 3200 : 1800);
+      drillPause(drill.tries >= 2 ? 1500 : 900, drillWarmLoad);
+      syncDrill();
+      return;
+    }
+    if (n === 4){
       if (!drill.tries) drill.first++;
       drill.warmMs += drill.ms;
       drill.wi++;
@@ -2957,8 +3004,8 @@ function drillOnLock(p, n, spin){
       else drillPause(900, drillWarmNext);
     } else {
       drill.tries++;
-      showToast('这一下是' + clearName(n, spin, false) + '，要的是 T 旋双消 —— 同一题再来'
-                + (drill.tries >= 2 ? '。T 竖着送到槽口没屋檐那边，落到底再按变换转进去' : ''),
+      showToast((n ? '这一下是' + clearName(n, spin, false) : '没消行') + '，要的是四消 —— 同一题再来'
+                + (drill.tries >= 2 ? '。I 竖起来（变换 1 下），按住右到墙，落底' : ''),
                 drill.tries >= 2 ? 3600 : 1800);
       drillPause(drill.tries >= 2 ? 1600 : 900, drillWarmLoad);
     }
@@ -3162,7 +3209,7 @@ function syncDrill(){
   let a = '', b = '';
   if (drill.stage === 'warm'){
     // 细栏在 SE 上只有一百来像素给文字，只写最要紧的
-    a = '热身 ' + Math.min(drill.wi + 1, DRILL_WARM_N) + '/' + DRILL_WARM_N + '　T 旋双消';
+    a = '热身 ' + Math.min(drill.wi + 1, DRILL_WARM_N) + '/' + DRILL_WARM_N + '　' + (game.piece && game.piece.type === 'I' ? 'I 进井四消' : '先补平缺口');
     b = fmtMs(drill.ms);
   } else if (drill.stage === 'stack'){
     // 堆叠段推荐是藏着的：细栏只说这块该找哪几种台阶
@@ -4639,20 +4686,20 @@ function coachOnLock(p, n, spin){
     else if (sh.rec.kind === 'hold') R.iWaste = (R.iWaste || 0) + 1;           // 井还不够深、本该暂存却放掉了
     else R.iOther = (R.iOther || 0) + 1;                                       // 别的（保命消行 / 暂存里已经有 I …）
   }
-  if (!J.good && J.loss > 0){
-    // 存这一手的盘面（只存有东西的行，字符串一行一个）、你放的、推荐放的
-    const rows = [];
-    for (let y = 0; y < TOTAL_ROWS; y++) rows.push(sh.b0[y].map(v => v ? '#' : '.').join(''));
-    const top = rows.findIndex(r => r.includes('#'));
-    const keep = Math.min(top < 0 ? TOTAL_ROWS - 4 : top, TOTAL_ROWS - 4) - 2;
-    const from = Math.max(0, Math.min(keep, ...J.cells.map(c => c[1]), ...(sh.rec.cells || []).map(c => c[1])));
-    const w = { loss: Math.round(J.loss), r: J.r, msg: J.msg, type: p.type, from, rows: rows.slice(from),
-                mine: J.cells.map(([x, y]) => [x, y - from]), rec: (sh.rec.cells || []).map(([x, y]) => [x, y - from]),
-                at: game.lines };
-    R.cWorst.push(w);
-    R.cWorst.sort((a, b) => b.loss - a.loss);
-    R.cWorst.length = Math.min(R.cWorst.length, COACH_WORST);
-  }
+  if (!J.good && J.loss > 0) pushWorst(R.cWorst, sh.b0, J, sh.rec, p);
+}
+// 存这一手的盘面（只存有东西的行，字符串一行一个）、你放的、推荐放的；只留损失最大的 COACH_WORST 手
+function pushWorst(list, b0, J, rec, p){
+  const rows = [];
+  for (let y = 0; y < TOTAL_ROWS; y++) rows.push(b0[y].map(v => v ? '#' : '.').join(''));
+  const top = rows.findIndex(r => r.includes('#'));
+  const keep = Math.min(top < 0 ? TOTAL_ROWS - 4 : top, TOTAL_ROWS - 4) - 2;
+  const from = Math.max(0, Math.min(keep, ...J.cells.map(c => c[1]), ...(rec.cells || []).map(c => c[1])));
+  list.push({ loss: Math.round(J.loss), r: J.r, msg: J.msg, type: p.type, from, rows: rows.slice(from),
+              mine: J.cells.map(([x, y]) => [x, y - from]), rec: (rec.cells || []).map(([x, y]) => [x, y - from]),
+              at: game.lines });
+  list.sort((a, b) => b.loss - a.loss);
+  list.length = Math.min(list.length, COACH_WORST);
 }
 // 损失最大的几手：小盘面，灰的是当时的盘面，红的是你放的，绿框是推荐
 function drawWorst(cv, w){
@@ -4896,11 +4943,11 @@ function pct(a, b){ return b > 0 ? Math.round(a / b * 100) : 0; }
 //   · 洞：按提示模式口径（槽屋檐下不算），零失误也有十几个 / 100 块，所以门槛放高
 //   · 「消得太碎」删了：零失误的教练也有八成多的行是 1~3 行消的，攒着不消反而 -18%
 const COACH_TSD100 = 3;      // （T 旋练习的参照，留着给测试 / 以后用）
-// 照提示模式的教练（留井四消定式）在真实引擎上打：每秒 1 块、开灰线、4 局 —— 40.6~54.3 万，
-// 高处放块 9~23%（平均 15）、洞每 100 块 13~19、四消占消行 31~39%（平均 36）、后台判放对 96~97%。
+// 照提示模式的教练（留井四消定式）在真实引擎上打：每秒 1 块、开灰线、4 局 —— 39.6~50.5 万，
+// 高处放块 14~30%（平均 22）、洞每 100 块 10.5~14.1（平均 12）、四消占消行 40~47%（平均 43）、后台判放对 97~98%。
 // 对照：随机放偏 10% 的 1~2 分钟就顶死，高处放块 34~44%。门槛放在两者之间
-const WC_REF = { high: 15, tet: 36, holes: 16 };
-const WC_HIGH = 30, WC_TET_MIN = 20;
+const WC_REF = { high: 22, tet: 43, holes: 12 };
+const WC_HIGH = 35, WC_TET_MIN = 20;
 function reviewTips(r, pieces, lines, ctx){
   const tips = [], c = ctx || {};
   const per100 = pieces ? r.holes / pieces * 100 : 0;
@@ -4927,6 +4974,39 @@ function reviewTips(r, pieces, lines, ctx){
     tips.push(['打法对了', `四消拿了 ${pct(r.bigPts, r.bigPts + r.smallPts)}% 的分。下一步是扛得更久：盘面一高就先保命`]);
   return tips.slice(0, 3);
 }
+// 提示模式的局后小结：放对几成、六条规则各犯几次（最该盯的那条）、损失最大的几手 —— 和普通局复盘同一个位置
+function fillHintReview(box){
+  const H = hintStats, r = game.run || newRun();
+  const show = H.total >= 10;
+  box.hidden = !show;
+  if (!show) return;
+  const rows = [];
+  const add = (k, v, wide) => rows.push(`<span${wide ? ' class="w"' : ''}><i>${k}</i><b>${v}</b></span>`);
+  add('放对', `${H.good}/${H.total}（${pct(H.good, H.total)}%）· 一模一样 ${H.same}`, true);
+  add('六条规则各犯', HINT_RULES.map((x, i) => x.n + ' ' + (H.rules[i] | 0)).join('　'), true);
+  add('四消', (r.clr ? r.clr[4] : 0) + ' 次');
+  add('造洞', (H.holes | 0) + ' 个');
+  add('消行', game.lines + ' 行');
+  add('放了', game.pieces + ' 块');
+  $('rvStats').innerHTML = rows.join('');
+  const worst = H.rules.indexOf(Math.max(...H.rules));
+  const tips = [];
+  if (H.rules[worst] > 0)
+    tips.push(['下一局先盯 ' + HINT_RULES[worst].n + ' ' + HINT_RULES[worst].t, `这局犯了 ${H.rules[worst]} 次，最多。${HINT_RULES[worst].d}`]);
+  const g = pct(H.good, H.total);
+  if (g >= 85) tips.push(['放对 ' + g + '%，可以加难度', '打开「先自己找」：推荐先藏着，放完再对照，练的是自己看出来']);
+  else if (g < 60) tips.push(['先慢下来', '放对不到六成。按暂停对照底下的「为什么」和「别处」，想清楚再放 —— 先放对，再放快']);
+  if (!tips.length) tips.push(['打法对了', '六条规则一条没犯。下一步：打开「先自己找」']);
+  $('rvTips').innerHTML = tips.map(([t, d]) => `<li><b>${escHtml(t)}</b><span>${escHtml(d)}</span></li>`).join('');
+  const wb = $('rvWorst');
+  if (wb){
+    const ws = (H.worst || []).filter(w => w && Array.isArray(w.rows));
+    wb.hidden = !ws.length;
+    $('rvWorstList').innerHTML = ws.map((w, i) => `<div class="rv-w"><canvas data-w="${i}"></canvas><span><b>${escHtml(HINT_RULES[w.r] ? HINT_RULES[w.r].n + ' ' + HINT_RULES[w.r].t : '')}</b>${escHtml(w.msg)}<em>第 ${w.at} 行时 · ${w.type} 块</em></span></div>`).join('');
+    ws.forEach((w, i) => drawWorst($('rvWorstList').querySelector(`[data-w="${i}"]`), w));
+  }
+  syncCardMore();
+}
 // 结算卡能往下滑的时候，底边给个「往下滑还有」；滑到底收起
 function syncCardMore(){
   const card = document.querySelector('#overlay .card');
@@ -4940,6 +5020,7 @@ function syncCardMore(){
 function fillReview(){
   const box = $('review');
   if (!box) return;
+  if (!CRAZY && hintMode && !tsOn() && !drill) return fillHintReview(box);
   const r = game.run;
   // 中途开局只看开局之后你自己打的那一段：行、块、用时、分数都减掉开局送的
   const m0 = mid || { L: 0, s: 0, p: 0, e: 0 };
@@ -10543,11 +10624,11 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
   CLEAR_DRAW_MS, DROP_GUARD_MS,
-  startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, simReach, finesseMin,
+  startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, drillGenTetris, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, wcRec, wcBoard, wcJudge, wellDepth, garbRows, finessePath, pathText, HINT_RULES, WC_FITS, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, wcRec, wcBoard, wcJudge, WC_WELL, wellDepth, garbRows, finessePath, pathText, HINT_RULES, WC_FITS, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 

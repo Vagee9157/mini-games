@@ -164,7 +164,7 @@ JS = r"""() => {
     if (rc && rc.kind === 'hold'){ T.holdPiece(); settle(); continue; }
     if (rc && rc.cells){
       // 进井只许在「别处都会留更多洞」的时候（②不留洞 排在 ③ 前面）
-      if (T.game.piece.type !== 'I' && !rc.danger && rc.cells.some(c => c[0] === 9)){
+      if (T.game.piece.type !== 'I' && !rc.danger && rc.cells.some(c => c[0] === 9) && T.simFeatures(T.simBoard()).maxH < T.WC_WELL.hiH){   // 6 行以上借井减压是允许的
         const b0 = T.simBoard(), h0 = T.simFeatures(b0).holes, hm = c => T.simFeatures(T.simPlace(b0, c).b).holes - h0;
         const mine = hm(rc.cells), wh = b => { for (let y = 0; y < b.length; y++) if (b[y][9]) return b.length - y; return 0; };
         if (wh(T.simPlace(b0, rc.cells).b) <= wh(b0)){ /* 进井顺手消行、消完井还空着：不算堵 */ }
@@ -176,7 +176,7 @@ JS = r"""() => {
     }
     T.hardDrop(); settle(); n150++;
   }
-  ok(n150 >= 100 && wellBad === 0 && tsTalk === 0, `照推荐 ${n150} 块：非 I 块只在别处都会留更多洞时才把井垫高（违反 ${wellBad}），理由里不提 T 旋（${tsTalk}）`);
+  ok(n150 >= 100 && wellBad === 0 && tsTalk === 0, `照推荐 ${n150} 块：盘面低时，非 I 块只在别处都会留更多洞时才把井垫高（违反 ${wellBad}），理由里不提 T 旋（${tsTalk}）`);
 
   // ① 保命：九列堆到 14 行，推荐能消就消
   T.startHint(); T.game.noGarbage = true;
@@ -223,6 +223,25 @@ JS = r"""() => {
   ok(/留井四消/.test(document.getElementById('hintSheetTitle').textContent), `标题「${document.getElementById('hintSheetTitle').textContent}」`);
   document.getElementById('hintDone').click();
   ok(hs.hidden && !T.game.frozen, '关掉接着放');
+
+  // ── 局后小结：放对几成、六条规则各犯几次、最该盯哪条、损失最大的几手 ──
+  T.startHint(); T.game.noGarbage = true;
+  for (let i = 0; i < 14; i++){
+    const rc = T.tsRec;
+    if (rc && rc.kind === 'hold'){ T.holdPiece(); settle(); continue; }
+    const p = T.game.piece;
+    if (i % 3 === 0){ const d = T.simDrops(T.simBoard(), p.type); const w = d[d.length - 1]; p.rot = w.rot; p.x = w.x; }   // 每三块故意乱放一块
+    else if (rc && rc.cells){ p.rot = rc.rot; p.x = rc.x; }
+    p.y = 0; T.hardDrop(); settle();
+  }
+  T.endGame('堆到顶了');
+  const rs = document.getElementById('rvStats').textContent, rt = document.getElementById('rvTips').textContent;
+  ok(!document.getElementById('review').hidden && /放对\d+\/\d+（\d+%）/.test(rs) && /六条规则各犯① \d+　② \d+/.test(rs),
+     `提示局结束：小结有放对几成和六条规则各犯几次（${rs.slice(0, 60)}…）`);
+  ok(/下一局先盯 [①-⑥]/.test(rt) || /先慢下来|可以加难度|打法对了/.test(rt), `给出下一局先盯哪条（${rt.slice(0, 30)}…）`);
+  ok(T.hintStats.rules.some(v => v > 0) ? !document.getElementById('rvWorst').hidden && !!document.querySelector('#rvWorstList canvas') : true, '放偏过：列出损失最大的几手（小盘面）');
+  ok(!/T 块|T 旋/.test(rs + rt), '小结里不提 T 旋');
+  T.startHint();
 
   // ── 暂停：遮罩半透明，盘面和提示都看得见 ──
   document.getElementById('pauseBtn').click();

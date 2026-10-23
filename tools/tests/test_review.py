@@ -49,9 +49,9 @@ JS = r"""async () => {
   ok(n.length === 1 && n[0] === '打法对了', `四消占一半、洞少不高：打法对了（${n.join(' / ')}）`);
   n = names({ clr: [0, 120, 40, 20, 4] });
   ok(n.includes('四消打得少') && !n.some(t => /T 旋/.test(t)), `246 行里只有 4 次四消：提四消打得少，不再提 T 旋（${n.join(' / ')}）`);
-  n = names({ highLocks: 200 });
-  ok(n[0] === '在高处待太久', `三成多的块在高处放：排第一（${n.join(' / ')}）`);
-  ok(!names({ highLocks: 120 }).includes('在高处待太久'), '两成在高处：不提（照教练打也有一成多）');
+  n = names({ highLocks: 240 });
+  ok(n[0] === '在高处待太久', `四成的块在高处放：排第一（${n.join(' / ')}）`);
+  ok(!names({ highLocks: 180 }).includes('在高处待太久'), '三成在高处：不提（照教练打最高也到过三成）');
   n = names({ holes: 160 });
   ok(n.includes('洞造多了'), `每 100 块 27 个洞：提洞（${n.join(' / ')}）`);
   ok(!names({ holes: 100 }).includes('洞造多了'), '每 100 块 17 个洞：不提（照教练打也有十几个）');

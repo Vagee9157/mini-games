@@ -1,7 +1,7 @@
-"""每日练习：随机 T 槽题可解、三段流程、计数口径、按天存档、隔离
+"""每日练习：四消热身题可解、四段流程、计数口径、按天存档、隔离
 
-热身题用 simReach 给出的按键串在真盘面上回放（doAct），不是直接把块摆到终点 ——
-摆过去的话「只用顺时针能不能转进去」根本没被验证。
+热身题（四消热身）：底下 4 行左边九列快满、井空着，第 4 行留一个正好是这题那块底面的缺口 ——
+先补平、再把 I 竖进井打四消。出题用 simDrops 验过「从顶上直接落得进去」。
 """
 import os, http.server, socketserver, threading, functools, sys
 ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,22 +21,24 @@ JS = r"""async () => {
   const tsd = () => T.simReach(T.simBoard(), 'T').find(l => l.spin === 'tspin' && l.lines === 2);
   const play = acts => { for (const a of T.parseActs(acts + 'H')) T.doAct(a); };
 
-  // ── 出题：200 道，道道可解、必须转、不重样 ──
-  const seen = new Set(); let bad = 0, straight = 0, sides = new Set(), cols = new Set();
+  // ── 出题：200 道，道道可解（补平后井够 4 行、I 进井四消）、补之前不够、不重样 ──
+  const R = T.TOTAL_ROWS, toB = pz => { const b = Array.from({ length: R }, () => new Array(10).fill(false));
+    pz.rows.forEach((r, k) => { for (let x = 0; x < 10; x++) b[R - pz.rows.length + k][x] = r[x] === '#'; }); return b; };
+  const seen = new Set(); let bad = 0, pre = 0; const types = new Set();
   for (let i = 0; i < 200; i++){
-    const pz = T.drillGenPuzzle();
+    const pz = T.drillGenTetris();
     if (!pz){ bad++; continue; }
-    seen.add(pz.rows.join('/')); sides.add(pz.s); cols.add(pz.c);
-    const b = Array.from({ length: T.TOTAL_ROWS }, () => new Array(10).fill(false));
-    pz.rows.forEach((r, k) => { for (let x = 0; x < 10; x++) b[T.TOTAL_ROWS - pz.rows.length + k][x] = r[x] === '#'; });
-    if (!T.simReach(b, 'T').some(l => l.spin === 'tspin' && l.lines === 2)) bad++;
-    // 不转、直接从顶上落，任何位置都消不了两行 —— 题目必须靠 T 旋
-    if (T.simDrops(b, 'T').some(d => T.simPlace(b, d.cells).lines >= 2)) straight++;
+    seen.add(pz.rows.join('/')); types.add(pz.X);
+    const b = toB(pz);
+    if (T.wellDepth(b) >= 4) pre++;
+    const good = T.simDrops(b, pz.X).find(d => T.wellDepth(T.simPlace(b, d.cells).b) >= 4);
+    if (!good){ bad++; continue; }
+    const b2 = T.simPlace(b, good.cells).b;
+    if (!T.simDrops(b2, 'I').some(d => d.cells.every(c => c[0] === 9) && T.simPlace(b2, d.cells).lines === 4)) bad++;
   }
-  ok(bad === 0, `200 道题都能只用顺时针打出 T 旋双消（不行的 ${bad}）`);
-  ok(straight === 0, `没有一道能不转直接落出两行（${straight}）`);
-  ok(seen.size >= 180, `200 道里不重样的 ${seen.size} 道`);
-  ok(sides.size === 2 && cols.size >= 7, `屋檐左右都有、槽口分布在 ${cols.size} 列`);
+  ok(bad === 0, `200 道题都能「补平 → I 进井四消」（不行的 ${bad}）`);
+  ok(pre === 0, `补之前井都不够 4 行，得先补（${pre}）`);
+  ok(seen.size >= 150 && types.size === 6, `200 道里不重样的 ${seen.size} 道，六种块都出（${[...types].join('')}）`);
 
   // ── 先开一局普通局 —— 练完要能接着玩、纪录不能动 ──
   localStorage.removeItem(T.DRILL_KEY);
@@ -54,24 +56,31 @@ JS = r"""async () => {
   ok(/热身/.test($('drGo').textContent), `按钮写着下一段（「${$('drGo').textContent}」）`);
   ok(!!T.readSave() && T.readSave().score === nScore, '普通局打到一半进来，存档留着');
 
-  // ── ① 热身 ──
+  // ── ① 四消热身 ──
   $('drGo').click();
   ok(T.drill.stage === 'warm' && $('drSheet').hidden && !T.game.frozen, '开始热身');
-  ok(T.game.piece && T.game.piece.type === 'T' && T.game.queue.every(t => t === 'T'), '题目只出 T');
+  ok(T.game.piece && T.game.piece.type === T.drill.puz.X && T.game.queue[0] === 'I', `先出补缺口的 ${T.drill.puz.X}，下一块是 I`);
+  ok(/先补平/.test($('drLabel').textContent), `细栏写「${$('drLabel').textContent}」`);
   T.holdPiece();
   ok(T.game.hold === null, '热身不能暂存');
-  // 第一题故意失手：不转直接落
+  // 第一题故意失手：放到补不平的位置
   const rows0 = JSON.stringify(T.game.board);
-  T.hardDrop();
-  ok(T.drill.tries === 1 && T.game.frozen, '没打出来：记一次，先停一下');
+  { const b = T.simBoard(), p = T.game.piece;
+    const wrong = T.simDrops(b, p.type).find(d => T.wellDepth(T.simPlace(b, d.cells).b) < 4);
+    p.rot = wrong.rot; p.x = wrong.x; p.y = 0; T.hardDrop(); }
+  ok(T.drill.tries === 1 && T.game.frozen, '没补平：记一次，先停一下');
   await sleep(1000);
-  ok(JSON.stringify(T.game.board) === rows0 && T.game.piece.type === 'T', '同一题重摆');
+  ok(JSON.stringify(T.game.board) === rows0 && T.game.piece.type === T.drill.puz.X, '同一题重摆');
   for (let i = 0; i < T.DRILL_WARM_N; i++){
-    const m = tsd();
-    if (!m){ ok(false, `第 ${i + 1} 题找不到解`); break; }
     await sleep(60);                  // 让计时走一点
-    play(m.acts);
-    ok(i === T.DRILL_WARM_N - 1 || (T.drill.wi === i + 1), `第 ${i + 1} 题照解法回放打出 T 旋双消（${m.acts}H）`);
+    let b = T.simBoard(), p = T.game.piece;
+    const fill = T.simDrops(b, p.type).find(d => T.wellDepth(T.simPlace(b, d.cells).b) >= 4);
+    p.rot = fill.rot; p.x = fill.x; p.y = 0; T.hardDrop(); settle();
+    ok(T.game.piece && T.game.piece.type === 'I' && /I 进井/.test($('drLabel').textContent), `第 ${i + 1} 题补平了，轮到 I`);
+    b = T.simBoard(); p = T.game.piece;
+    const tet = T.simDrops(b, 'I').find(d => d.cells.every(c => c[0] === 9));
+    p.rot = tet.rot; p.x = tet.x; p.y = 0; T.hardDrop();
+    ok(i === T.DRILL_WARM_N - 1 || (T.drill.wi === i + 1), `第 ${i + 1} 题 I 进井打出四消`);
     await sleep(1100);
   }
   const w = T.drill && T.drill.done.warm;
