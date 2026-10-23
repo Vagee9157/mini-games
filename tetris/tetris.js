@@ -2188,9 +2188,21 @@ function toggleHintHide(){
   syncHint();
 }
 
+// 推荐暂存时：HOLD 框亮绿边、一闪一闪，盘面上挂一条「点 HOLD 暂存这块 →」
+function syncHoldCue(){
+  const rec = tsRec;
+  const on = hintMode && !hintHidden() && !!rec && rec.kind === 'hold' && !!game.piece && !game.over;
+  const hs = $('holdSlot'); if (hs) hs.classList.toggle('hint-hold', on);
+  const cue = $('holdCue');
+  if (cue){
+    cue.hidden = !on;
+    if (on) cue.textContent = /^换出 I/.test(rec.why && rec.why[0] || '') ? '点 HOLD 把 I 换出来 →' : '点 HOLD 暂存这块 →';
+  }
+}
 function syncHint(){
   document.body.classList.toggle('hinting', hintMode);
   document.body.classList.toggle('tspinning', tsOn());
+  syncHoldCue();
   if (tsOn()) return tsSyncBar();
   if (drill) syncDrill();      // 每日练习的堆叠段：推荐理由写在它自己的细栏里
   if (!hintMode) return;

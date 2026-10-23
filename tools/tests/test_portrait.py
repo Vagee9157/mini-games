@@ -59,9 +59,10 @@ SIZES = [('SE 1代',320,568,'safari'), ('SE 2/3',375,667,'safari'), ('mini / X',
          ('17/16 Pro 主屏',402,874,'app'), ('Plus/Pro Max',430,932,'app'), ('17 Pro Max',440,956,'app')]
 bad = 0
 with sync_playwright() as p:
-    b = p.webkit.launch()
     base = dict(p.devices['iPhone 13'])
     for name, w, h, kind in SIZES:
+        # 每个机型重开一次浏览器：同一个 WebKit 连开连关 60 多个页面后，再开新页面会卡在加载（跑全套时的「页面加载超时」就是这个）
+        b = p.webkit.launch()
         d = dict(base); d['viewport'] = {'width': w, 'height': h}
         row = []
         for mode in ('start', 'normal', 'practice', 'hint', 'drill', 'vs', 'nes', 'tspin'):
@@ -86,6 +87,6 @@ with sync_playwright() as p:
             else:
                 print(f"   PASS {tag}（格子 {m['cell']}px）")
             pg.close()
-    b.close()
+        b.close()
 srv.shutdown(); srv.server_close()
 sys.exit(1 if bad else 0)

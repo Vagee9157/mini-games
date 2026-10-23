@@ -144,10 +144,15 @@ JS = r"""() => {
   // ⑥ I 来了井不够深：先暂存；井够 4 行：竖进井四消；暂存里是 I 且井够了：换出来
   setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); T.game.hold = null; give('I');
   ok(T.tsRec.kind === 'hold' && /暂存 I/.test(T.hintMove.why) && /差|不够/.test(more()[0]), `井只有 2 行：建议暂存 I（「${T.hintMove.why}」）`);
+  const cue = document.getElementById('holdCue'), hsl = document.getElementById('holdSlot');
+  ok(!cue.hidden && hsl.classList.contains('hint-hold') && getComputedStyle(hsl).opacity === '1', `推荐暂存：HOLD 框亮起来、盘面挂「${cue.textContent}」`);
+  T.holdPiece(); settle();
+  ok(cue.hidden && !hsl.classList.contains('hint-hold'), '暂存之后：提示收起');
   setH([4, 4, 4, 4, 4, 4, 4, 4, 4, 0]); give('I');
   ok(T.tsRec.kind === 'place' && T.hintMove.cells.every(c => c[0] === 9) && /四消/.test(T.hintMove.why), `井够 4 行：I 竖进井四消（「${T.hintMove.why}」）`);
   T.game.hold = 'I'; give('O');
   ok(T.tsRec.kind === 'hold' && /换出 I/.test(T.hintMove.why), `暂存里是 I、井够了：建议换出来（「${T.hintMove.why}」）`);
+  ok(!cue.hidden && /换出来/.test(cue.textContent), `换出 I 时盘面写「${cue.textContent}」`);
   T.game.hold = null;
 
   // ③ 井只给 I：照推荐打 150 块（灰线照涨），不在危险区时非 I 块从不推荐进第 10 列；理由里没有 T 旋
