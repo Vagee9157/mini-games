@@ -153,6 +153,13 @@ JS = r"""() => {
   T.game.hold = 'I'; give('O');
   ok(T.tsRec.kind === 'hold' && /换出 I/.test(T.hintMove.why), `暂存里是 I、井够了：建议换出来（「${T.hintMove.why}」）`);
   ok(!cue.hidden && /换出来/.test(cue.textContent), `换出 I 时盘面写「${cue.textContent}」`);
+  // 暂存里压着 I、井还不够：说明里写「I 在暂存等井」（不是忘了用）
+  setH([2, 2, 2, 2, 2, 2, 2, 2, 2, 0]); T.game.hold = 'I'; give('O');
+  ok(T.tsRec.kind === 'place' && /I 在暂存等井/.test(more()[0]), `暂存里有 I：「${more()[0]}」`);
+  // 堆高到要保命：暂存里的 I 换出来消行，不再干等井凑满 4 行
+  setH([14, 14, 14, 13, 14, 14, 14, 14, 13, 0]); T.game.board[R2 - 1][0] = null;   // 底行留个洞：井凑不满 4 行
+  T.game.hold = 'I'; give('O');
+  ok(T.tsRec.kind === 'hold' && /换出 I —— 堆高了/.test(T.hintMove.why), `堆到要保命、井凑不满、暂存里有 I：建议换出来用（「${T.hintMove.why}」）`);
   T.game.hold = null;
 
   // ③ 井只给 I：照推荐打 150 块（灰线照涨），不在危险区时非 I 块从不推荐进第 10 列；理由里没有 T 旋

@@ -1848,9 +1848,24 @@ const WC_GARB_DIG = 3;         // 灰线积到几行开始挖
 // 提示模式用的盘面：灰线格记成 2（不是 true），好数还剩几行灰线；simPlace / simScore 只看真假，照常用
 function wcBoard(){ return game.board.map(r => r.map(c => !c ? false : c === GARBAGE ? 2 : true)); }
 function garbRows(b){ let n = 0; for (const r of b) if (r.some(v => v === 2)) n++; return n; }
+// 灰线缺口上面还压着几格：缺口一涨上来就被盖住成了洞，得先把上面几行消掉才挖得出来。
+// 两块的打分看不了那么远，就数「压着几格」—— 每一步都让它变薄，一步步往下挖
+const WC_COVER = { pen: 0 };     // 模拟比过：开了反而死得早（见 WC_MODE 那段）
+function garbCover(b){
+  let n = 0;
+  for (let y = TOTAL_ROWS - 1; y >= 0; y--){
+    const row = b[y];
+    if (!row.some(v => v === 2)) continue;
+    for (let x = 0; x < COLS; x++){
+      if (row[x]) continue;                      // 灰线这一行的缺口
+      for (let k = y - 1; k >= 0; k--) if (b[k][x]) n++;
+    }
+  }
+  return n;
+}
 function wcBoardScore(b){
   const g = garbRows(b);
-  return simScore(b) - (g >= WC_GARB_DIG ? g * 40 : g * 4);
+  return simScore(b) - (g >= WC_GARB_DIG ? g * 40 + garbCover(b) * WC_COVER.pen : g * 4);
 }
 // 井还差几行能四消：井（最右列）上面连着几行是「左边九列都满、只空井」
 function wellDepth(b){
@@ -1971,20 +1986,40 @@ function wcShape(m, lines, danger){
   return m.type + '：' + (fit ? (fit.orient ? fit.orient + '放 · ' : '') + fit.name : '放这里');
 }
 // 推荐：当前块（type）、下一块（next，可以不给）、暂存。返回 { kind:'place'|'hold', cells, rot, x, why:[四行], ... }
+// 有压力时 I 不再收着等四消、暂存里的 I 拿出来用。试过三种「压力」口径（每秒 0.6 块、开灰线、同 4 个种子，平均）：
+//   只在保命时（下面这组）              27.8 万 · 撑 14.5 分钟
+//   堆到 9 行或灰线 ≥3 行就算压力、挖灰线时消行加分、井可借      21.9 万 · 12.4 分钟
+//   再加「灰线缺口上压着几格」扣分                                17.6 万 · 10.8 分钟
+// 灰线和方块一样，消一行盘面就降一行；缺口被盖住以后硬挖只能一行行碎着消，不如在上面接着打四消降得快。
+// 所以只在保命时把 I 拿出来用，灰线多了也照常留井四消（WC_COVER.pen 也是 0）
+const WC_MODE = { pressH: 99, digUrgent: false };   // 模拟调参用的开关（tools 里的模拟脚本会改它）
 function wcRec(b0, type, next, hold, holdUsed, lite){
   const f0 = simFeatures(b0), danger = f0.maxH >= HINT_DANGER;
+  const dig = garbRows(b0) >= WC_GARB_DIG && WC_MODE.digUrgent;
+  const press = danger || dig || f0.maxH >= WC_MODE.pressH;
+  // 挖灰线和保命一样：消行是好事、井可以借（不然 1 层的打分算不出「先消上面几行把缺口挖出来」）
+  const urgent = danger || dig;
   const depth = wellDepth(b0), canHold = !holdUsed;
-  const all = simDrops(b0, type).map(m => Object.assign(m, wcEval(b0, m.cells, next, danger, type)));
+  const all = simDrops(b0, type).map(m => Object.assign(m, wcEval(b0, m.cells, next, urgent, type)));
   if (!all.length) return null;
   const tet = type === 'I' ? all.find(m => m.cells.every(c => c[0] === HINT_WELL) && m.lines === 4) : null;
   // ⑥ 暂存：I 来了井还不够深 → 先收着；暂存里是 I、井够深了 → 换出来四消
-  if (type === 'I' && !tet && canHold && hold !== 'I' && !danger && garbRows(b0) < WC_GARB_DIG)   // 灰线积多了 I 先拿去挖，不收
-    return { kind: 'hold', type, holdType: 'I', next, danger,
+  // 有压力（保命）时 I 直接拿来用；灰线缺口露着、I 现在就能消掉灰线行，也直接用，不收
+  // （只认消灰线：井里两三行普通的就拿 I 去消，等不到四消 —— 照推荐打 226 块就死了，实测）
+  const g0 = garbRows(b0);
+  if (type === 'I' && !tet && canHold && hold !== 'I' && !press && !all.some(m => m.lines >= 1 && garbRows(m.b) < g0))
+    return { kind: 'hold', type, holdType: 'I', next, danger: urgent,
              why: ['暂存 I —— 留着打四消', '为什么：井只有 ' + depth + ' 行，不够 4 行，现在放 I 是浪费',
                    hold ? '换出来的 ' + hold + ' 照常放，井够 4 行再换回 I' : '井够 4 行再换出来'] };
   if (type !== 'I' && hold === 'I' && canHold && depth >= 4)
-    return { kind: 'hold', type, holdType: type, next, danger,
+    return { kind: 'hold', type, holdType: type, next, danger: urgent,
              why: ['换出 I —— 井够 4 行了', '为什么：I 竖进第 10 列就是四消', '当前的 ' + type + ' 收进暂存，下一手再放'] };
+  // 有压力、暂存里压着 I：I 能消行就换出来用，别等井凑满 4 行
+  if (type !== 'I' && hold === 'I' && canHold && press && simDrops(b0, 'I').some(m => simPlace(b0, m.cells).lines >= 1))
+    return { kind: 'hold', type, holdType: type, next, danger: urgent,
+             why: ['换出 I —— ' + (dig ? '灰线多了，I 拿来挖' : '堆高了，先用 I 消行'),
+                   '为什么：' + (dig ? '灰线积了 ' + garbRows(b0) + ' 行，井凑不齐 4 行，I 一直压着灰线只会越积越多' : '盘面到 ' + f0.maxH + ' 行了，I 先拿来消几行降下来'),
+                   '当前的 ' + type + ' 收进暂存，下一手再放'] };
   // 选点：分最高的那一组里（差 WC_TOL 以内算一样好），先低后左
   let best = tet;
   let ties = [];
@@ -1998,10 +2033,10 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   }
   const bf = wcFeat(b0, best);
   // ⑥ 放哪都留洞的 S / Z / O，暂存空着就先收起来
-  if (bf.holes > 0 && canHold && !hold && (type === 'S' || type === 'Z' || type === 'O') && !danger)
-    return { kind: 'hold', type, holdType: type, next, danger,
+  if (bf.holes > 0 && canHold && !hold && (type === 'S' || type === 'Z' || type === 'O') && !urgent)
+    return { kind: 'hold', type, holdType: type, next, danger: urgent,
              why: ['暂存 ' + type + ' —— 放哪都会留洞', '为什么：最好的位置也要留 ' + bf.holes + ' 个洞，等有合适的台阶再放', '下一块 ' + (next || '') + ' 先放'] };
-  if (lite) return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger, why: [] };
+  if (lite) return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger: urgent, why: [] };
   // 四行说明
   const l1 = (garbRows(b0) >= WC_GARB_DIG && bf.garb < garbRows(b0) ? '挖灰线 · ' : '') + wcShape(best, best.lines, danger) + ' · ' + colsOf(best.cells);
   const parts = [];
@@ -2012,6 +2047,7 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   parts.push(bf.sz ? 'S/Z 有台阶' : (bf.f.accept.S ? 'Z' : bf.f.accept.Z ? 'S' : 'S/Z') + ' 没台阶');
   const dAfter = wellDepth(simPlace(b0, best.cells).b);
   if (best.lines !== 4) parts.push(dAfter >= 4 ? '井够 4 行' : '井差 ' + (4 - dAfter) + ' 行');
+  if (hold === 'I' && best.lines !== 4) parts.push('I 在暂存等井');
   const l2 = '为什么：' + parts.join(' · ');
   // 别处：一样好的说为什么挑这里；差的挑两处说差在哪
   let l3;
@@ -2027,12 +2063,12 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
       const c = colsOf(m.cells);
       if (seenCols.has(c)) continue;
       seenCols.add(c);
-      bits.push(c + '：' + wcWorse(b0, Object.assign({ next }, best), m, danger).t);
+      bits.push(c + '：' + wcWorse(b0, Object.assign({ next }, best), m, urgent).t);
       if (bits.length >= 2) break;
     }
     l3 = bits.length ? '别处：' + bits.join('；') : '别处：只有这一处能放';
   }
-  return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger,
+  return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger: urgent,
            why: [l1, l2, l3] };      // 按法那一行去掉了（用户：不需要），最少按法还在复盘「多余按键」里用
 }
 // 判一手（提示模式、后台教练、每日练习堆叠段都用）：和 judgeCore 同一个返回形状
@@ -2091,8 +2127,8 @@ const HINT_RULES = [
   { n: '②', t: '不留洞', d: '先找和这块底面一样的台阶，严丝合缝放下去。宁可放高一格，也别盖住空格 —— 洞上面那几行全都消不掉' },
   { n: '③', t: '井只给 I', d: '最右一列（第 10 列）是井，只等 I 竖着进去打四消。盘面低（6 行以下）时别的块一格都别碰；堆到 6 行以上，借井消几行减压可以' },
   { n: '④', t: '九列堆平、留台阶', d: '左边九列相邻高低差尽量不超过 2；表面随时给 S、Z 留一个高低差一格的台阶；除了井，别挖只有 I 能填的深坑。安全时别消零碎行，攒着四消' },
-  { n: '⑤', t: '灰线积多了先挖', d: '灰线积到 3 行以上就先挖：把盖在灰线缺口上的块消掉，让缺口露出来再填掉。灰线别越积越多，不然光打四消也会被顶死' },
-  { n: '⑥', t: '暂存', d: 'I 来了、井还不够 4 行：先把 I 放进暂存，井够了再换出来四消。暂存空着时，放哪都会留洞的 S / Z / O 也先收起来' },
+  { n: '⑤', t: '灰线能挖就挖', d: '灰线缺口露着（上面没盖住）就顺手填掉。被盖住了也不用硬挖：灰线和方块一样，消一行盘面就降一行，在上面接着打四消降得更快' },
+  { n: '⑥', t: '暂存', d: 'I 来了井还不够 4 行：先把 I 收进暂存，井够了再换出来四消。堆高到要保命时：暂存里的 I 拿出来消行，别再等。暂存空着时，放哪都会留洞的 S / Z / O 也先收起来' },
 ];
 // 每种块的定式（规则卡里那张表）
 const WC_FITS = [
@@ -10632,7 +10668,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, wcRec, wcBoard, wcJudge, WC_WELL, wellDepth, garbRows, finessePath, pathText, HINT_RULES, WC_FITS, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, wcRec, wcBoard, wcJudge, WC_WELL, WC_COVER, WC_MODE, wellDepth, garbRows, finessePath, pathText, HINT_RULES, WC_FITS, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 
