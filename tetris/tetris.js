@@ -2212,7 +2212,13 @@ function syncHint(){
   const mo = $('hintMore');
   if (mo){
     const ls = hintMove && hintMove.lines && !hintHidden() ? hintMove.lines.slice(1) : [];
-    mo.innerHTML = ls.map(l => '<span>' + escHtml(l) + '</span>').join('');
+    // 每行拆成「标签：内容」，标签加粗上色（为什么 绿 / 别处 黄 / 按法 青），「为什么」整行加粗
+    mo.innerHTML = ls.map(l => {
+      const i = l.indexOf('：');
+      const lb = i > 0 ? l.slice(0, i) : '', tx = i > 0 ? l.slice(i + 1) : l;
+      const k = /^为什么/.test(lb) ? 'why' : /^按法/.test(lb) ? 'how' : 'alt';
+      return '<span class="hm-' + k + '">' + (lb ? '<b>' + escHtml(lb) + '：</b>' : '') + escHtml(tx) + '</span>';
+    }).join('');
     mo.hidden = !ls.length;
   }
   const sc = $('hintScore');

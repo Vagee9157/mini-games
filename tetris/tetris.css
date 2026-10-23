@@ -2022,3 +2022,12 @@ body.gameover .hintbar{ visibility: hidden; }
 }
 @media (prefers-reduced-motion: reduce){ .slot.hold.hint-hold{ animation: none; } }
 .hold-cue{ display: block; line-height: 1.5; height: auto; white-space: nowrap; letter-spacing: 0; font-family: inherit; }
+
+/* 底部说明：标签粗体上色，「为什么」整行加粗最显眼；字号不放大（再大盘面又要缩一档） */
+.hint-more span{ color: var(--ink); }
+.hint-more b{ font-weight: 700; margin-right: 4px; }
+.hint-more .hm-why{ font-weight: 600; }
+.hint-more .hm-why b{ color: #5ee08a; }
+.hint-more .hm-alt b{ color: #ffd166; }
+.hint-more .hm-how b{ color: #7fe3ff; }
+.hint-more span:last-child{ color: var(--ink); }
