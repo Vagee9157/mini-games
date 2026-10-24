@@ -1910,16 +1910,17 @@ const wellPen = (type, cells, danger, b0, b1) => !danger && type !== 'I' && inWe
 function wcEval(b0, cells, next, danger, type){
   const r1 = simPlace(b0, cells);
   const p1 = type ? wellPen(type, cells, danger, b0, r1.b) : 0;
-  let v = -Infinity;
+  let v = -Infinity, plan = null;
   if (next){
     for (const n of simDrops(r1.b, next)){
       const r2 = simPlace(r1.b, n.cells);
       const w = wcBoardScore(r2.b) + lineValue(r1.lines, danger) + lineValue(r2.lines, danger) - wellPen(next, n.cells, danger, r1.b, r2.b);
-      if (w > v) v = w;
+      if (w > v){ v = w; plan = n; }
     }
   }
   if (v === -Infinity) v = wcBoardScore(r1.b) + lineValue(r1.lines, danger);
-  return { v: v - p1, lines: r1.lines, b: r1.b };
+  // plan：这一手的分是按下一块放在哪算出来的，那一处就是「下一块的计划」，盘面上画成虚框
+  return { v: v - p1, lines: r1.lines, b: r1.b, plan };
 }
 const colsOf = cells => { const xs = cells.map(c => c[0]); const a = Math.min(...xs) + 1, b = Math.max(...xs) + 1; return a === b ? '第 ' + a + ' 列' : '第 ' + a + '~' + b + ' 列'; };
 const holesMade = (b0, b1) => Math.max(0, simFeatures(b1).holes - simFeatures(b0).holes);
@@ -2063,6 +2064,9 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   const dAfter = wellDepth(simPlace(b0, best.cells).b);
   if (best.lines !== 4) parts.push(dAfter >= 4 ? '井够 4 行' : '井差 ' + (4 - dAfter) + ' 行');
   if (hold === 'I' && best.lines !== 4) parts.push('I 在暂存等井');
+  // 下一块的计划。这一手消了行的话，计划是按消完的盘面算的，行号对不上现在的盘面，就不画。
+  // 只画在盘面上、不进说明：「为什么」那行在手机上本来就排满了，再加字会被截掉
+  const plan = best.plan && !best.lines ? { type: next, cells: best.plan.cells } : null;
   const l2 = '为什么：' + parts.join(' · ');
   // 别处：一样好的说为什么挑这里；差的挑两处说差在哪
   let l3;
@@ -2084,7 +2088,7 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
     l3 = bits.length ? '别处：' + bits.join('；') : '别处：只有这一处能放';
   }
   return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger: urgent,
-           why: [l1, l2, l3] };      // 按法那一行去掉了（用户：不需要），最少按法还在复盘「多余按键」里用
+           plan, why: [l1, l2, l3] };      // 按法那一行去掉了（用户：不需要），最少按法还在复盘「多余按键」里用
 }
 // 判一手（提示模式、后台教练、每日练习堆叠段都用）：和 judgeCore 同一个返回形状
 function wcJudge(rec, b0, p, n, spin){
@@ -2113,7 +2117,7 @@ function wcCompute(){
   const b0 = wcBoard();
   tsBase = b0;
   tsRec = wcRec(b0, p.type, game.queue[0], game.hold, game.holdUsed);
-  if (tsRec && tsRec.cells) hintMove = { type: p.type, cells: tsRec.cells, rot: tsRec.rot, x: tsRec.x, why: tsRec.why[0], lines: tsRec.why };
+  if (tsRec && tsRec.cells) hintMove = { type: p.type, cells: tsRec.cells, rot: tsRec.rot, x: tsRec.x, why: tsRec.why[0], lines: tsRec.why, plan: tsRec.plan };
   else if (tsRec) hintMove = { type: p.type, cells: null, why: tsRec.why[0], lines: tsRec.why };
   needsDraw = true;
   syncHint();
@@ -2613,8 +2617,32 @@ function tsDraw(c, ghostCells){
   }
   if (hintMove && hintMove.cells && game.piece){
     const key = cs => cs.map(v => v.join(',')).sort().join(';');
+    if (hintMove.plan) planBox(c, hintMove.plan);
     hintBox(c, hintMove.cells, !!ghostCells && key(ghostCells) === key(hintMove.cells), 1);
   }
+}
+// 下一块的计划：用那块自己的颜色画细虚框、调淡，和绿框（这一块放这）分得开；先画，被绿框压在下面
+function planBox(c, plan){
+  c.save();
+  c.globalAlpha = .7;
+  c.strokeStyle = colorOf(plan.type);
+  c.lineWidth = Math.max(1.5, CELL * .06);
+  c.setLineDash([CELL * .12, CELL * .12]);
+  for (const [x, y] of plan.cells){
+    if (y < BUFFER) continue;
+    roundRect(c, x * CELL + 5, (y - BUFFER) * CELL + 5, CELL - 10, CELL - 10, CELL * .14);
+    c.stroke();
+  }
+  // 虚框上方标一句「下一块」，顶到盘面上沿就标在框里
+  const xs = plan.cells.map(v => v[0]), top = Math.min(...plan.cells.map(v => v[1])) - BUFFER;
+  const cx = (Math.min(...xs) + Math.max(...xs) + 1) / 2 * CELL;
+  c.globalAlpha = .85;
+  c.fillStyle = colorOf(plan.type);
+  c.font = '600 ' + Math.round(CELL * .36) + 'px system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = top > 0 ? 'bottom' : 'top';
+  c.fillText('下一块', cx, top > 0 ? top * CELL - 2 : 2);
+  c.restore();
 }
 
 function tsSyncBar(){

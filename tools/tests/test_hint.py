@@ -53,6 +53,22 @@ JS = r"""() => {
   ok(!!hm && hm.why.length > 0 && document.getElementById('hintWhy').textContent.includes(hm.why),
      `细栏写着理由（「${document.getElementById('hintWhy').textContent}」）`);
 
+  // 下一块的计划：推荐不消行时，带着「下一块放哪」—— 就是这一手打分时下一块挑的那处，盘面上画成虚框
+  {
+    const rc = T.wcRec(T.wcBoard(), 'L', 'O', null, true);
+    const after = T.simPlace(T.simBoard(), rc.cells).b;
+    const key = cs => cs.map(c => c.join(',')).sort().join(';');
+    const legal = T.simDrops(after, 'O').map(d => key(d.cells));
+    ok(rc.lines === 0 && !!rc.plan && rc.plan.type === 'O' && legal.includes(key(rc.plan.cells)),
+       `推荐不消行时带下一块的计划，且是放完这一块之后落得到的位置（${rc.plan && key(rc.plan.cells)}）`);
+    ok(!rc.why.join('').includes('下一块 O 接'), '计划只画在盘面上，不往说明里加字（手机上那几行本来就满了）');
+    // 这一手要消行：计划是按消完的盘面算的，行号对不上现在的盘面 → 不给
+    const b = T.simBoard().map(r => r.map(() => false));
+    for (let y = b.length - 4; y < b.length; y++) for (let x = 0; x < 9; x++) b[y][x] = true;
+    const rt = T.wcRec(b, 'I', 'O', null, true);
+    ok(rt.lines === 4 && !rt.plan, `这一手四消时不给计划（消 ${rt.lines} 行，plan=${!!rt.plan}）`);
+  }
+
   // 能暂存（和普通局一样）
   const t0 = T.game.piece.type;
   T.holdPiece();
