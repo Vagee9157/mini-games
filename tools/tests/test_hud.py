@@ -45,6 +45,21 @@ JS = r"""async () => {
   const cv = document.getElementById('nextCv');
   const near = () => Math.abs(cv._w - cv.getBoundingClientRect().width) < .5 && Math.abs(cv._h - cv.getBoundingClientRect().height) < .5;
   ok(cv._w > 0 && near(), `开局量好的预览尺寸对得上（${cv._w && cv._w.toFixed(1)}×${cv._h && cv._h.toFixed(1)}）`);
+
+  // ④ BEST 格固定显示开局前的历史最高分：破了纪录也不跟着当前分涨，格子标「已破纪录」
+  {
+    const box = document.getElementById('best').parentElement, val = () => document.getElementById('best').textContent;
+    T.game.best = 500; T.restart(); T.game.noGarbage = true; T.step(16);
+    ok(!box.hidden && val() === '500' && !box.classList.contains('beat'), `开局：BEST 显示历史最高 500（${val()}）`);
+    T.game.score = 300; T.step(16);
+    ok(val() === '500' && !box.classList.contains('beat'), '没超过：照旧 500');
+    T.game.score = 800; T.game.best = 800; T.step(16);      // game.best 是实时刷的纪录，格子不该跟着它走
+    ok(val() === '500' && box.classList.contains('beat') && box.firstElementChild.textContent === '已破纪录',
+       `超过了：BEST 还是 500、标「已破纪录」（显示 ${val()} · ${box.firstElementChild.textContent}）`);
+    T.restart(); T.step(16);
+    ok(val() === '800' && !box.classList.contains('beat') && box.firstElementChild.textContent === 'BEST',
+       `下一局：BEST 换成新纪录 800（${val()}）`);
+  }
   return L;
 }"""
 

@@ -107,6 +107,7 @@ JS = r"""() => {
   ok(!T.hintMode && !document.body.classList.contains('hinting'), '点「普通」退出提示模式');
   ok(T.game.noGarbage !== true, '退出后灰线恢复');
   ok(document.getElementById('overlay').classList.contains('has-save'), '「接着上次玩」还在');
+  ok(!document.getElementById('best').parentElement.hidden, '切回普通、还在开局页：BEST 就显示出来（不用等开局）');
   document.getElementById('resumeSaveBtn').click();
   ok(T.game.score === nScore && T.game.pieces === nPieces, `续玩接回进提示之前那局（${T.game.score} 分 ${T.game.pieces} 块）`);
   T.drawPreview();

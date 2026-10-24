@@ -240,6 +240,9 @@ body{
   text-overflow: ellipsis;
 }
 .stat.hi b{ color: var(--n-cyan); }
+/* 这局分数超过了开局前的历史最高：BEST 格换成金色、标签写「已破纪录」，数字仍是旧纪录 */
+.stat.beat{ border-color: rgba(255,209,102,.55); }
+.stat.beat span, .stat.beat b{ color: #ffd166; }
 #levelBox.flash{ animation: lvl .6s ease; }
 @keyframes lvl{
   0%,100%{ box-shadow: none; border-color: var(--line); }

@@ -703,6 +703,7 @@ function saveGame(force){
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       board: game.board,
       rush: game.rush,          // 不存的话，续玩会把狂欢局静默变成普通局
+      bestBase,                 // 续玩时 BEST 格接着显示这局开局前的纪录（这时 game.best 可能已经被这局刷过了）
       pieces: game.pieces,      // 有效局判据要用
       queue: game.queue,
       mods: game.mods,
@@ -757,6 +758,7 @@ function restoreGame(d){
   // 但这是个隐式前提，哪天续玩入口挪到暂停页，就会带着上一局的 FEVER 复活。
   crazyReset();
   game.board = d.board;
+  bestBase = Number.isFinite(d.bestBase) ? d.bestBase : game.best;
   game.run = Object.assign(newRun(), d.run && typeof d.run === 'object' ? d.run : {});
   if (!d.run) game.run.aidTs = !CRAZY && !!aids.ts;   // 老存档没有 run：按现在的开关算
   game.queue = d.queue || [];
@@ -1569,6 +1571,8 @@ function exitPractice(){
   syncPractice();
   syncHint();
   syncResume();
+  // BEST 格平时靠 syncHud 跟着刷，停在开局页时没人调它 —— 从提示 / 练习切回普通，BEST 一直藏着直到开局
+  syncBestBox();
   $('overlay').dataset.mode = 'start';
   $('overlay').classList.add('show');
 }
@@ -4195,6 +4199,10 @@ let trails = [];        // 硬降残影 { cells:[[x,y]...], color, t }
 let lastClearRows = [];
 let lastLockY = 0;
 let bestBeaten = false;
+// 右栏 BEST 显示的数：这局开局前的历史最高分。原来显示 game.best，而 game.best 一破纪录就跟着当前分实时涨，
+// 于是破纪录之后 BEST 和 SCORE 是同一个数，历史最高分在对局里根本看不到。
+// 纪录照旧实时写（game.best），只是格子里固定显示开局那一刻的值，超过了就把格子标成「已破纪录」。
+let bestBase = 0;
 
 // 消除的视觉分级。三条轴分开表达：
 //   颜色 = 哪一种消除（普通走冷色梯度，T-spin 系走品红，四行走金）
@@ -6481,13 +6489,19 @@ function syncHud(){
   syncStreak();
   syncDanger();
   syncBestBox();
-  const key = game.score + '/' + game.lines + '/' + game.level + '/' + game.best;
+  const key = game.score + '/' + game.lines + '/' + game.level + '/' + bestBase + '/' + game.started;
   if (key === hudCache) return;         // 每帧写 DOM 很浪费
   hudCache = key;
   rollScore(false);
   setStat($('lines'), String(game.lines));
   setStat($('level'), String(game.level));
-  setStat($('best'), fmtScore(game.best));
+  setStat($('best'), fmtScore(bestBase));
+  const beat = game.started && bestBase > 0 && game.score > bestBase;
+  const bb = $('best').parentElement;
+  if (bb.classList.contains('beat') !== beat){
+    bb.classList.toggle('beat', beat);
+    bb.firstElementChild.textContent = beat ? '已破纪录' : 'BEST';
+  }
   syncPace();
 }
 
@@ -10262,6 +10276,7 @@ function restart(){
   game.elapsed = 0;
   game.why = '';
   bestBeaten = false;
+  bestBase = game.best;
   // 目标线开局定一次：它依赖 game.rush，而 restart 里 rush 已经定了
   goalNow = CRAZY ? goalScore() : 0;
   goalHit = false;
@@ -10413,6 +10428,7 @@ function init(){
   } catch { /* 忽略 */ }
   game.board = newBoard();
   game.best = readBest();
+  bestBase = game.best;
   syncEdge();
   syncHud();
   fillQueue();
