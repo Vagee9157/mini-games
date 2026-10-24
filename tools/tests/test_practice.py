@@ -205,14 +205,24 @@ JS = r"""() => {
   const g = T.gravityFor(T.game.level);
   const soft = document.getElementById('btnSoft');
   soft.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
-  T.step(g / 4);                   // 这点时间自然重力一格都掉不了
+  T.step(g / 2);                   // 这点时间自然重力一格都掉不了
   const dy = T.game.piece ? T.game.piece.y - y0 : -1;
-  ok(dy >= 4, `按住软降明显更快（${g/4}ms 掉了 ${dy} 格，自然重力同期是 0 格）`);
+  ok(dy >= 2 && dy <= 4, `按住软降是加速、不是到底（${g/2}ms 掉了 ${dy} 格，自然重力同期是 0 格）`);
   ok(T.game.score - s0 === dy, `软降每格 +1 分（掉 ${dy} 格，加了 ${T.game.score - s0}）`);
   soft.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
   const y1 = T.game.piece.y, s1 = T.game.score;
   T.step(g / 4);
   ok(T.game.piece.y === y1 && T.game.score === s1, '松手就停');
+  // 快到下一格时才按下软降：攒着的重力时间不能一次放掉（原来当场连掉十几格，看着就是一按到底）
+  T.startPractice();
+  for (let y=0;y<T.TOTAL_ROWS;y++) T.game.board[y].fill(null);
+  T.practicePick('T');
+  { const g2 = T.gravityFor(T.game.level);
+    T.step(g2 * .9); const ya = T.game.piece.y;
+    soft.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+    T.step(16); const jump = T.game.piece.y - ya;
+    soft.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+    ok(jump <= 1, `重力快到下一格时按软降：按下那一刻最多掉 1 格（掉了 ${jump}）`); }
 
   // 软降落地**不锁死** —— 这是它和落底唯一的本质区别，也是 T 旋成立的前提
   T.startPractice();

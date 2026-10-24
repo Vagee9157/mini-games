@@ -250,7 +250,9 @@ function setHandling(k){
   handling = k; DAS = HANDLING[k].das; ARR = HANDLING[k].arr;
   try { localStorage.setItem(HANDLING_KEY, k); } catch { /* 存不了就算了 */ }
 }
-const SOFT_DROP_FACTOR = 20; // 软降速度倍率
+// 软降速度倍率。20 → 6：20 倍时 1 级每格 50ms、一秒掉 20 行，按住跟落底分不出来（用户：软降要的是加速，不是到底）。
+// 6 倍：1 级每格约 170ms，看得清一格格往下走，松手就恢复
+const SOFT_DROP_FACTOR = 6;
 const TRAIL_MS = 130;        // 硬降残影存活时间
 const TRAIL_MIN_DROP = 4;    // 落差不到这么多格就不留残影
 const TRAIL_MAX = 2;         // 同时最多几道
@@ -9650,6 +9652,10 @@ function stepOnce(dt){
     }
     const g = gravityFor(game.level);
     const speed = softDropping ? g / SOFT_DROP_FACTOR : g;
+    // 按下软降那一刻，dropTimer 里还攒着按正常重力计的时间（快到下一格时能有 900ms）。
+    // 速度一切到软降，下面的 while 会把攒的一次用掉，当场连掉十几格 —— 软降一按就到底的真正原因。
+    // 封顶到一格：按下最多立刻掉 1 格，之后按软降速度匀速走
+    if (softDropping && dropTimer > speed) dropTimer = speed;
     // ZONE 期间重力停 —— 手动软降/硬降照常，所以限制你的是摆放速度不是重力。
     // 这是 ZONE 和 FEVER 手感不同的根源：FEVER 是被动吃倍率，ZONE 是主动抢时间。
     if (zoneLeft > 0 || demoRunning) dropTimer = 0; else dropTimer += dt;
@@ -10012,7 +10018,8 @@ function bindButtons(){
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     // 落底不进「按偏了也算」：按偏成左右移 / 变换顶多走错一格，按偏成落底这块就直接锁死了，
     // 而落底夹在右移和变换中间，两边按偏都会落到它头上（用户：落底太灵敏）。落底只认按在键上
-    if (id !== 'holdSlot' && id !== 'nextSlot' && id !== 'btnDrop') pads.push({ el, start, end });
+    // 软降同理：它就在变换正上方，往上按偏一点的变换会被当成软降
+    if (id !== 'holdSlot' && id !== 'nextSlot' && id !== 'btnDrop' && id !== 'btnSoft') pads.push({ el, start, end });
   }
 
   // 按偏了也算。键和键之间空着 9~15px，最下面一排键底下到屏幕底还有 30 多 px（iPhone 375 宽实测），
