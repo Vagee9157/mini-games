@@ -66,6 +66,45 @@ JS = r"""async () => {
   await fresh('T');
   tap('btnCw');
   ok(T.game.piece.rot === 1, '点变换转一下');
+
+  // ④ 按偏了也算：键和键之间的空隙、底排键下面那条空白，就近交给最近的键
+  const touch = (x, y, type, tg) => {
+    tg = tg || document.elementFromPoint(x, y) || document.body;
+    const t = new Touch({ identifier: 7, target: tg, clientX: x, clientY: y });
+    tg.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true,
+      touches: type === 'touchend' ? [] : [t], changedTouches: [t] }));
+    return tg;
+  };
+  const tapAt = (x, y) => { const tg = touch(x, y, 'touchstart'); touch(x, y, 'touchend', tg); return tg; };
+  const R = id => document.getElementById(id).getBoundingClientRect();
+  {
+    const cw = R('btnCw'), dr = R('btnDrop'), lf = R('btnLeft'), rt = R('btnRight');
+    await fresh('T');
+    const tg = tapAt((cw.left + cw.right) / 2, Math.min(innerHeight - 1, cw.bottom + 16));
+    ok(!tg.closest('button') && T.game.piece.rot === 1, `点在变换键下面 16px：照样转（落点 ${tg.tagName}.${tg.className}，朝向 ${T.game.piece.rot}）`);
+    await fresh('T');
+    tapAt(cw.left - 3, (cw.top + cw.bottom) / 2);
+    ok(T.game.piece.rot === 1, '点在落底和变换中间、靠变换那边：算变换');
+    await fresh('T'); { const x0 = T.game.piece.x;
+      tapAt(lf.right + 2, (lf.top + lf.bottom) / 2);
+      ok(T.game.piece.x === x0 - 1, `点在左移和右移中间、靠左移那边：左移一格（${x0} → ${T.game.piece.x}）`); }
+    await fresh('T'); { const n0 = T.game.pieces, x0 = T.game.piece.x;
+      tapAt(rt.right + 2, (rt.top + rt.bottom) / 2);
+      ok(T.game.pieces === n0 && T.game.piece.x === x0 + 1, `点在右移和落底中间、靠右移那边：右移，不是落底（落了 ${T.game.pieces - n0}，${x0} → ${T.game.piece.x}）`); }
+    await fresh('T'); { const n0 = T.game.pieces;
+      tapAt(dr.left - 2, (dr.top + dr.bottom) / 2);
+      ok(T.game.pieces === n0 + 1, `点在右移和落底中间、靠落底那边：落底（落了 ${T.game.pieces - n0}）`); }
+    // 松手要找回去：按住偏了的左移再松手，不能一直连发滑到墙边
+    await fresh('T'); { const x0 = T.game.piece.x, y = Math.min(innerHeight - 1, lf.bottom + 12), x = (lf.left + lf.right) / 2;
+      const tg = touch(x, y, 'touchstart'); touch(x, y, 'touchend', tg); T.step(600);
+      ok(T.game.piece.x === x0 - 1, `按偏的左移松手后停住（${x0} → ${T.game.piece.x}，应只走 1 格）`); }
+    // 离得远的、落在盘面上的不管
+    await fresh('T'); { const s0 = JSON.stringify([T.game.piece.x, T.game.piece.rot]);
+      const bd = document.getElementById('board').getBoundingClientRect();
+      tapAt((bd.left + bd.right) / 2, bd.bottom - 4);
+      tapAt((rt.left + rt.right) / 2, rt.top - 40);
+      ok(JSON.stringify([T.game.piece.x, T.game.piece.rot]) === s0, '点在盘面上、离键 40px 远：都不算按键'); }
+  }
   return L;
 }"""
 

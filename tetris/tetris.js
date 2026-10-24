@@ -231,10 +231,14 @@ const LOCK_RESET_LIMIT = Infinity;
 // 原来写死 150/40。改成 110/25 之后用户反馈「按一下左右直接就跑过去了，对不齐」：
 // 手指在屏幕上按一下常常就有 0.1 秒出头，110ms 起步等于轻点也会触发连发。
 // 现在默认「快」= 140/36，只比原来的 150/40 灵敏一点点；三档都往慢收了一截。
+// 三档 → 六档：两头各加。key 不改，原来存的选择照样认得。
 const HANDLING = {
+  calm:   { name: '很稳', das: 190, arr: 55 },
   steady: { name: '稳',   das: 165, arr: 45 },
   fast:   { name: '快',   das: 140, arr: 36 },
   faster: { name: '很快', das: 115, arr: 28 },
+  turbo:  { name: '超快', das: 95,  arr: 20 },
+  max:    { name: '极快', das: 80,  arr: 12 },
 };
 const HANDLING_KEY = 'tetris.handling.v1';
 let handling = 'fast';
@@ -9957,6 +9961,7 @@ function bindButtons(){
     // 点 NEXT 换牌。标准版里 rerollPiece 开头就 !CRAZY 早退，等于没绑。
     ['nextSlot', () => rerollPiece(), null],
   ];
+  const pads = [];       // 底部那几个键，给下面「按偏了也算」用
   for (const [id, down, up] of map){
     const el = $(id);
     if (!el) continue;
@@ -9984,7 +9989,46 @@ function bindButtons(){
     el.addEventListener('mouseup', (e) => { if (!touched) end(e); });
     el.addEventListener('mouseleave', (e) => { if (!touched) end(e); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+    if (id !== 'holdSlot' && id !== 'nextSlot') pads.push({ el, start, end });
   }
+
+  // 按偏了也算。键和键之间空着 9~15px，最下面一排键底下到屏幕底还有 30 多 px（iPhone 375 宽实测），
+  // 拇指按底排很容易落在键外面 —— 那一下什么都不响，就是「有时候按了没反应」。
+  // 落在空白处的触点就近交给最近的键：横向 PAD_NEAR 以内，键底下放宽一倍（往下按偏最常见）。
+  // 只兜「什么都没按到」的触点：落在别的按钮、盘面、提示栏、面板上的照旧不管。
+  const PAD_NEAR = 22;
+  const nearPad = (x, y) => {
+    let best = null, bd = PAD_NEAR;
+    for (const k of pads){
+      const r = k.el.getBoundingClientRect();
+      if (!r.width) continue;
+      const dx = Math.max(r.left - x, 0, x - r.right);
+      const dy = y > r.bottom ? (y - r.bottom) / 2 : Math.max(r.top - y, 0);
+      const d = Math.max(dx, dy);
+      if (d < bd){ bd = d; best = k; }
+    }
+    return best;
+  };
+  const owner = new Map();     // 触点 id → 交给了哪个键，松手时找回去
+  document.addEventListener('touchstart', (e) => {
+    if (!game.started || game.over || game.paused || demoRunning || topSheet()) return;
+    for (const t of e.changedTouches){
+      const tg = t.target;
+      if (!(tg instanceof Element) || tg.closest('button, a, input, select, textarea, canvas, [role="button"], .sheet, .overlay, .hintbar')) continue;
+      const k = nearPad(t.clientX, t.clientY);
+      if (!k) continue;
+      owner.set(t.identifier, k);
+      k.start(e);
+    }
+  }, { passive: false });
+  const lift = (e) => {
+    for (const t of e.changedTouches){
+      const k = owner.get(t.identifier);
+      if (k){ owner.delete(t.identifier); k.end(e); }
+    }
+  };
+  document.addEventListener('touchend', lift, { passive: false });
+  document.addEventListener('touchcancel', lift, { passive: false });
 }
 
 // ───────────────────────── 样式切换 ─────────────────────────
@@ -10310,6 +10354,8 @@ function buildHandlingPanel(){
     b.addEventListener('click', () => { setHandling(k); buildHandlingPanel(); });
     hw.appendChild(b);
   }
+  const tip = $('handTip');
+  if (tip) tip.textContent = '按住 ' + DAS + 'ms 开始连发，之后每 ' + ARR + 'ms 走一格' + (handling === 'fast' ? '（默认）' : '');
 }
 function buildAudioPanel(){
   buildHandlingPanel();

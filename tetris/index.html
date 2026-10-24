@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=38cc46fa">
+<link rel="stylesheet" href="tetris.css?v=e2d9e2d3">
 </head>
 <body>
 <div class="topline"></div>
@@ -470,9 +470,10 @@
       </div>
       <p class="pr-tip aid-tip">保命线：盘面六成高画一条淡线，堆过线先消低处，只是参考，照常记成绩。<br>标 T 槽：把搭好的 T 旋双消槽圈出来、不推荐落点；开着打的局不进最高分，历史记录里单独标「标槽」。</p>
       <!-- std-only:end -->
-      <!-- 手感：左右按住多久开始连发、连发多快。默认「快」 -->
+      <!-- 手感：左右按住多久开始连发、连发多快。六档，默认「快」 -->
       <span class="sheet-lb">手感 · 左右按住移动的快慢</span>
       <div class="seg seg-3" id="handOpts"></div>
+      <p class="pr-tip hand-tip" id="handTip"></p>
       <span class="sheet-lb">背景音乐</span>
       <div class="seg seg-3" id="trackOpts"></div>
       <span class="sheet-lb">音效风格</span>
@@ -488,7 +489,7 @@
 
 </div>
 
-<script src="tetris.js?v=40bc82d2"></script>
+<script src="tetris.js?v=fb4e1cf9"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {
