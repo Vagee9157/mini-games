@@ -145,31 +145,31 @@ JS = r"""async () => {
   for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
   const ev = (id, t) => $(id).dispatchEvent(new MouseEvent(t, { bubbles: true }));
   const tap = id => { ev(id, 'mousedown'); ev(id, 'mouseup'); };
-  // 干净的一块：直接落底 = 1 键，最少也是 1 键
+  // 干净的一块：直接落底 = 1 键，最少也是 1 键（每块出来先等过 DROP_BORN_MS：新块刚出来的屏幕落底不认）
   T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext();
-  await sleep(200); tap('btnDrop'); settle();
+  await sleep(T.DROP_BORN_MS + 30); tap('btnDrop'); settle();
   ok(T.drill.keys === 1 && T.drill.faults === 0, `直接落底：1 键、不算多余（${T.drill.keys} 键 / 多余 ${T.drill.faults}）`);
   // 绕一下：右、左、落底 = 3 键，同一个落点最少 1 键 → 多余一次
   T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext();
-  await sleep(200); tap('btnRight'); tap('btnLeft'); tap('btnDrop'); settle();
+  await sleep(T.DROP_BORN_MS + 30); tap('btnRight'); tap('btnLeft'); tap('btnDrop'); settle();
   ok(T.drill.keys === 4 && T.drill.faults === 1, `右左落底：累计 4 键、多余 1（${T.drill.keys} / ${T.drill.faults}）`);
   // 转四下回原样再落：多余
   T.game.piece = null; T.game.queue.unshift('T'); T.game.mods.unshift(null); T.spawnNext();
-  await sleep(200); for (let i = 0; i < 4; i++) tap('btnCw'); tap('btnDrop'); settle();
+  await sleep(T.DROP_BORN_MS + 30); for (let i = 0; i < 4; i++) tap('btnCw'); tap('btnDrop'); settle();
   ok(T.drill.faults === 2, `转一圈再落：多余 +1（${T.drill.faults}）`);
   // 最少按法：J 竖着靠左墙 = 转一下 + 按住左（一次）+ 落底；用 3 键不算多余
   T.game.piece = null; T.game.queue.unshift('J'); T.game.mods.unshift(null); T.spawnNext();
-  await sleep(200);
+  await sleep(T.DROP_BORN_MS + 30);
   tap('btnCw'); ev('btnLeft', 'mousedown'); await sleep(600); ev('btnLeft', 'mouseup'); tap('btnDrop'); settle();
   ok(T.drill.faults === 2, `转一下 + 按住左到墙 + 落底：不算多余（${T.drill.faults}）`);
   // 连点落底被挡掉的那下不数
   const k0 = T.drill.keys;
   T.game.piece = null; T.game.queue.unshift('O'); T.game.mods.unshift(null); T.spawnNext();
-  await sleep(200); tap('btnDrop'); await sleep(40); tap('btnDrop'); settle();
+  await sleep(T.DROP_BORN_MS + 30); tap('btnDrop'); await sleep(40); tap('btnDrop'); settle();
   ok(T.drill.keys === k0 + 1, `连点落底只数 1 键（+${T.drill.keys - k0}）`);
   // 打到 40 行收尾（行数直接拨到线上，靠下一块锁定触发）
   T.game.lines = T.DRILL_SPRINT_LINES;
-  await sleep(250); tap('btnDrop'); settle();
+  await sleep(T.DROP_BORN_MS + 30); tap('btnDrop'); settle();
   ok(T.game.level === 1, '冲刺段不升级');
   await sleep(900);
   const sp = T.drill && T.drill.done.sprint;

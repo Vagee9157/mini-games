@@ -97,9 +97,11 @@ JS = r"""async () => {
     await fresh('T'); { const n0 = T.game.pieces, x0 = T.game.piece.x;
       tapAt(rt.right + 2, (rt.top + rt.bottom) / 2);
       ok(T.game.pieces === n0 && T.game.piece.x === x0 + 1, `点在右移和落底中间、靠右移那边：右移，不是落底（落了 ${T.game.pieces - n0}，${x0} → ${T.game.piece.x}）`); }
+    // 落底只认按在键上：按偏了的触点不会变成落底（按偏成落底这块就锁死了）
     await fresh('T'); { const n0 = T.game.pieces;
       tapAt(dr.left - 2, (dr.top + dr.bottom) / 2);
-      ok(T.game.pieces === n0 + 1, `点在右移和落底中间、靠落底那边：落底（落了 ${T.game.pieces - n0}）`); }
+      tapAt((dr.left + dr.right) / 2, Math.min(innerHeight - 1, dr.bottom + 10));
+      ok(T.game.pieces === n0, `点在落底旁边 2px、落底下面 10px：都不落底（落了 ${T.game.pieces - n0}）`); }
     // 松手要找回去：按住偏了的左移再松手，不能一直连发滑到墙边
     await fresh('T'); { const x0 = T.game.piece.x, y = Math.min(innerHeight - 1, lf.bottom + 12), x = (lf.left + lf.right) / 2;
       const tg = touch(x, y, 'touchstart'); touch(x, y, 'touchend', tg); T.step(600);

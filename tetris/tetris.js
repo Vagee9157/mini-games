@@ -9952,7 +9952,7 @@ let lastBtnDrop = -1e9;
 // 只看「离上一下多久」还拦不住两种：消行动画 260ms 里没块可落、这一下不记，动画一完新块出来，
 // 回弹的第二下离上次落底早过了 160ms，新块照样被砸下去；手指回弹本身也常有 200ms 出头。
 // 所以再加一道：当前这块出来不到 DROP_BORN_MS，屏幕落底键不认。看的是块本身，不管中间有没有消行。
-const DROP_BORN_MS = 200;
+const DROP_BORN_MS = 250;     // 200 用户实测还是会误触
 function btnHardDrop(){
   // 没东西可落（消行动画中 / NES 等下一块）：这一下不算，也不启动防连点。
   // 原来照样记一次，结果新块出来后真按的那一下落底被当成「连点」吞掉
@@ -10010,7 +10010,9 @@ function bindButtons(){
     el.addEventListener('mouseup', (e) => { if (!touched) end(e); });
     el.addEventListener('mouseleave', (e) => { if (!touched) end(e); });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    if (id !== 'holdSlot' && id !== 'nextSlot') pads.push({ el, start, end });
+    // 落底不进「按偏了也算」：按偏成左右移 / 变换顶多走错一格，按偏成落底这块就直接锁死了，
+    // 而落底夹在右移和变换中间，两边按偏都会落到它头上（用户：落底太灵敏）。落底只认按在键上
+    if (id !== 'holdSlot' && id !== 'nextSlot' && id !== 'btnDrop') pads.push({ el, start, end });
   }
 
   // 按偏了也算。键和键之间空着 9~15px，最下面一排键底下到屏幕底还有 30 多 px（iPhone 375 宽实测），
