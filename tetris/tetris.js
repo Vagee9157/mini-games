@@ -940,6 +940,19 @@ function collides(type, x, y, rot){
   return false;
 }
 
+// 出生行。规范出生点在顶上两行隐藏区里：T/S/Z/J/L/O 横着出生时整块都在隐藏区，
+// 1 级一秒一格，每块要等一两秒才露出来（I 也只露半截）。
+// 所以盘面顶部够空就直接往下挪到整块可见；顶上 SPAWN_CLEAR_ROWS 行里有任何一格
+// 就不挪，照旧从 y=0 出生 —— 挪下来的块翻不过高处的柱子，堆高了必须留着隐藏区那两行走位。
+// 判死仍然只看 y=0（spawn 里先判再挪），所以难度不变。
+// 提示 / 多余按键 / 可达搜索都从这里取起点，和真块对得上。
+const SPAWN_CLEAR_ROWS = BUFFER + 4;
+function spawnY(b, type){
+  for (let y = 0; y < SPAWN_CLEAR_ROWS; y++) if (b[y].some(Boolean)) return 0;
+  const top = Math.min(...PIECES[type].states[0].map(c => c[1]));
+  return Math.max(0, BUFFER - top);
+}
+
 function spawn(type, mod){
   previewDirty = true;
   needsDraw = true;
@@ -956,6 +969,8 @@ function spawn(type, mod){
   grounded = false;
   // 出生位置就被占 → 结束
   if (collides(p.type, p.x, p.y, p.rot)){ endGame('出生撞死'); return; }
+  const sy = spawnY(game.board, type);
+  if (sy && !collides(p.type, p.x, sy, p.rot)) p.y = sy;
   // 提示模式：每块一出生就算推荐（当前块 × 1 个 NEXT）
   if (hintMode) hintCompute();
   if (drill) drillOnSpawn();
@@ -1934,7 +1949,7 @@ function wcWorse(b0, rec, alt, danger){
 // 最少按法：和多余按键同一套（点一下 / 按住到墙 / 变换 / 落底），返回步骤
 function finessePath(b, type, cells, ccw){
   const want = cells.map(c => c.join(',')).sort().join(';');
-  const start = { x: PIECES[type].spawnX, y: 0, rot: 0, acts: [] };
+  const start = { x: PIECES[type].spawnX, y: spawnY(b, type), rot: 0, acts: [] };
   if (!simFits(b, type, start.x, start.y, start.rot)) return null;
   const seen = new Set([start.x + ',' + start.y + ',' + start.rot]);
   let layer = [start];
@@ -2764,7 +2779,7 @@ function simTSpin(b, x, y, rot, lastRot, kick){
 // ccw：也试逆时针（键盘有 Z 键；手机屏幕上只有顺时针，默认不试）
 function simReach(b, type, ccw){
   // acts 是走到这里的按键串（parseActs 的写法），测试拿它在真盘面上回放
-  const start = { x: PIECES[type].spawnX, y: 0, rot: 0, lr: false, k: -1, acts: '' };
+  const start = { x: PIECES[type].spawnX, y: spawnY(b, type), rot: 0, lr: false, k: -1, acts: '' };
   if (!simFits(b, type, start.x, start.y, start.rot)) return [];
   const seen = new Set(), q = [start], out = [];
   const key = s => s.x + ',' + s.y + ',' + s.rot + ',' + (s.lr ? 1 : 0);
@@ -2868,7 +2883,7 @@ function drillGenPuzzle(rand){
 // 最少几下能落到同一组格子。用了软降的块不算（那是滑入/旋入，没有可比的最少按法）。
 function finesseMin(b, type, cells, ccw){
   const want = cells.map(c => c.join(',')).sort().join(';');
-  const start = { x: PIECES[type].spawnX, y: 0, rot: 0 };
+  const start = { x: PIECES[type].spawnX, y: spawnY(b, type), rot: 0 };
   if (!simFits(b, type, start.x, start.y, start.rot)) return null;
   const seen = new Set([start.x + ',' + start.y + ',' + start.rot]);
   let layer = [start];
