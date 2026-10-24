@@ -70,9 +70,9 @@ JS = r"""async () => {
   // ── 复盘：多余按键 + 分段每行 ──
   $('startBtn').click(); T.game.noGarbage = true; T.game.lines = 0; T.game.score = 0;
   load([]); give('O');
-  tap('btnRight'); tap('btnRight'); tap('btnRight'); tap('btnRight'); tap('btnDrop'); settle();
+  tap('btnRight'); tap('btnRight'); tap('btnRight'); tap('btnRight'); await wait(T.DROP_BORN_MS + 20); tap('btnDrop'); settle();
   await wait(200);
-  load([]); give('O'); tap('btnDrop'); settle();
+  load([]); give('O'); await wait(T.DROP_BORN_MS + 20); tap('btnDrop'); settle();
   const r = T.game.run;
   ok(r.finN === 2 && r.faults === 1 && r.extra === 3, `O 块点 4 下右再落（最少是按住到墙 + 落底 2 下）算多余 3 下；直接落底不算（${r.finN} 块 / ${r.faults} 块多 / 多 ${r.extra} 下）`);
   await wait(200);

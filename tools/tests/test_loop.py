@@ -52,7 +52,7 @@ JS = r"""async (eng) => {
     for (let x = 0; x < 9; x++) T.game.board[R - 1][x] = 'J';
     T.game.board[R - 2][0] = 'J';
     const p = T.game.piece; p.rot = 1; p.x = 7; p.y = 0; };
-  clearSetup(); await sleep(150);
+  clearSetup(); await sleep(T.DROP_BORN_MS + 30);       // 新块出来不到 DROP_BORN_MS 的落底不认，先等过
   T.game.queue[0] = 'T';                                 // 下一块固定成能转的
   ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');
   await sleep(90);
@@ -64,11 +64,20 @@ JS = r"""async (eng) => {
   const q = T.game.piece;
   ok(midClear && q && q.type === 'T' && q.rot === 1 && q.x === 4 && q.y < 3,
      `消行动画中点了右 + 变换：新块出来就照做（列 ${q && q.x}、朝向 ${q && q.rot}，应为 4 / 1；没被落底砸下去：y=${q && q.y}）`);
+  // 新块刚出来就落底不认：消行动画一完、手指回弹的那一下正好砸在新块上（用户实际碰到的误触）。
+  // 从新块真正出现开始计时 —— 写死「等 260 + 100」的话，WebKit 新块出来得早一点，量出来已经过了保护时间
+  clearSetup(); await sleep(T.DROP_BORN_MS + 30);
+  ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');
+  while (!T.game.piece || T.clearing) await new Promise(r => requestAnimationFrame(r));
   const n0 = T.game.pieces;
   await sleep(100);
   ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');
   await sleep(30);
-  ok(T.game.pieces === n0 + 1, '消行时那下空落底不启动防连点：新块出来 0.1 秒后按落底照常落下');
+  ok(T.game.pieces === n0, `消行完新块出来 0.1 秒就按落底：不认（落了 ${T.game.pieces - n0}）`);
+  await sleep(T.DROP_BORN_MS);
+  ev('btnDrop', 'mousedown'); ev('btnDrop', 'mouseup');
+  await sleep(30);
+  ok(T.game.pieces === n0 + 1, `新块出来超过 ${T.DROP_BORN_MS}ms 再按：照常落下（落了 ${T.game.pieces - n0}）`);
 
   // ── 两边同时按：后按的方向说了算，松开后回到另一边 ──
   fresh(); T.game.piece.x = 4; await sleep(150);

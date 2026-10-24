@@ -25,6 +25,7 @@ JS = r"""async () => {
     document.getElementById('startBtn').click(); T.game.noGarbage = true;
     for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
     if (t){ T.game.piece = null; T.game.queue.unshift(t); T.game.mods.unshift(null); T.spawnNext(); }
+    await sleep(T.DROP_BORN_MS + 20);      // 新块刚出来的落底不认，先等过
   };
 
   // ① 落底连点：保护窗口内第二下不算，窗口外照常
@@ -34,8 +35,13 @@ JS = r"""async () => {
     ok(T.game.pieces - n0 === 1, `落底隔 ${gap}ms 点两下只落 1 块（落了 ${T.game.pieces - n0}）`);
   }
   await fresh(); { const n0 = T.game.pieces;
-    tap('btnDrop'); await sleep(T.DROP_GUARD_MS + 60); tap('btnDrop'); await sleep(30);
-    ok(T.game.pieces - n0 === 2, `隔 ${T.DROP_GUARD_MS + 60}ms 的两下照常落 2 块（落了 ${T.game.pieces - n0}）`); }
+    const g = Math.max(T.DROP_GUARD_MS, T.DROP_BORN_MS) + 60;
+    tap('btnDrop'); await sleep(g); tap('btnDrop'); await sleep(30);
+    ok(T.game.pieces - n0 === 2, `隔 ${g}ms 的两下照常落 2 块（落了 ${T.game.pieces - n0}）`); }
+  // 两下之间隔得比 DROP_GUARD_MS 久、但新块还没出来够 DROP_BORN_MS：第二下照样不认（手指回弹常有 200ms 上下）
+  await fresh(); { const n0 = T.game.pieces;
+    tap('btnDrop'); await sleep(T.DROP_GUARD_MS + 20); tap('btnDrop'); await sleep(30);
+    ok(T.DROP_GUARD_MS + 20 < T.DROP_BORN_MS && T.game.pieces - n0 === 1, `隔 ${T.DROP_GUARD_MS + 20}ms 的回弹：新块不被砸下去（落了 ${T.game.pieces - n0}）`); }
 
   // 键盘空格不受保护：桌面连按是有意的
   await fresh(); { const n0 = T.game.pieces;

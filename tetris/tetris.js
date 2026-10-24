@@ -953,6 +953,7 @@ function collides(type, x, y, rot){
 // 判死仍然只看 y=0（spawn 里先判再挪），所以难度不变。
 // 提示 / 多余按键 / 可达搜索都从这里取起点，和真块对得上。
 const SPAWN_CLEAR_ROWS = BUFFER + 4;
+let pieceBornAt = -1e9;     // 当前这块出生的时刻（屏幕落底键防误触用，见 DROP_BORN_MS）
 function spawnY(b, type){
   for (let y = 0; y < SPAWN_CLEAR_ROWS; y++) if (b[y].some(Boolean)) return 0;
   const top = Math.min(...PIECES[type].states[0].map(c => c[1]));
@@ -964,6 +965,7 @@ function spawn(type, mod){
   needsDraw = true;
   const def = PIECES[type];
   const p = { type, x: def.spawnX, y: 0, rot: 0, mod: CRAZY ? (mod || null) : null };
+  pieceBornAt = performance.now();     // 屏幕落底键的防误触看这个，见 DROP_BORN_MS
   if (game.run && p.mod) game.run[p.mod]++;
   game.piece = p;
   game.holdUsed = false;
@@ -9947,6 +9949,10 @@ function restartPick(m){
 // 还没看清的下一块一起砸下去。只拦屏幕按键，键盘不拦。
 const DROP_GUARD_MS = 160;
 let lastBtnDrop = -1e9;
+// 只看「离上一下多久」还拦不住两种：消行动画 260ms 里没块可落、这一下不记，动画一完新块出来，
+// 回弹的第二下离上次落底早过了 160ms，新块照样被砸下去；手指回弹本身也常有 200ms 出头。
+// 所以再加一道：当前这块出来不到 DROP_BORN_MS，屏幕落底键不认。看的是块本身，不管中间有没有消行。
+const DROP_BORN_MS = 200;
 function btnHardDrop(){
   // 没东西可落（消行动画中 / NES 等下一块）：这一下不算，也不启动防连点。
   // 原来照样记一次，结果新块出来后真按的那一下落底被当成「连点」吞掉
@@ -9954,6 +9960,7 @@ function btnHardDrop(){
   if (!canDrop) return;
   const now = performance.now();
   if (now - lastBtnDrop < DROP_GUARD_MS) return;
+  if (!nes && now - pieceBornAt < DROP_BORN_MS) return;
   lastBtnDrop = now;
   if (nes){ nesHardDrop(); return; }     // NES 里也是落底，连点保护照样有
   drillKey(false, false);
@@ -10768,7 +10775,7 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   feverStart, feverEnd, FEVER_COOL, get feverCool(){ return feverCool; }, switchTrack, setPack, setTempo,
   get trackIdx(){ return trackIdx; }, get sfxPack(){ return sfxPack; }, cellsOf, collides, restart, riseGarbage, clearStyle, popScore, garbagePeriod, garbageClock, gravityFor, levelMult, edgeColor, syncEdge, MAX_LEVEL,
   step, stepOnce, setSeed, hardDrop, tryRotate, holdPiece, tryMove, lockPiece, LINES_PER_LEVEL, COLS, ROWS, BUFFER, TOTAL_ROWS,
-  CLEAR_DRAW_MS, DROP_GUARD_MS,
+  CLEAR_DRAW_MS, DROP_GUARD_MS, DROP_BORN_MS,
   startDrill, drillBegin, drillGo, drillSkip, drillExit, drillRedo, drillGenPuzzle, drillGenTetris, simReach, finesseMin,
   drillReadAll, drillSave, fmtMs, DRILL_KEY, DRILL_WARM_N, DRILL_STACK_N, DRILL_SPRINT_LINES, tspinKind,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
