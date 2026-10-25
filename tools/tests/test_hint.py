@@ -163,6 +163,8 @@ JS = r"""() => {
   ok(T.tsRec.kind === 'hold' && /暂存 I/.test(T.hintMove.why) && /差|不够/.test(more()[0]), `井只有 2 行：建议暂存 I（「${T.hintMove.why}」）`);
   const cue = document.getElementById('holdCue'), hsl = document.getElementById('holdSlot');
   ok(!cue.hidden && hsl.classList.contains('hint-hold') && getComputedStyle(hsl).opacity === '1', `推荐暂存：HOLD 框亮起来、盘面挂「${cue.textContent}」`);
+  { const cr = cue.getBoundingClientRect(), hr = hsl.getBoundingClientRect(), mid = v => (v.top + v.bottom) / 2;
+    ok(Math.abs(mid(cr) - mid(hr)) <= 12, `「点 HOLD」那条和 HOLD 框齐平（差 ${Math.round(mid(cr) - mid(hr))}px）`); }
   T.holdPiece(); settle();
   ok(cue.hidden && !hsl.classList.contains('hint-hold'), '暂存之后：提示收起');
   setH([4, 4, 4, 4, 4, 4, 4, 4, 4, 0]); give('I');

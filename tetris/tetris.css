@@ -713,6 +713,10 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 /* 和变换之间多留 8px（网格本身只隔 6px）—— 这个键挪到这儿就是因为老按错，
    拇指往上够变换的时候不能擦到它 */
 .side .k-soft{ margin-top: auto; margin-bottom: 8px; }
+/* HOLD 排在右栏最后（BEST / 每行下面、软降上面）。原来紧跟 NEXT 在最上面，拇指够不着（用户：HOLD 太靠上）。
+   只改显示顺序不改 DOM：横屏 / 桌面里 .side 是 display:contents、每块有自己的 grid-area，order 在那边不起作用 */
+.side .slot.hold{ order: 1; }
+.side .k-soft{ order: 2; }
 .k em{ font-style: normal; opacity: .8; }
 .k.active, .k:active{
   transform: translateY(1px);

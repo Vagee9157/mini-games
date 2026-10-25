@@ -2270,6 +2270,13 @@ function syncHoldCue(){
   if (cue){
     cue.hidden = !on;
     if (on) cue.textContent = /^换出 I/.test(rec.why && rec.why[0] || '') ? '点 HOLD 把 I 换出来 →' : '点 HOLD 暂存这块 →';
+    // 箭头要指着 HOLD：HOLD 挪到右栏最下面之后，固定挂在盘面右上角就指空了 —— 按 HOLD 框的高度摆
+    const par = on && hs && cue.offsetParent;
+    if (par){
+      const pr = par.getBoundingClientRect(), hr = hs.getBoundingClientRect();
+      const y = hr.top + hr.height / 2 - pr.top - cue.offsetHeight / 2;
+      cue.style.top = Math.round(clamp(y, 8, pr.height - cue.offsetHeight - 8)) + 'px';
+    }
   }
 }
 function syncHint(){
