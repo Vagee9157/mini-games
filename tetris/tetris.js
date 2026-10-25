@@ -2021,7 +2021,9 @@ function wcShape(m, lines, danger){
 // 灰线和方块一样，消一行盘面就降一行；缺口被盖住以后硬挖只能一行行碎着消，不如在上面接着打四消降得快。
 // 所以只在保命时把 I 拿出来用，灰线多了也照常留井四消（WC_COVER.pen 也是 0）
 const WC_MODE = { pressH: 99, digUrgent: false };   // 模拟调参用的开关（tools 里的模拟脚本会改它）
-function wcRec(b0, type, next, hold, holdUsed, lite){
+// fixed：上一手画给这块的计划（格子）。给了、而且这块真能落到那里，就照它推荐，不再重新挑 ——
+// 「下一块」虚框画在哪，下一块出来时推荐就在哪（用户：两步推荐要一致，不能随时变）
+function wcRec(b0, type, next, hold, holdUsed, lite, fixed){
   const f0 = simFeatures(b0), danger = f0.maxH >= HINT_DANGER;
   const dig = garbRows(b0) >= WC_GARB_DIG && WC_MODE.digUrgent;
   const press = danger || dig || f0.maxH >= WC_MODE.pressH;
@@ -2030,26 +2032,29 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   const depth = wellDepth(b0), canHold = !holdUsed;
   const all = simDrops(b0, type).map(m => Object.assign(m, wcEval(b0, m.cells, next, urgent, type)));
   if (!all.length) return null;
+  const ckey = cs => cs.map(c => c.join(',')).sort().join(';');
+  const fx = fixed ? all.find(m => ckey(m.cells) === ckey(fixed)) || null : null;
   const tet = type === 'I' ? all.find(m => m.cells.every(c => c[0] === HINT_WELL) && m.lines === 4) : null;
   // ⑥ 暂存：I 来了井还不够深 → 先收着；暂存里是 I、井够深了 → 换出来四消
   // 有压力（保命）时 I 直接拿来用；灰线缺口露着、I 现在就能消掉灰线行，也直接用，不收
   // （只认消灰线：井里两三行普通的就拿 I 去消，等不到四消 —— 照推荐打 226 块就死了，实测）
   const g0 = garbRows(b0);
-  if (type === 'I' && !tet && canHold && hold !== 'I' && !press && !all.some(m => m.lines >= 1 && garbRows(m.b) < g0))
+  // 照计划放（fx）时下面几条暂存规则都不走：画计划的时候已经预演过，会被推荐暂存的块根本不画计划
+  if (!fx && type === 'I' && !tet && canHold && hold !== 'I' && !press && !all.some(m => m.lines >= 1 && garbRows(m.b) < g0))
     return { kind: 'hold', type, holdType: 'I', next, danger: urgent,
              why: ['暂存 I —— 留着打四消', '为什么：井只有 ' + depth + ' 行，不够 4 行，现在放 I 是浪费',
                    hold ? '换出来的 ' + hold + ' 照常放，井够 4 行再换回 I' : '井够 4 行再换出来'] };
-  if (type !== 'I' && hold === 'I' && canHold && depth >= 4)
+  if (!fx && type !== 'I' && hold === 'I' && canHold && depth >= 4)
     return { kind: 'hold', type, holdType: type, next, danger: urgent,
              why: ['换出 I —— 井够 4 行了', '为什么：I 竖进第 10 列就是四消', '当前的 ' + type + ' 收进暂存，下一手再放'] };
   // 有压力、暂存里压着 I：I 能消行就换出来用，别等井凑满 4 行
-  if (type !== 'I' && hold === 'I' && canHold && press && simDrops(b0, 'I').some(m => simPlace(b0, m.cells).lines >= 1))
+  if (!fx && type !== 'I' && hold === 'I' && canHold && press && simDrops(b0, 'I').some(m => simPlace(b0, m.cells).lines >= 1))
     return { kind: 'hold', type, holdType: type, next, danger: urgent,
              why: ['换出 I —— ' + (dig ? '灰线多了，I 拿来挖' : '堆高了，先用 I 消行'),
                    '为什么：' + (dig ? '灰线积了 ' + garbRows(b0) + ' 行，井凑不齐 4 行，I 一直压着灰线只会越积越多' : '盘面到 ' + f0.maxH + ' 行了，I 先拿来消几行降下来'),
                    '当前的 ' + type + ' 收进暂存，下一手再放'] };
   // 选点：分最高的那一组里（差 WC_TOL 以内算一样好），先低后左
-  let best = tet;
+  let best = fx || tet;
   let ties = [];
   if (!best){
     const top = Math.max(...all.map(m => m.v));
@@ -2061,7 +2066,7 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   }
   const bf = wcFeat(b0, best);
   // ⑥ 放哪都留洞的 S / Z / O，暂存空着就先收起来
-  if (bf.holes > 0 && canHold && !hold && (type === 'S' || type === 'Z' || type === 'O') && !urgent)
+  if (!fx && bf.holes > 0 && canHold && !hold && (type === 'S' || type === 'Z' || type === 'O') && !urgent)
     return { kind: 'hold', type, holdType: type, next, danger: urgent,
              why: ['暂存 ' + type + ' —— 放哪都会留洞', '为什么：最好的位置也要留 ' + bf.holes + ' 个洞，等有合适的台阶再放', '下一块 ' + (next || '') + ' 先放'] };
   if (lite) return { kind: 'place', type, cells: best.cells, rot: best.rot, x: best.x, score: best.v, lines: best.lines, next, danger: urgent, why: [] };
@@ -2078,7 +2083,9 @@ function wcRec(b0, type, next, hold, holdUsed, lite){
   if (hold === 'I' && best.lines !== 4) parts.push('I 在暂存等井');
   // 下一块的计划。这一手消了行的话，计划是按消完的盘面算的，行号对不上现在的盘面，就不画。
   // 只画在盘面上、不进说明：「为什么」那行在手机上本来就排满了，再加字会被截掉
-  const plan = best.plan && !best.lines ? { type: next, cells: best.plan.cells } : null;
+  // 下一块出来时要是会被推荐去暂存（I 等井、换出暂存里的 I、放哪都留洞），这里画了位置就是自相矛盾 —— 先预演一下，会暂存就不画
+  const nextHolds = () => { const r = wcRec(simPlace(b0, best.cells).b, next, null, hold, false, true); return !r || r.kind === 'hold'; };
+  const plan = best.plan && !best.lines && next && !nextHolds() ? { type: next, cells: best.plan.cells } : null;
   const l2 = '为什么：' + parts.join(' · ');
   // 别处：一样好的说为什么挑这里；差的挑两处说差在哪
   let l3;
@@ -2122,13 +2129,25 @@ function wcJudge(rec, b0, p, n, spin){
   out.r = w.r; out.msg = w.t;
   return out;
 }
+let wcPlan = null;    // 上一手画的「下一块」计划：{ type, cells, after: 照推荐放完之后盘面应有的样子 }
+let wcCur = null;     // 这一块已经给出的推荐：{ type, b: 盘面, cells }
 function wcCompute(){
   tsRec = null; hintMove = null;
   const p = game.piece;
   if (!hintMode || !p || game.over) return syncHint();
   const b0 = wcBoard();
   tsBase = b0;
-  tsRec = wcRec(b0, p.type, game.queue[0], game.hold, game.holdUsed);
+  // 计划锁定：上一手画了「下一块」虚框、你照推荐放了（盘面和画计划时预想的一模一样）、来的就是那块
+  // → 这一手直接推荐虚框那里。没照着放 / 涨了灰线 / 用了暂存，盘面或块对不上，就照常重新算。
+  // wcCur 让同一块重复算（暂存后重算、切显示）时拿到同一个结果
+  const bk = JSON.stringify(b0);
+  const fixed = wcCur && wcCur.type === p.type && wcCur.b === bk ? wcCur.cells
+              : wcPlan && wcPlan.type === p.type && wcPlan.after === bk ? wcPlan.cells : null;
+  tsRec = wcRec(b0, p.type, game.queue[0], game.hold, game.holdUsed, false, fixed);
+  if (tsRec && tsRec.kind === 'place'){
+    if (!(wcCur && wcCur.type === p.type && wcCur.b === bk)) wcCur = { type: p.type, b: bk, cells: tsRec.cells };
+    wcPlan = tsRec.plan ? { type: tsRec.plan.type, cells: tsRec.plan.cells, after: JSON.stringify(simPlace(b0, tsRec.cells).b) } : null;
+  } else { wcCur = null; wcPlan = null; }
   if (tsRec && tsRec.cells) hintMove = { type: p.type, cells: tsRec.cells, rot: tsRec.rot, x: tsRec.x, why: tsRec.why[0], lines: tsRec.why, plan: tsRec.plan };
   else if (tsRec) hintMove = { type: p.type, cells: null, why: tsRec.why[0], lines: tsRec.why };
   needsDraw = true;

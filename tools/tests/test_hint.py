@@ -69,6 +69,42 @@ JS = r"""() => {
     ok(rt.lines === 4 && !rt.plan, `这一手四消时不给计划（消 ${rt.lines} 行，plan=${!!rt.plan}）`);
   }
 
+  // 计划锁定：照推荐放了，下一块出来的推荐就是上一手画的虚框，不会再换地方
+  {
+    const key = cs => cs.map(c => c.join(',')).sort().join(';');
+    const save = JSON.stringify({ b: T.game.board, q: T.game.queue, h: T.game.hold, st: T.hintStats, ng: T.game.noGarbage, sc: T.game.score, pc: T.game.pieces, ln: T.game.lines });
+    for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
+    T.game.noGarbage = true; T.hintCompute();
+    let locked = 0, broke = [];
+    for (let i = 0; i < 60 && !T.game.over; i++){
+      const m = T.hintMove, p = T.game.piece;
+      if (!m || !p) { settle(); continue; }
+      if (!m.cells){ T.holdPiece(); continue; }
+      const plan = m.plan;
+      p.rot = m.rot; p.x = m.x; T.hardDrop(); settle();
+      if (plan && T.game.piece && T.game.piece.type === plan.type && T.hintMove && T.hintMove.cells){
+        if (key(T.hintMove.cells) === key(plan.cells)) locked++;
+        else broke.push(i + ':' + plan.type);
+      }
+    }
+    ok(locked >= 10 && !broke.length, `照推荐打 60 块：画过的「下一块」虚框，下一手推荐都在那（对上 ${locked} 次，对不上 ${broke.join(' ') || 0}）`);
+    // 没照推荐放：计划作废，照常重新算（不会硬推一个已经不对的位置）
+    for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
+    T.game.piece = null; T.game.queue[0] = 'O'; T.game.queue.unshift('L'); T.game.mods.unshift(null); T.spawnNext();
+    const m1 = T.hintMove;
+    if (m1 && m1.plan){
+      const want = m1.plan.cells, p = T.game.piece;
+      p.rot = (m1.rot + 2) & 3; p.x = 0; T.hardDrop(); settle();
+      const fresh = T.wcRec(T.wcBoard(), T.game.piece.type, T.game.queue[0], T.game.hold, T.game.holdUsed);
+      ok(T.hintMove && fresh && key(T.hintMove.cells || []) === key(fresh.cells || []), `没照推荐放：计划作废、照常重算（虚框原本在 ${key(want)}）`);
+    } else ok(false, '没照推荐放的那条没跑成：第一手没出计划');
+    // 还原：这段放的 60 多块不能算进后面断言用的统计，灰线也要开回来
+    const sv = JSON.parse(save); sv.b.forEach((r, y) => T.game.board[y] = r); T.game.queue = sv.q; T.game.hold = sv.h;
+    Object.assign(T.hintStats, sv.st); T.hintStats.rules.splice(0, Infinity, ...sv.st.rules);
+    T.game.noGarbage = sv.ng; T.game.score = sv.sc; T.game.pieces = sv.pc; T.game.lines = sv.ln; T.game.over = false;
+    T.game.piece = null; T.spawnNext();
+  }
+
   // 能暂存（和普通局一样）
   const t0 = T.game.piece.type;
   T.holdPiece();
