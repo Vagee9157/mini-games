@@ -1975,6 +1975,12 @@ body.gameover .hintbar{ visibility: hidden; }
 /* 「先离开这一局？」 */
 .leave-go{ border-color: rgba(127,227,255,.55); color: #7fe3ff; }
 
+/* 顶栏按键的点按区（外观不变）：竖向往外各扩 8px。原来只在 361~480 宽的竖屏里扩，320 宽的小屏和横屏
+   暂停 / 菜单 / 模式键只有 23~30px 高，全靠按准。横向不扩 —— 三个模式键之间只隔 1px，往外扩只会互相抢。
+   下面 361~480 那条会盖过这里（那边竖向 7px、横向 2px，暂停键单独再宽一点）。 */
+.bar:has(.modesw) :is(.back, .modesw button, .tbtn){ position: relative; }
+.bar:has(.modesw) :is(.back, .modesw button, .tbtn)::after{ content: ''; position: absolute; inset: -8px 0; }
+
 /* 顶栏好按：模式开关和按钮做高一点，点击区再往外扩到 44pt 上下；「合集」和模式开关拉开，
    原来「合集」57×25、紧挨着「普通」，一碰就离开页面。320 宽的小屏放不下，照旧用紧凑的 */
 @media (min-width: 361px) and (max-width: 480px){
@@ -1985,6 +1991,8 @@ body.gameover .hintbar{ visibility: hidden; }
   .bar:has(.modesw) #pauseBtn span{ display: none; }      /* 暂停只留图标（谁都认得），省出位置给其它按钮加大 */
   .bar:has(.modesw) :is(.back, .modesw button, .tbtn){ position: relative; }
   .bar:has(.modesw) :is(.back, .modesw button, .tbtn)::after{ content: ''; position: absolute; inset: -7px -2px; }
+  /* 暂停键只有 39px 宽，往左右多扩一点凑到 48px；它右边离菜单 6px，往右只扩 3px，两边各留一点不抢 */
+  .bar:has(.modesw) #pauseBtn::after{ inset: -7px -3px -7px -6px; }
 }
 /* 上面那几条被老的 .final span / .final b（四个大格时代的块级样式）盖了，这里拉回行内 */
 .final .final-sub span{ display: inline; font-family: inherit; font-size: inherit; letter-spacing: 0; color: inherit; }

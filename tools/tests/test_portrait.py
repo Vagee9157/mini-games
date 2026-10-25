@@ -49,6 +49,23 @@ M = r"""() => {
   for (const k of document.querySelectorAll('.pads .k, #btnSoft')){
     const r = R(k); if (Math.min(r.width, r.height) < 44) iss.push('键太小 ' + k.id + ' ' + Math.round(r.width) + '×' + Math.round(r.height));
   }
+  // ④b 顶栏暂停 / 菜单 / 三个模式键的点按区（含看不见的 ::after 往外扩的那圈）：用 elementFromPoint 扫出来量。
+  // 竖向不小于 38（320 宽小屏的上限，更宽的竖屏要 44）；361 宽以上竖屏宽也要 44（模式键之间只隔 1px，没法再往外扩）
+  if (document.querySelector('.bar .modesw')){
+    const tall = innerWidth > 360 && innerHeight > innerWidth ? 44 : 38;
+    for (const [nm, el] of [['暂停', document.getElementById('pauseBtn')], ['菜单', document.getElementById('menuBtn')],
+                            ...[...document.querySelectorAll('#modeSw [data-m]')].map(b => ['模式键 ' + b.dataset.m, b])]){
+      if (!el || !el.offsetParent) continue;
+      const r = R(el); let L = 1e9, T = 1e9, Rr = -1e9, B = -1e9;
+      for (let x = Math.floor(r.left) - 14; x <= r.right + 14; x++) for (let y = Math.floor(r.top) - 14; y <= r.bottom + 14; y++){
+        const e = document.elementFromPoint(x, y);
+        if (e && (e === el || el.contains(e))){ L = Math.min(L, x); Rr = Math.max(Rr, x); T = Math.min(T, y); B = Math.max(B, y); }
+      }
+      const w = Rr - L + 1, h = B - T + 1;
+      if (h < tall) iss.push('顶栏点按区太矮 ' + nm + ' ' + w + '×' + h + '（要 ≥' + tall + '）');
+      if (innerWidth > 360 && innerHeight > innerWidth && w < 44) iss.push('顶栏点按区太窄 ' + nm + ' ' + w + '×' + h);
+    }
+  }
   // ⑤ 横向不溢出
   if (document.documentElement.scrollWidth > innerWidth + 1) iss.push('横向溢出');
   const cell = +(R(document.querySelector('.board-box')).height / 20).toFixed(1);
