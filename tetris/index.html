@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=064a21ed">
+<link rel="stylesheet" href="tetris.css?v=ec8ca039">
 </head>
 <body>
 <div class="topline"></div>
@@ -271,6 +271,7 @@
          提示细栏那时候收起来 —— 两条一起挂盘面要少两行 -->
     <div class="drbar" id="drBar">
       <b class="pr-goal" id="drLabel"></b>
+      <span class="dr-ghost" id="drGhost" hidden></span>
       <span class="dr-stat" id="drStat"></span>
       <button class="pr-s" id="drRedo" type="button">重来</button>
       <button class="pr-s pr-menu" id="drMenu" type="button">进度</button>
@@ -366,7 +367,7 @@
       <button class="pbtn sheet-done" id="vsGo">开打</button>
     </div>
   </div>
-  <!-- 每日练习面板：四段的状态和成绩 + 最近 7 天。开着时方块停住 -->
+  <!-- 每日练习面板：五段的状态和成绩 + 最近 7 天。开着时方块停住 -->
   <div class="sheet" id="drSheet" hidden>
     <div class="sheet-box">
       <div class="sheet-top"><h3>每日练习</h3></div>
@@ -489,7 +490,7 @@
 
 </div>
 
-<script src="tetris.js?v=99ffdd91"></script>
+<script src="tetris.js?v=4d156c7e"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

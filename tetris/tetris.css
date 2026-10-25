@@ -1676,6 +1676,10 @@ body.drilling.hinting .hintbar{ display: none; }
 body.drilling .pr-goal{ color: #ffd166; }
 body.drilling.hinting .pr-goal{ color: #5ee08a; }
 .dr-stat{ flex: none; font-size: 12px; opacity: .75; font-variant-numeric: tabular-nums; }
+/* 冲刺幽灵：比你历史最好的那次快（绿）/ 慢（红）多少秒 */
+.dr-ghost{ flex: none; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dr-ghost.up{ color: #5ee08a; }
+.dr-ghost.dn{ color: #ff7a7a; }
 .dr-entry{ width: 100%; margin: 0 0 8px; font-size: 14px; }
 .dr-body{ display: flex; flex-direction: column; gap: 6px; }
 .dr-st{

@@ -1,4 +1,4 @@
-"""每日练习：四消热身题可解、四段流程、计数口径、按天存档、隔离
+"""每日练习：四消热身题可解、五段流程、计数口径、按天存档、隔离、想多久、冲刺幽灵、压力段
 
 热身题（四消热身）：底下 4 行左边九列快满、井空着，第 4 行留一个正好是这题那块底面的缺口 ——
 先补平、再把 I 竖进井打四消。出题用 simDrops 验过「从顶上直接落得进去」。
@@ -174,11 +174,39 @@ JS = r"""async () => {
   await sleep(900);
   const sp = T.drill && T.drill.done.sprint;
   ok(!!sp && sp.done && sp.ms > 0 && sp.pieces === 6, `冲刺成绩：${sp && T.fmtMs(sp.ms)}、${sp && sp.pieces} 块、${sp && sp.keys} 键、多余 ${sp && sp.faults}`);
-  ok(/练完了/.test($('drGo').textContent) && $('drSkip').disabled, '四段都完：按钮变「练完了」');
+  ok(Array.isArray(sp.splits) && sp.splits.length === 8 && sp.splits.every((v, i) => Number.isFinite(v) && (!i || v >= sp.splits[i - 1])),
+     `冲刺成绩带 8 个分段时间（每 5 行一个，递增）：${sp.splits}`);
+  ok(Number.isFinite(sp.think) && sp.think > 100 && sp.think < 3000, `冲刺成绩带「每块想多久」（${sp.think} ms，每块都等了 ${T.DROP_BORN_MS}ms 以上才按）`);
+  ok(/压力/.test($('drGo').textContent) && !$('drSkip').disabled, `冲刺完下一段是压力（「${$('drGo').textContent}」）`);
+
+  // ── ⑤ 压力 2 分钟：200 行开局的盘面、等级和灰线 ──
+  $('drGo').click();
+  ok(T.drill.stage === 'press' && T.drill.clock && !T.game.frozen, '压力段开始计时');
+  ok(T.game.lines === T.DRILL_PRESS_LINES && T.game.level === 34 && T.game.score === 0, `从 200 行、34 级、0 分起（${T.game.lines} 行 / ${T.game.level} 级 / ${T.game.score} 分）`);
+  { const rows = T.game.board.filter(r => r.some(c => c === 'X')).length;
+    ok(!T.game.noGarbage && rows >= 4, `灰线真涨、盘面上有 ${rows} 行灰线`); }
+  { const g0 = T.game.garbage; T.garbageTimer = 1e9; T.step(50);
+    ok(T.game.garbage > g0, `灰线钟到点就升一行（${g0} → ${T.game.garbage}）`); }
+  ok(T.game.level === 34, '压力段不升级');
+  T.game.score = 12345;
+  T.drill.ms = T.DRILL_PRESS_MS - 100; T.step(200);
+  await sleep(900);
+  { const pr = T.drill && T.drill.done.press;
+    ok(!!pr && pr.done && pr.ms === T.DRILL_PRESS_MS && pr.pts === 12345 && pr.lines === 0,
+       `时间到：撑满 2 分钟、${pr && pr.pts} 分、消 ${pr && pr.lines} 行（${pr && T.fmtMs(pr.ms)}）`);
+    ok(/撑满/.test($('drBody').textContent) && /12,345|1\.23万/.test($('drBody').textContent), '面板上写着撑满和分数');
+    ok(T.readBest() === best0, '压力段不写最高分'); }
+  // 被顶死：算这一段的成绩、不进结算页
+  $('drSheet').hidden = true; T.drillBegin('press'); T.game.score = 777; T.endGame('出生撞死'); await sleep(900);
+  { const pr = T.drill && T.drill.done.press;
+    ok(!!pr && !pr.done && pr.pts === 777 && pr.ms < T.DRILL_PRESS_MS, `被顶死：done=false、${pr && pr.pts} 分、撑了 ${pr && T.fmtMs(pr.ms)}`);
+    ok(T.drillReadAll().days[T.bjDay()].press.pts === 12345, '同一天分数低的那次不覆盖'); }
+  ok(/练完了/.test($('drGo').textContent) && $('drSkip').disabled, '五段都完：按钮变「练完了」');
 
   // ── 存档 ──
   const all = T.drillReadAll(), today = all.days[T.bjDay()];
-  ok(!!today && !!today.warm && !!today.stack && !!today.dig && !!today.sprint, '今天四项都存下来了');
+  ok(!!today && !!today.warm && !!today.stack && !!today.dig && !!today.sprint && !!today.press, '今天五项都存下来了');
+  ok(/热身/.test($('drBody').querySelector('.dr-hist').textContent) && !/T 槽/.test($('drBody').querySelector('.dr-hist').textContent), '历史表头是「热身」（不是老的「T 槽」）');
   ok($('drBody').querySelector('.dr-hist') && /\d+\/\d+/.test($('drBody').querySelector('.dr-hist').textContent), '面板里有最近几天的表');
   // 同一天再来一次更差的：留最好的
   T.drillSave('sprint', { done: true, ms: sp.ms + 5000, lines: 40, pieces: 6, keys: 9, faults: 3 });
@@ -222,6 +250,51 @@ JS = r"""async () => {
   ok(/这一段重来/.test($('rsAgain').textContent), `重开面板的主按钮写着「${$('rsAgain').textContent}」`);
   $('rsAgain').click();
   ok(T.drill.stage === 'warm' && T.drill.ms === 0, '顶栏「重开」→「这一段重来」');
+
+  // ── 想多久 + 幽灵（单开一轮冲刺）──
+  localStorage.removeItem(T.DRILL_KEY);
+  T.startDrill(); $('drGo').click(); T.drillBegin('sprint');
+  ok(T.drill.ghost === null && $('drGhost').hidden, '没有历史最好成绩：不显示快 / 慢');
+  const R2 = T.TOTAL_ROWS;
+  { // 消行动画里就按了：这块算 0（出块之前已经想好）
+    for (let y = 0; y < R2; y++) T.game.board[y].fill(null);
+    T.game.piece = null; T.game.queue.unshift('I'); T.game.mods.unshift(null); T.spawnNext();
+    for (let x = 0; x < 9; x++) T.game.board[R2 - 1][x] = 'J';
+    await sleep(T.DROP_BORN_MS + 30);
+    const q = T.game.piece; q.rot = 1; q.x = 7; q.y = 0;
+    const ev2 = (id, t) => $(id).dispatchEvent(new MouseEvent(t, { bubbles: true }));
+    const n0 = T.drill.think.length;
+    ev2('btnDrop', 'mousedown'); ev2('btnDrop', 'mouseup'); await sleep(80);
+    ok(!!T.clearing && !T.game.piece, '落底消了一行，进了消行动画');
+    ev2('btnRight', 'mousedown'); ev2('btnRight', 'mouseup');
+    ok(T.drill.pre === true, '消行动画里按了键：记下「提前按了」');
+    await sleep(400);
+    ok(T.drill.think.length >= n0 + 2 && T.drill.think[T.drill.think.length - 1] === 0, `下一块出来：想的时间记 0（${T.drill.think.slice(n0)}）`);
+    const n1 = T.drill.think.length;
+    ev2('btnLeft', 'mousedown'); ev2('btnLeft', 'mouseup');
+    ok(T.drill.think.length === n1, '同一块后面再按键不重复记');
+  }
+  // 幽灵：分段插值
+  { const g = { splits: [10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000] };
+    ok(T.ghostTime(g, 0) === 0 && T.ghostTime(g, 5) === 10000 && T.ghostTime(g, 40) === 80000, '幽灵：0 行 0 秒、5 行第一段、40 行最后一段');
+    ok(T.ghostTime(g, 2.5) === 5000 && T.ghostTime(g, 7.5) === 15000, '幽灵：分段之间按行数线性插');
+    const sv = { done: true, ms: 80000, lines: 40, pieces: 100, keys: 300, faults: 5, splits: g.splits, think: 700 };
+    T.drillSave('sprint', sv);
+    ok(T.drillGhost() && T.drillGhost().ms === 80000, '存过带分段的冲刺：它就是幽灵');
+    T.drillSave('sprint', Object.assign({}, sv, { ms: 90000 }));
+    ok(T.drillGhost().ms === 80000, '更慢的不会顶掉幽灵');
+    T.drillBegin('sprint');
+    ok(!!T.drill.ghost && !$('drGhost').hidden && /^快 0\.0s$/.test($('drGhost').textContent), `有最好成绩：细栏显示快 / 慢（「${$('drGhost').textContent}」）`);
+    // 5 行用了 8 秒（幽灵 10 秒）→ 快 2 秒；停着不消行，过了幽灵下一行的时刻就一点点变慢
+    T.game.lines = 5; T.drill.lastLines = 5; T.drill.lastMs = 8000; T.drill.ms = 8000;
+    ok(Math.abs(T.drillGhostDelta() - 2000) < 1, `5 行 8 秒、幽灵 10 秒：快 2 秒（${T.drillGhostDelta()}）`);
+    T.drill.ms = 13000;
+    ok(T.drillGhostDelta() === -1000, `停着不消行：幽灵 6 行在 12 秒，现在 13 秒 → 慢 1 秒（${T.drillGhostDelta()}）`);
+    T.drill.ms = 13000; T.drill.statAt = -1; T.drillStep(0);
+    ok($('drGhost').classList.contains('dn') && $('drGhost').textContent === '慢 1.0s', `细栏变红：「${$('drGhost').textContent}」`);
+    T.drillBegin('warm');
+    ok($('drGhost').hidden, '换到别的段：不显示快 / 慢');
+  }
   return L;
 }"""
 
@@ -245,15 +318,16 @@ with sync_playwright() as p:
         q.goto(f"http://127.0.0.1:{port}/tetris/index.html"); q.wait_for_function("() => !!window.__tetris")
         q.evaluate("""() => { const T = __tetris, days = {};
           for (let i = 1; i <= 7; i++){ const k = new Date(Date.now() + 8*3600e3 - i*864e5).toISOString().slice(0,10);
-            days[k] = { warm:{first:2,n:5,ms:50000}, stack:{same:60,total:100,holes:4}, sprint:{done:true,ms:180000,lines:40,pieces:100,keys:330,faults:15} }; }
+            days[k] = { warm:{first:2,n:5,ms:50000}, stack:{same:60,total:100,holes:4}, sprint:{done:true,ms:180000,lines:40,pieces:100,keys:330,faults:15,think:900}, press:{done:false,ms:80000,lines:20,pieces:60,pts:123456,think:800} }; }
           localStorage.setItem(T.DRILL_KEY, JSON.stringify({ v:1, days })); T.startDrill(); }""")
         q.wait_for_timeout(450)          # 面板有 .22s 的上滑动画，滑完再量
         g = q.evaluate("""() => {
           const r = document.getElementById('drGo').getBoundingClientRect();
+          const bx = document.querySelector('#drSheet .sheet-box').getBoundingClientRect(), tb = document.querySelector('#drBody .dr-hist').getBoundingClientRect();
           return [Math.round(r.top), Math.round(r.bottom), innerHeight,
-                  document.querySelectorAll('#drBody .dr-hist tr').length]; }""")
-        okk = g[1] <= g[2] and g[0] >= 0 and g[3] == 8
-        print('  ', ('PASS ' if okk else 'FAIL ') + f'{w}×{h} 面板主按钮在屏幕里（{g[0]}~{g[1]} / {g[2]}，表 {g[3]-1} 行）')
+                  document.querySelectorAll('#drBody .dr-hist tr').length, tb.left >= bx.left - 1 && tb.right <= bx.right + 1]; }""")
+        okk = g[1] <= g[2] and g[0] >= 0 and g[3] == 8 and g[4]
+        print('  ', ('PASS ' if okk else 'FAIL ') + f'{w}×{h} 面板主按钮在屏幕里、表没撑出面板（{g[0]}~{g[1]} / {g[2]}，表 {g[3]-1} 行，不越界 {g[4]}）')
         if not okk: fails += 1
         q.close()
     # 疯狂版没有这些
