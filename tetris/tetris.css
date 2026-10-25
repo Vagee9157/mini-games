@@ -700,9 +700,11 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
   transition: transform .08s, background .12s, border-color .12s;
 }
 .k svg{ width: 24px; height: 24px; display: block; color: var(--ink); }
-/* 落底和其他三个等高、上下对齐，只在左右各留 6px 死区。
-   高度压矮那版看着一排不齐，防误触换成横向留白这一条。 */
-.k-drop{ margin: 0 6px; }
+/* 落底和其他三个等高、上下对齐，只收窄宽度：占自己那格的 64%（375 宽上约 52px，原来 70px），
+   最窄 48px 守住 44pt 的可点下限。两边空出来的就是死区 —— 落底不接「按偏了也算」，
+   按在空白里会就近交给右移 / 变换，不会变成落底（用户：落底按钮小一点，好容易按错）。
+   高度压矮那版看着一排不齐，所以不动高度。 */
+.k-drop{ justify-self: center; width: max(48px, 64%); margin: 0; }
 
 .k-soft{ min-height: 46px; }
 /* 竖屏：软降钉在右栏最底下，正好在「变换」正上方。右栏原本是上下居中的，
@@ -890,7 +892,7 @@ body.practising .modesw{ border-color: rgba(127,227,255,.5); }
   .side .k-soft{ grid-area: padr; align-self: start; justify-self: end; width: 112px; margin: 0; min-height: 44px; }
   .k{ min-height: 50px; }
   .k .ico{ font-size: 19px; }
-  .k-drop{ margin: 0 6px; }
+  .k-drop{ justify-self: center; width: max(48px, 64%); margin: 0; }
 
   .stats{ grid-template-columns: 1fr 1fr; gap: 5px; align-content: start; }
   .stat{ padding: 3px 5px 4px; text-align: left; }
@@ -1616,12 +1618,8 @@ body.demoing .pads{ opacity: .4; pointer-events: none; }
 body.practising .side .stats .stat[data-k="score"]{ opacity: .5; }
 
 
-/* 窄屏（iPhone SE 一类 320px）：五列之后落底只剩 42px，低于 44pt 的可点下限
-   —— 它自带的 6px 死区边距在这个宽度下反而把自己挤没了。收窄到 3px 换回 48px，
-   死区变薄但还在，总比按不中强。
-   这条必须留在文件末尾：上面的 .k-drop{ margin: 0 6px } 和它特异性相同，
-   写在前面会被后者盖掉（第一版就是这么失效的，实测 42px 没变）。 */
-@media (max-width: 360px){ .k-drop{ margin: 0 3px; } }
+/* 窄屏（iPhone SE 一类 320px）原来单独把落底的边距收到 3px 保住 44pt；
+   现在落底宽度是 max(48px, 64%)，自带下限，这条不需要了 */
 
 /* 有模式开关的顶栏（只在标准版）：手机宽度上「样式 / 暂停 / 重开」只留图标。
    实测 iPhone 13 带文字要 422px、顶栏只有 370px，会折行；收成图标之后余 30 多 px。
