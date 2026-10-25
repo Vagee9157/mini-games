@@ -10170,9 +10170,19 @@ function bindButtons(){
     // 触屏走 touch 事件；一旦用过触屏就不再理会浏览器合成的 mouse 事件，
     // 否则一次点按会被当成两次输入。
     let touched = false;
-    el.addEventListener('touchstart', (e) => { touched = true; start(e); }, { passive: false });
-    el.addEventListener('touchend', end, { passive: false });
-    el.addEventListener('touchcancel', end, { passive: false });
+    // 落底 / 软降只认真按在键上的触点。Chromium（安卓）会把落在键旁边几 px 空白里的触摸直接改派给最近的键
+    // （实测落底旁边 8px 的触点 touchstart 的 target 就是落底），而落底按下去那块就锁死了。
+    // 所以不信 target，量触点坐标：不在键的矩形里就当按偏，交给最近的移动 / 变换键
+    const strict = id === 'btnDrop' || id === 'btnSoft';
+    el.addEventListener('touchstart', (e) => {
+      touched = true;
+      if (strict && missed(e, el)){ e.preventDefault(); routeMiss(e); return; }
+      start(e);
+    }, { passive: false });
+    // 按偏的触点交给了别的键，它的松手也归那个键管 —— 别在这儿把落底 / 软降的状态误松掉（另一根手指可能还按着软降）
+    const own = (e) => strict && [...e.changedTouches].every(t => owner.has(t.identifier));
+    el.addEventListener('touchend', (e) => { if (!own(e)) end(e); }, { passive: false });
+    el.addEventListener('touchcancel', (e) => { if (!own(e)) end(e); }, { passive: false });
     el.addEventListener('mousedown', (e) => { if (!touched) start(e); });
     el.addEventListener('mouseup', (e) => { if (!touched) end(e); });
     el.addEventListener('mouseleave', (e) => { if (!touched) end(e); });
@@ -10201,6 +10211,19 @@ function bindButtons(){
     return best;
   };
   const owner = new Map();     // 触点 id → 交给了哪个键，松手时找回去
+  const missed = (e, el) => {
+    const t = e.changedTouches[0], r = el.getBoundingClientRect();
+    return !!t && (t.clientX < r.left || t.clientX > r.right || t.clientY < r.top || t.clientY > r.bottom);
+  };
+  const routeMiss = (e) => {
+    if (!game.started || game.over || game.paused || demoRunning || topSheet()) return;
+    for (const t of e.changedTouches){
+      const k = nearPad(t.clientX, t.clientY);
+      if (!k) continue;
+      owner.set(t.identifier, k);
+      k.start(e);
+    }
+  };
   document.addEventListener('touchstart', (e) => {
     if (!game.started || game.over || game.paused || demoRunning || topSheet()) return;
     for (const t of e.changedTouches){

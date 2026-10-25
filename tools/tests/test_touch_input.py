@@ -125,6 +125,32 @@ with sync_playwright() as p:
     pg.goto(f"http://127.0.0.1:{port}/tetris/index.html"); pg.wait_for_function("() => !!window.__tetris")
     r = pg.evaluate(JS)
     if errs: r.append('FAIL 页面报错：' + '; '.join(errs))
+    # 真实触摸（CDP）：Chromium 会把落在键旁边空白里的触摸直接改派给最近的键，
+    # 合成的 TouchEvent 测不到这个。落底 / 软降只认真按在键矩形里的触点。
+    cdp = pg.context.new_cdp_session(pg)
+    def touch(x, y):
+        cdp.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x, 'y': y, 'id': 0}]}); pg.wait_for_timeout(40)
+        cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []}); pg.wait_for_timeout(80)
+    def fresh():
+        pg.evaluate("""() => { const T = __tetris; document.getElementById('startBtn').click(); T.game.noGarbage = true;
+          for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
+          T.game.piece = null; T.game.queue.unshift('T'); T.game.mods.unshift(null); T.spawnNext(); }""")
+        pg.wait_for_timeout(330)
+    state = lambda: pg.evaluate("() => { const g = __tetris.game, p = g.piece; return p ? [g.pieces, p.x, p.rot] : null }")
+    rc = lambda id: pg.evaluate("id => { const r = document.getElementById(id).getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom] }", id)
+    fresh(); dr = rc('btnDrop'); cy = (dr[1] + dr[3]) / 2
+    for name, x, y, want in [('落底键中心', (dr[0] + dr[2]) / 2, cy, 'drop'),
+                             ('落底左边 8px 的空白', dr[0] - 8, cy, 'no-drop'),
+                             ('落底右边 8px 的空白', dr[2] + 8, cy, 'no-drop'),
+                             ('落底下面 10px', (dr[0] + dr[2]) / 2, dr[3] + 10, 'no-drop')]:
+        fresh(); a = state(); touch(x, y); b2 = state()
+        dropped = b2[0] - a[0]
+        okk = dropped == 1 if want == 'drop' else dropped == 0
+        r.append(('PASS ' if okk else 'FAIL ') + f'真实触摸：点{name}，{"落底" if want == "drop" else "不落底"}（落了 {dropped} 块）')
+    sf = rc('btnSoft')
+    fresh(); a = state(); touch((sf[0] + sf[2]) / 2, sf[1] - 10)
+    pg.wait_for_timeout(250); b2 = state()
+    r.append(('PASS ' if b2[0] == a[0] else 'FAIL ') + '真实触摸：点在软降上面 10px，不触发软降 / 落底')
     print('屏幕按键防误操作')
     for l in r:
         print('  ', l)
