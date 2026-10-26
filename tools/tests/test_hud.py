@@ -60,6 +60,24 @@ JS = r"""async () => {
     ok(val() === '800' && !box.classList.contains('beat') && box.firstElementChild.textContent === 'BEST',
        `下一局：BEST 换成新纪录 800（${val()}）`);
   }
+  // ⑤ 不进纪录的模式：BEST 照样显示（总纪录当参照），但分数超过了也不标「已破纪录」
+  {
+    const box = document.getElementById('best').parentElement, val = () => document.getElementById('best').textContent;
+    T.game.best = 500; T.startPractice(); T.step(16);
+    ok(!box.hidden && val() === '500', `练习：BEST 显示总纪录 500（${val()}）`);
+    T.game.score = 9999; T.step(16);
+    ok(val() === '500' && !box.classList.contains('beat'), '练习里分数超过了：不标「已破纪录」（练习不进纪录）');
+    T.startHint(); T.game.score = 9999; T.step(16);
+    ok(!box.hidden && val() === '500' && !box.classList.contains('beat'), '提示模式：BEST 在、不标已破纪录');
+    // NES：这个起始级自己的纪录
+    localStorage.setItem(T.NES_KEY, JSON.stringify({ best: { 9: { score: 123000, start: 9 } }, runs: [] }));
+    T.startNes(9); T.step(16);
+    ok(!box.hidden && val() === '12.3万', `NES：BEST 显示起始 9 级的纪录（${val()}）`);
+    T.nes.score = 130000; T.nesHud();
+    ok(val() === '12.3万' && box.classList.contains('beat'), 'NES：超过这一级的纪录：标「已破纪录」');
+    T.startNes(0); T.nesHud();
+    ok(val() === '—' && !box.classList.contains('beat'), `NES：另一个起始级没记录写「—」（${val()}）`);
+  }
   return L;
 }"""
 

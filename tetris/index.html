@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/shared.css?v=5c706aa6">
-<link rel="stylesheet" href="tetris.css?v=0ba2c637">
+<link rel="stylesheet" href="tetris.css?v=112de5e5">
 </head>
 <body>
 <div class="topline"></div>
@@ -103,8 +103,8 @@
             <button class="pbtn ghost" id="practiceBtn" data-std-only>练习关卡</button>
             <!-- 每日练习：热身 + 堆叠 + 40 行冲刺，约 10 分钟，按天存成绩看进步 -->
             <button class="pbtn ghost" id="dailyBtn" data-std-only>每日练习</button>
-            <!-- 中途开局：直接从第 150 / 180 / 200 行开始，等级、分数、灰线、盘面按平时打到这里的样子铺好 -->
-            <button class="pbtn ghost" id="midBtn" data-std-only>中途开局</button>
+            <!-- 中途开局：直接从第 180 / 200 / 220 / 250 行开始，等级、分数、灰线、盘面按平时打到这里的样子铺好 -->
+            <button class="pbtn ghost mid-entry" id="midBtn" data-std-only>中途开局</button>
             <!-- 另外两种玩法：对战机器人（现代规则 + 互发垃圾行）、经典 NES（另一套规则，单独的引擎） -->
             <!-- std-only:start -->
             <div class="mode-row">
@@ -427,7 +427,7 @@
         <button class="pr-b" type="button" data-rs="hint">提示</button>
         <button class="pr-b" type="button" data-rs="tspin">T 旋练习</button>
         <button class="pr-b" type="button" data-rs="drill">每日练习</button>
-        <button class="pr-b" type="button" data-rs="mid">中途开局</button>
+        <button class="pr-b mid-entry" type="button" data-rs="mid">中途开局</button>
       </div>
       <!-- std-only:end -->
       <button class="pbtn ghost rs-close" id="rsClose" type="button">关闭</button>
@@ -490,7 +490,7 @@
 
 </div>
 
-<script src="tetris.js?v=7c10b3eb"></script>
+<script src="tetris.js?v=58408898"></script>
 <script>
 // 注册 Service Worker：装好之后断网也能玩（高铁、地铁、飞机上）
 if ('serviceWorker' in navigator) {

@@ -1,4 +1,4 @@
-"""中途开局：直接从第 150 / 180 / 200 行开始
+"""中途开局：直接从第 180 / 200 / 220 / 250 行开始
 
 等级、分数、已用时间、灰线钟按平时水平铺好，盘面垫灰线 + 一层方块；不进最高分，历史记录单独标；
 结算复盘只算开局之后自己打的那一段。
@@ -24,7 +24,8 @@ JS = r"""async () => {
   ok(!!$('midBtn') && !!document.querySelector('#rsModes [data-rs="mid"]'), '开局面板和重开面板都有「中途开局」');
   $('midBtn').click(); await wait(50);
   const tiers = [...document.querySelectorAll('#midTiers [data-ml]')].map(b => +b.dataset.ml);
-  ok(!$('midSheet').hidden && tiers.join(',') === '150,180,200', `三档：${tiers.join(' / ')} 行起`);
+  ok(!$('midSheet').hidden && tiers.join(',') === '180,200,220,250', `四档：${tiers.join(' / ')} 行起（没有 150）`);
+  ok(document.querySelector('[data-ml="200"]').classList.contains('on'), '默认选中 200 行起');
   ok(/还不到 3 局/.test($('midSrc').textContent), '没记录：说按默认水平估');
   document.querySelector('[data-ml="180"]').click(); $('midGo').click(); await wait(50);
 
@@ -39,7 +40,8 @@ JS = r"""async () => {
   const ms = T.levelMult;
   let sum = 0; for (let i = 0; i < 180; i++) sum += ms(Math.floor(i / T.LINES_PER_LEVEL) + 1);
   ok(Math.abs(P.s - Math.round(153 * sum)) <= 1, `默认分数 = 每行 153 × 一路的等级倍率（${P.s}）`);
-  ok(gRows() === 3 && height() >= 7 && height() <= 10, `盘面：底下 ${gRows()} 行灰线，堆高 ${height()} 行`);
+  // 堆高有随机：机器人堆到「h − 灰线」行就停，最后一块能多出最多 3 行（竖 I），所以上限是 h + 3，不是 h
+  ok(gRows() === 3 && height() >= 7 && height() <= 11, `盘面：底下 ${gRows()} 行灰线，堆高 ${height()} 行（7~11）`);
   ok(!g.board.some(r => r.every(Boolean)), '盘面上没有满行');
   ok(!g.board.slice(0, R - 12).some(r => r.some(Boolean)), '上面留着地方（12 行以上全空）');
   ok(/中途开局 · 180 行起/.test($('modeTag').textContent) && !$('modeTag').hidden, `盘面角上写着「${$('modeTag').textContent}」`);
@@ -72,13 +74,39 @@ JS = r"""async () => {
   const a = []; for (let i = 0; i < 5; i++) a.push({ d: Date.now() - i * 1e6, s: 300000, l: 250, lv: 42, t: 500000, p: 600 });
   localStorage.setItem(T.HIST_KEY, JSON.stringify(a));
   let s250 = 0; for (let i = 0; i < 250; i++) s250 += ms(Math.floor(i / T.LINES_PER_LEVEL) + 1);
-  const r = T.midRates(), P2 = T.midPlan(150);
+  const r = T.midRates(), P2 = T.midPlan(250);
   ok(r.from === 5 && Math.abs(r.b - 300000 / s250) < 1e-6 && r.tpl === 2000, `按最近 5 局估：每行底分 ${r.b.toFixed(1)}、每行 ${r.tpl / 1000} 秒`);
-  ok(P2.e === 300000 && P2.eLo === 255000 && P2.eHi === 345000, `150 行起：已用中心 ${P2.e / 1000} 秒（150 × 2 秒），随机范围 ±15%`);
+  ok(P2.e === 500000 && P2.eLo === 425000 && P2.eHi === 575000, `250 行起：已用中心 ${P2.e / 1000} 秒（250 × 2 秒），随机范围 ±15%`);
   T.openMidSheet(); await wait(30);
   ok(/最近 5 局/.test($('midSrc').textContent), `面板上说按最近 5 局估（${$('midSrc').textContent}）`);
   T.startMid(200);
   ok(g.lines === 200 && g.level >= 32 && g.level <= 36 && gRows() === 4, `200 行起：${g.level} 级（32~36）、${gRows()} 行灰线`);
+  { // 220 / 250 行起：等级 = floor(L/6)+1 ±2，灰线更多
+    T.startMid(220);
+    ok(g.lines === 220 && g.level >= 35 && g.level <= 39 && gRows() === 4, `220 行起：${g.level} 级（35~39）、${gRows()} 行灰线`);
+    T.startMid(250);
+    ok(g.lines === 250 && g.level >= 40 && g.level <= 44 && gRows() === 5, `250 行起：${g.level} 级（40~44）、${gRows()} 行灰线`);
+    ok(height() >= 8 && height() <= 12, `250 行起：盘面堆了 ${height()} 行（8~12）`);
+    const m250 = T.mid;
+    T.startMid(150);
+    ok(T.mid === m250 && T.mid.L === 250, '150 行起已经没了：startMid(150) 不生效（还是 250 行那局）');
+    T.startMid(200);
+  }
+  // ── BEST：这一档自己的最好成绩 ──
+  { const box = $('best').parentElement;
+    localStorage.setItem(T.HIST_KEY, JSON.stringify([
+      { d: Date.now(), s: 260000, l: 230, lv: 38, t: 3e5, p: 300, mid: 200, s0: 190000, l0: 200 },
+      { d: Date.now(), s: 330000, l: 240, lv: 40, t: 4e5, p: 400, mid: 200, s0: 190000, l0: 200 },
+      { d: Date.now(), s: 900000, l: 250, lv: 42, t: 5e5, p: 500, mid: 250, s0: 290000, l0: 250 }]));
+    ok(T.midBest(200) === 330000 && T.midBest(250) === 900000 && T.midBest(180) === 0, `每档取各自最高：200→${T.midBest(200)}、250→${T.midBest(250)}、180→${T.midBest(180)}`);
+    T.startMid(200); T.step(16);
+    ok(!box.hidden && $('best').textContent === '33万' && !box.classList.contains('beat'), `200 行起：BEST 显示这一档的 33 万（「${$('best').textContent}」），不是总纪录`);
+    T.game.score = 340000; T.step(16);
+    ok($('best').textContent === '33万' && box.classList.contains('beat') && box.firstElementChild.textContent === '已破纪录', '超过这一档的纪录：BEST 不动、标「已破纪录」');
+    T.startMid(180); T.step(16);
+    ok($('best').textContent === '—' && !box.classList.contains('beat'), `180 行起还没打过：BEST 写「—」（「${$('best').textContent}」）`);
+    T.startMid(200);
+  }
   // 消行照常升级
   const lv0 = g.level; g.lines = 203;
   for (let y = 0; y < R; y++) T.game.board[y].fill(null);

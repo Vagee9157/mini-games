@@ -45,7 +45,7 @@ STD = r"""async () => {""" + PRE + r"""
   T.restart();
 
   // ── NES 清掉 mid ──
-  T.startMid(150); T.startNes(9); T.exitPractice ? T.exitPractice() : 0;
+  T.startMid(180); T.startNes(9); T.exitPractice ? T.exitPractice() : 0;
   ok(!T.mid, '中途开局后切 NES：中途开局的状态清掉');
 
   // ── 面板里松手 ──
@@ -87,21 +87,23 @@ STD = r"""async () => {""" + PRE + r"""
   document.querySelector('#modeSw [data-m="normal"]').click(); await wait(20);
 
   // ── 历史全是中途局：摘要说清楚 ──
-  localStorage.setItem(T.HIST_KEY, JSON.stringify([{ d: Date.now(), s: 300000, l: 220, lv: 37, t: 1e5, p: 100, mid: 150, s0: 1e5, l0: 150 }]));
+  localStorage.setItem(T.HIST_KEY, JSON.stringify([{ d: Date.now(), s: 300000, l: 220, lv: 37, t: 1e5, p: 100, mid: 180, s0: 1e5, l0: 180 }]));
   T.openHistSheet(); await wait(20);
   ok(/共 1 局，都是中途开局/.test($('histSum').textContent), `历史只有中途局：摘要「${$('histSum').textContent.slice(0, 18)}…」`);
   T.closeHistSheet();
 
-  // ── 界面四条：BEST 只在计最高分的局显示、提示栏结束收起、每日练习四段、复盘长行不截断 ──
+  // ── 界面四条：每个模式都显示 BEST、提示栏结束收起、每日练习四段、复盘长行不截断 ──
   const bestBox = () => !$('best').parentElement.hidden;
   T.restart(); await wait(20);
   ok(bestBox(), '普通局：右栏有 BEST');
-  T.startMid(150); await wait(20);
-  ok(!bestBox(), '中途开局：右栏不挂 BEST（原来 15 万分旁边一个 0）');
+  T.startMid(180); await wait(20);
+  ok(bestBox() && $('best').textContent === '30万', `中途开局：右栏有 BEST，显示这一档打过的最好成绩（${$('best').textContent}）`);
+  T.startMid(220); await wait(20);
+  ok(bestBox() && $('best').textContent === '—', `中途开局：这一档还没打过就写「—」（不是 0：15 万分旁边一个 0 像出了 bug）（${$('best').textContent}）`);
   T.startPractice(); await wait(20);
-  ok(!bestBox(), '练习：不挂 BEST');
+  ok(bestBox(), '练习：也有 BEST（总纪录当参照）');
   T.startHint(); await wait(20);
-  ok(!bestBox() && getComputedStyle($('hintBar')).visibility === 'visible', '提示模式打着：提示栏在');
+  ok(bestBox() && getComputedStyle($('hintBar')).visibility === 'visible', '提示模式打着：BEST 在，提示栏也在');
   T.endGame('堆到顶了'); await wait(20);
   ok(getComputedStyle($('hintBar')).visibility === 'hidden', '提示模式结束：提示栏收起来，不挂在结算页上');
   ok(/挖灰线/.test($('prDaily').textContent), `每日练习入口写四段（${$('prDaily').textContent}）`);

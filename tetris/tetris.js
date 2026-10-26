@@ -1602,6 +1602,7 @@ function syncModeTag(){
   const txt = vs ? '对战 Lv ' + vs.bot.lv : nes ? 'NES · 起始 ' + nes.start + ' 级' : tsOn() ? 'T 旋练习 · ' + tsSpeedName() + (tsGarbage ? ' · 灰线' : '') : mid ? '中途开局 · ' + mid.L + ' 行起' : '';
   t.textContent = txt;
   t.hidden = !txt;
+  t.classList.toggle('mid', !!mid && !vs && !nes && !tsOn());      // 中途开局的标签单独一个颜色，和入口同色
 }
 function syncModeSwitch(){
   syncModeTag();
@@ -3726,8 +3727,10 @@ function nesHud(){
   setStat($('score'), fmtScore(nes.score));
   setStat($('lines'), String(nes.lines));
   setStat($('level'), String(nes.level));
-  const b = nesRecords().best[nes.start];
-  setStat($('best'), fmtScore(b ? b.score : 0));
+  // 这个起始级打出过的最高分（开局前的纪录，局内不跟着涨）
+  if (nes.bb === undefined){ const b = nesRecords().best[nes.start]; nes.bb = b ? b.score : 0; }
+  syncBestBox();
+  paintBest(nes.bb, nes.bb > 0 && nes.score > nes.bb);
 }
 
 // ── 画 ──
@@ -4722,15 +4725,16 @@ function lockPage(){
 
 // ───────────────────────── 中途开局 ─────────────────────────
 //
-// 普通局前面一两百行是在攒倍率（20 级才封顶 ×8），每局都从头打很磨。中途开局直接从第 150 / 180 / 200 行开始：
+// 普通局前面一两百行是在攒倍率（20 级才封顶 ×8），每局都从头打很磨。中途开局直接从第 180 / 200 / 220 / 250 行开始：
 // 等级、分数、已用时间、灰线钟都按「你平时打到这里大概是什么样」铺好，盘面垫几行灰线、堆一层方块。
 // 分数和用时按你最近从头打完的局估（每行底分 × 一路的等级倍率；每行平均几秒），没记录时按 246 行 24 万、10 分 40 秒那种水平。
 // 不进最高分（有一截分是送的）；历史记录里单独标「N 行起」，曲线只画从头打的局。
-const MID_TIERS = [150, 180, 200];
-const MID_SHAPE = { 150: { h: 7, g: 3 }, 180: { h: 8, g: 3 }, 200: { h: 8, g: 4 } };   // 堆多高、其中几行是灰线
+const MID_TIERS = [180, 200, 220, 250];
+// 堆多高、其中几行是灰线。越往后越高越多：220 / 250 行时灰线周期只剩 12 / 10 秒（等级 37 / 42，每超 20 级再 ×0.97）
+const MID_SHAPE = { 180: { h: 8, g: 3 }, 200: { h: 8, g: 4 }, 220: { h: 9, g: 4 }, 250: { h: 9, g: 5 } };
 const MID_DEF = { b: 153, tpl: 2600 };   // 没记录时：每行底分 153（246 行 ≈ 24 万）、每行 2.6 秒
 let mid = null;          // { L, s, p, e }：这局从第 L 行开起，开局送了 s 分、p 块、e 毫秒
-let midPick = 150;
+let midPick = 200;
 function multSum(L){
   let a = 0;
   for (let i = 0; i < L; i++) a += levelMult(Math.floor(i / LINES_PER_LEVEL) + 1);
@@ -4782,6 +4786,13 @@ function midBoard(h, g){
   }
   return tb;
 }
+// 这一档（N 行起）打出过的最高总分：BEST 格在中途开局里就看它。只算「有效局」（历史里记下来的那些），
+// 总分是和 SCORE 格同口径（含开局送的那一截）—— 格子上的「已破纪录」才对得上
+function midBest(L){
+  let b = 0;
+  for (const e of histRead()) if (e && e.mid === L && Number.isFinite(e.s) && e.s > b) b = e.s;
+  return b;
+}
 function midPlayed(){
   return !!mid && (game.pieces - mid.p >= RUSH_MIN_PIECES || game.elapsed - mid.e >= RUSH_MIN_MS);
 }
@@ -4797,6 +4808,7 @@ function startMid(L){
   garbageTimer = Math.random() * garbagePeriod() * .6;     // 灰线钟从半路走起，别一开局就涨
   mid = { L, s: P.s, p: P.p, e: P.e, dl: P.dl };
   midPick = L;
+  bestBase = midBest(L);         // 这一档的最好成绩，不是普通局的总纪录
   aidOnSpawn();                  // restart 里第一块出生时盘面还是空的，换上铺好的盘面后重拍一次（多余按键 / 标槽）
   staticDirty = true; previewDirty = true; needsDraw = true;
   syncEdge(); syncHud(); syncModeTag();
@@ -4811,7 +4823,7 @@ function renderMidSheet(){
     const best = done.length ? Math.max(...done.map(e => e.l)) : 0;
     return `<button type="button" class="mid-t${L === midPick ? ' on' : ''}" data-ml="${L}"><b>${L} 行起</b>`
       + `<span>${P.lvLo}~${P.lvHi} 级 · ${escHtml(fmtScore(P.sLo))}~${escHtml(fmtScore(P.sHi))} 分 · 已用 ${mmss(P.eLo)}~${mmss(P.eHi)}</span>`
-      + `<em>${done.length ? `打过 ${done.length} 次 · 最远 ${best} 行` : '还没打过'}</em></button>`;
+      + `<em>${done.length ? `打过 ${done.length} 次 · 最远 ${best} 行 · 最好 ${escHtml(fmtScore(midBest(L)))}` : '还没打过'}</em></button>`;
   }).join('');
   const src = $('midSrc');
   if (src) src.textContent = (r.from ? `分数和用时按你最近 ${r.from} 局从头打完的局估` : '你从头打完的局还不到 3 局，先按 246 行 24 万、10 分 40 秒的水平估')
@@ -5692,7 +5704,9 @@ function endGame(why){
   $('overScore').textContent = groupInt(game.score);
   $('overLines').textContent = game.lines;
   $('overLevel').textContent = game.level;
-  $('overBest').textContent = groupInt(game.best);
+  // 结算卡的「最高」：这一模式的纪录（含这一局）。不进纪录的局只当参照放总纪录
+  { const rec = bestCounts() && (!mid || midPlayed());
+    $('overBest').textContent = groupInt(rec ? Math.max(bestBase, game.score) : bestCounts() ? bestBase : game.best); }
   // 清过档的话把旧规则下的纪录也摆出来 —— 个人小游戏里最高分就是全部的意义，
   // 光写进 localStorage 没人看得见等于没留
   const lg = readLegacy();
@@ -6636,11 +6650,23 @@ function syncGoal(){
 
 // 不计最高分的局（练习 / 提示 / T 旋练习 / 每日练习 / 中途开局 / 开过标 T 槽）不显示 BEST：
 // 原来照挂着「BEST 0」，中途开局 15 万分旁边一个 0，看着像出了 bug
+// 这局的分数算不算进 BEST 那条纪录
+function bestCounts(){ return !assisted() && !(game.run && game.run.aidTs); }
+// 画 BEST 格：没有纪录写「—」（不是 0：中途开局 15 万分旁边一个 0 像出了 bug）；超过了就变金、标「已破纪录」
+function paintBest(base, beat){
+  setStat($('best'), base > 0 ? fmtScore(base) : '—');
+  const bb = $('best').parentElement;
+  if (bb.classList.contains('beat') !== beat){
+    bb.classList.toggle('beat', beat);
+    bb.firstElementChild.textContent = beat ? '已破纪录' : 'BEST';
+  }
+}
 function syncBestBox(){
-  const no = !CRAZY && (assisted() || !!mid || !!(game.run && game.run.aidTs));
+  // 每个模式都显示 BEST：普通局 = 总纪录，中途开局 = 这一档的最好成绩，NES = 这个起始级的纪录；
+  // 练习 / 提示 / T 旋 / 每日练习 / 标了 T 槽的局不进纪录，格子只当参照放总纪录（不标「已破纪录」）
   const a = $('best'), b = $('overBest');
-  if (a && a.parentElement.hidden !== no) a.parentElement.hidden = no;
-  if (b && b.parentElement.hidden !== no) b.parentElement.hidden = no;
+  if (a && a.parentElement.hidden) a.parentElement.hidden = false;
+  if (b && b.parentElement.hidden) b.parentElement.hidden = false;
   // 结束了就把提示细栏收起来：原来旧推荐和「先自己找 / 规则」还挂在结算页上下
   document.body.classList.toggle('gameover', !!game.over);
 }
@@ -6654,19 +6680,14 @@ function syncHud(){
   syncStreak();
   syncDanger();
   syncBestBox();
-  const key = game.score + '/' + game.lines + '/' + game.level + '/' + bestBase + '/' + game.started;
+  const counts = bestCounts(), shown = counts ? bestBase : game.best;
+  const key = game.score + '/' + game.lines + '/' + game.level + '/' + shown + '/' + game.started + '/' + counts;
   if (key === hudCache) return;         // 每帧写 DOM 很浪费
   hudCache = key;
   rollScore(false);
   setStat($('lines'), String(game.lines));
   setStat($('level'), String(game.level));
-  setStat($('best'), fmtScore(bestBase));
-  const beat = game.started && bestBase > 0 && game.score > bestBase;
-  const bb = $('best').parentElement;
-  if (bb.classList.contains('beat') !== beat){
-    bb.classList.toggle('beat', beat);
-    bb.firstElementChild.textContent = beat ? '已破纪录' : 'BEST';
-  }
+  paintBest(shown, counts && game.started && shown > 0 && game.score > shown);
   syncPace();
 }
 
@@ -10974,14 +10995,14 @@ window.__tetris = { game, PIECES, TRACKS, SFX_PACKS, CRAZY, NS,
   DRILL_PRESS_LINES, DRILL_PRESS_MS, drillGhost, ghostTime, drillGhostDelta, drillThink, drillStep,
   get drill(){ return drill; }, DRILL_DIG_ROWS, drillDigLeft,
   get inputBuf(){ return inputBuf; },
-  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, wcRec, wcBoard, wcJudge, WC_WELL, WC_COVER, WC_MODE, wellDepth, garbRows, finessePath, pathText, HINT_RULES, WC_FITS, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
+  tsdSlots, tsBestSlot, tsPathText, TS_W, tsEval, tsReadyCount, startTspin, tsOn, setTsSpeed, setTsGarbage, get tsGarbage(){ return tsGarbage; }, canScroll, reviewTips, histRead, histPush, coachRec, judgeCore, wcRec, wcBoard, wcJudge, WC_WELL, WC_COVER, WC_MODE, wellDepth, garbRows, finessePath, pathText, HINT_RULES, WC_FITS, COACH_TSD100, get shadow(){ return shadow; }, HIST_KEY, openHistSheet, closeHistSheet, openMenu, closeMenu, histChartSVG, startMid, openMidSheet, setAid, liveRun, askLeave, closeLeave, PALETTES, PAL_GROUPS, STYLES, skin, get aids(){ return aids; }, get aidSlots(){ return aidSlots; }, syncPace, AID_KEY, midPlan, midRates, midBest, MID_TIERS, get mid(){ return mid; }, get histView(){ return histView; }, get tsSpeed(){ return tsSpeed; }, TS_SPEED_KEY, get tsRec(){ return tsRec; }, get tsStats(){ return tsStats; },
   get hintKind(){ return hintKind; },
   hitPower, hitColor, get lastHit(){ return lastHit; }, get glows(){ return glows; },
 
   openRestartSheet, closeRestartSheet, restartPick,
   HANDLING, setHandling, get handling(){ return handling; }, get DAS(){ return DAS; }, get ARR(){ return ARR; },
   NES_PIECES, NES_GRAVITY, NES_LINE_SCORE, NES_FRAME, NES_DAS, NES_ARR, NES_KEY, nesGravity, nesFirstLevelUp, nesTier,
-  startNes, nesEnd, nesFrame, nesHardDrop, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },
+  startNes, nesHud, nesEnd, nesFrame, nesHardDrop, nesRoll, nesLock, nesFits, nesAre, nesStep, nesRotate, nesPress, nesRelease, nesRecords, openNesSheet, get nes(){ return nes; },
   VS_LEVELS, VS_KEY, vsAttack, vsSimMatch, startVs, vsEnd, vsStep, vsOnLock, vsRecords, openVsSheet, vsBotMove,
   get vs(){ return vs; }, modeRestart, layout,
   hintEval, fitGaps, pieceFits, bottomPattern, pieceHintText, HINT_TOL, HINT_RULES, toggleHintHide, hintHidden,
