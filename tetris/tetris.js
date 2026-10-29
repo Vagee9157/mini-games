@@ -230,15 +230,18 @@ const LOCK_RESET_LIMIT = Infinity;
 //   DAS = 按住方向键多久开始连发，ARR = 连发之后每格间隔
 // 原来写死 150/40。改成 110/25 之后用户反馈「按一下左右直接就跑过去了，对不齐」：
 // 手指在屏幕上按一下常常就有 0.1 秒出头，110ms 起步等于轻点也会触发连发。
-// 现在默认「快」= 140/36，只比原来的 150/40 灵敏一点点；三档都往慢收了一截。
+// （当时默认 140/36，只比 150/40 灵敏一点点；现在的六档数值见下面。）
 // 三档 → 六档：两头各加。key 不改，原来存的选择照样认得。
+// 六档整体再往下挪两档：原来最快两档（DAS 95 / 80、ARR 20 / 12）按一下就飞出去，用户反馈「灵敏度这几档太大了」。
+// 现在每一档用的是原来低两档的数，最快一档 = 原来的「很快」（115/28）；原来的默认手感 140/36 现在叫「很快」。
+// 默认仍是 key 'fast'（现在叫「适中」190/55）—— 已经选过的人 key 没变，实际手感会比以前慢两档
 const HANDLING = {
-  calm:   { name: '很稳', das: 190, arr: 55 },
-  steady: { name: '稳',   das: 165, arr: 45 },
-  fast:   { name: '快',   das: 140, arr: 36 },
-  faster: { name: '很快', das: 115, arr: 28 },
-  turbo:  { name: '超快', das: 95,  arr: 20 },
-  max:    { name: '极快', das: 80,  arr: 12 },
+  calm:   { name: '很稳', das: 240, arr: 75 },
+  steady: { name: '稳',   das: 215, arr: 65 },
+  fast:   { name: '适中', das: 190, arr: 55 },
+  faster: { name: '快',   das: 165, arr: 45 },
+  turbo:  { name: '很快', das: 140, arr: 36 },
+  max:    { name: '极快', das: 115, arr: 28 },
 };
 const HANDLING_KEY = 'tetris.handling.v1';
 let handling = 'fast';
