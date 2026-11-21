@@ -72,6 +72,21 @@ JS = r"""async () => {
   await fresh('T');
   tap('btnCw');
   ok(T.game.piece.rot === 1, '点变换转一下');
+  ok(!document.getElementById('btnCw').classList.contains('deny'), '转成了：变换键不闪「转不动」');
+
+  // ③b 转不动：变换键闪暖色（deny），朝向不变；O 块本来就不转，不闪
+  await fresh('I');
+  { const g = T.game, p = g.piece;
+    // 整个盘面填满：tryRotate 只查转过去的位置，每个踢墙位置都撞 → 转不动
+    for (let y = 0; y < T.TOTAL_ROWS; y++) g.board[y].fill('X');
+    tap('btnCw');
+    ok(p.rot === 0 && document.getElementById('btnCw').classList.contains('deny'), `转不动时变换键闪一下（朝向 ${p.rot}，class ${document.getElementById('btnCw').className}）`);
+    await sleep(240);
+    ok(!document.getElementById('btnCw').classList.contains('deny'), '闪完自己消掉');
+    for (let y = 0; y < T.TOTAL_ROWS; y++) g.board[y].fill(null);
+  }
+  await fresh('O'); tap('btnCw');
+  ok(!document.getElementById('btnCw').classList.contains('deny'), 'O 块点变换不闪（它本来就不转）');
 
   // ④ 按偏了也算：键和键之间的空隙、底排键下面那条空白，就近交给最近的键
   const touch = (x, y, type, tg) => {

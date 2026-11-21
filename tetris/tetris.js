@@ -1041,6 +1041,15 @@ function tryMove(dx, dy){
   return true;
 }
 
+// 转不动：低半音的变换声 + 变换键闪一下暖色，不震（和转成了的手感区分开）
+let denyT = 0;
+function rotDenied(){
+  sfx('rotate', 0.6);
+  const k = $('btnCw');
+  if (!k) return;
+  k.classList.remove('deny'); void k.offsetWidth; k.classList.add('deny');
+  clearTimeout(denyT); denyT = setTimeout(() => k.classList.remove('deny'), 180);
+}
 function tryRotate(dir){
   if (nes){ nesRotate(dir); return false; }
   const p = game.piece;
@@ -7054,10 +7063,37 @@ let actx = null;
 let muted = false;
 let buzzOn = true;
 
-// 手机上的触感反馈。桌面浏览器没有 vibrate，静默跳过。
+// 手机上的触感反馈。安卓走 vibrate；iPhone 的 Safari 没有 vibrate（以前在 iPhone 上一下都没震过），
+// 改用系统开关控件：iOS 18 起拨一下 <input type=checkbox switch> 会给一下系统级的轻触感。
+// 只能一下一下地「咔哒」，没有长短，所以震动图案按每段的起点各拨一下（最多三下）。桌面两样都没有，静默跳过。
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let tickEl = null;
+function iosTick(){
+  if (!tickEl){
+    tickEl = document.createElement('label');
+    tickEl.setAttribute('aria-hidden', 'true');
+    tickEl.style.cssText = 'position:fixed;left:-200px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
+    const i = document.createElement('input');
+    i.type = 'checkbox'; i.setAttribute('switch', ''); i.tabIndex = -1;
+    tickEl.appendChild(i);
+    // 拨开关是一次 click，别让它冒到页面上被当成点了空白（关面板之类）
+    tickEl.addEventListener('click', e => e.stopPropagation());
+    document.body.appendChild(tickEl);
+  }
+  tickEl.click();
+}
 function buzz(pattern){
   if (!buzzOn) return;
-  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch { /* 忽略 */ }
+  try {
+    if (navigator.vibrate){ navigator.vibrate(pattern); return; }
+    if (!IOS) return;
+    const seg = Array.isArray(pattern) ? pattern : [pattern];
+    let at = 0;
+    for (let i = 0; i < seg.length && i < 6; i += 2){
+      if (at === 0) iosTick(); else setTimeout(iosTick, at);
+      at += seg[i] + (seg[i + 1] || 0);
+    }
+  } catch { /* 忽略 */ }
 }
 
 // 音效走 8-bit 手法，不是连续滑音：
@@ -10161,12 +10197,14 @@ function btnHardDrop(){
 // 底部按钮：按住能连发
 function bindButtons(){
   const map = [
-    ['btnLeft',  () => press('left'),   () => release('left')],
-    ['btnRight', () => press('right'),  () => release('right')],
+    // 按下那一下轻震一次（按住连移不再震，不然一路嗡嗡的）
+    ['btnLeft',  () => { buzz(8); press('left'); },  () => release('left')],
+    ['btnRight', () => { buzz(8); press('right'); }, () => release('right')],
     ['btnSoft',  () => { softDropping = true;  }, () => { softDropping = false; }],
     // 屏幕按键不吃 IRS/IHS：键盘上按住旋转是有意的，触屏上多半是手指还没抬
     // 就去按落底 —— 下一块出生就是转过的，正好落错地方。
-    ['btnCw',    () => tryRotate(1),    null],
+    // 转成了轻震一下；转不动（贴墙、被卡住）给另一种反馈，免得以为没按到又连点
+    ['btnCw',    () => { const p = game.piece; if (tryRotate(1)) buzz(8); else if (p && p.type !== 'O' && !nes) rotDenied(); }, null],
     ['btnDrop',  () => btnHardDrop(),   null],
     // HOLD 走同一套 touch 处理，不然它比别的键慢半拍（click 要等浏览器确认不是双击/滚动）
     ['holdSlot', () => holdPiece(),     null],

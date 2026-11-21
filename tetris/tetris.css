@@ -733,6 +733,13 @@ body.dying .evwarn{ opacity: 0 !important; transition: opacity .35s ease; }
 }
 .k-drop em{ color: #a5f2ff; opacity: 1; }
 .k-drop svg{ color: #a5f2ff; }
+/* 变换转不动：闪一下暖色（不是按下的青色），一眼看出「按到了，只是转不了」 */
+.k.deny, .k.deny:active{
+  transform: translateX(2px);
+  background: linear-gradient(150deg, rgba(251,146,60,.30), rgba(251,146,60,.10));
+  border-color: rgba(253,186,116,.55);
+  transition: none;
+}
 .k-drop.active, .k-drop:active{
   background: linear-gradient(150deg, rgba(34,211,238,.42), rgba(168,85,247,.22));
 }
