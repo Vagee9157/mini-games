@@ -235,13 +235,17 @@ const LOCK_RESET_LIMIT = Infinity;
 // 六档整体再往下挪两档：原来最快两档（DAS 95 / 80、ARR 20 / 12）按一下就飞出去，用户反馈「灵敏度这几档太大了」。
 // 现在每一档用的是原来低两档的数，最快一档 = 原来的「很快」（115/28）；原来的默认手感 140/36 现在叫「很快」。
 // 默认仍是 key 'fast'（现在叫「适中」190/55）—— 已经选过的人 key 没变，实际手感会比以前慢两档
+// 11-21 再调：用户（用「快」165/45）同时说「轻点走过头」和「按住走得慢」—— 两个数是绑着往一个方向变的，
+// 起步短了轻点就容易越线，连发慢了按住又拖。改成「起步都留足、档位主要差在连发快慢」：
+// 起步 165~220 之间（轻点 0.1 秒出头也不会越线），连发从 60 一路快到 16。
+// 「快」165/45 → 185/30：起步晚 20ms 少走过头，滑到墙从 0.53 秒缩到 0.43 秒。
 const HANDLING = {
-  calm:   { name: '很稳', das: 240, arr: 75 },
-  steady: { name: '稳',   das: 215, arr: 65 },
-  fast:   { name: '适中', das: 190, arr: 55 },
-  faster: { name: '快',   das: 165, arr: 45 },
-  turbo:  { name: '很快', das: 140, arr: 36 },
-  max:    { name: '极快', das: 115, arr: 28 },
+  calm:   { name: '很稳', das: 220, arr: 60 },
+  steady: { name: '稳',   das: 205, arr: 48 },
+  fast:   { name: '适中', das: 195, arr: 38 },
+  faster: { name: '快',   das: 185, arr: 30 },
+  turbo:  { name: '很快', das: 175, arr: 22 },
+  max:    { name: '极快', das: 165, arr: 16 },
 };
 const HANDLING_KEY = 'tetris.handling.v1';
 let handling = 'fast';
@@ -10013,7 +10017,11 @@ function press(dir){
   const d = evMirror() ? (dir === 'left' ? 'right' : 'left') : dir;
   pressedAs[dir] = d;
   held[d] = true;
-  repeat[d] = 0;
+  // 起步计时从「手指按下」算，不从「下一帧」算：下一帧加进来的 dt 包含按下之前那段（最多一帧，卡帧时更长），
+  // 原来直接从 0 累加，起步时长每次差 0~十几 ms，有时提前越线 —— 轻点偶尔走 2 格、按住起步时快时慢。
+  // 把按下前那段先扣掉；超过两帧说明循环停着（暂停刚恢复之类），不扣
+  const since = performance.now() - lastFrame;
+  repeat[d] = since > 0 && since < 34 ? -since : 0;
   repeat.started[d] = false;
   lastDir = d;
   if (!game.piece){ bufferInput(d === 'left' ? 'L' : 'R'); return; }

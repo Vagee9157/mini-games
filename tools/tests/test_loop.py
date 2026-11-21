@@ -22,12 +22,13 @@ JS = r"""async (eng) => {
     for (let y = 0; y < T.TOTAL_ROWS; y++) T.game.board[y].fill(null);
     T.game.piece = null; T.game.queue.unshift(t || 'O'); T.game.mods.unshift(null); T.spawnNext(); };
 
-  // ── 手感六档：从慢到快、数值单调、最快一档不超过 115/28（再快轻点就会飞出去），默认是中间偏慢的「适中」 ──
+  // ── 手感六档：从慢到快、数值单调；起步都留足 165 以上（轻点 0.1 秒出头不越线），档位主要差在连发快慢 ──
   const hk = Object.keys(T.HANDLING), hv = hk.map(k => T.HANDLING[k]);
   ok(hk.length === 6 && hv.every((v, i) => i === 0 || (v.das < hv[i - 1].das && v.arr < hv[i - 1].arr)),
      `手感六档由慢到快、连发起步和间隔都越来越小（${hv.map(v => v.name + ' ' + v.das + '/' + v.arr).join('，')}）`);
-  ok(Math.min(...hv.map(v => v.das)) >= 115 && Math.min(...hv.map(v => v.arr)) >= 28, '最快一档不低于 115/28（原来 95/20、80/12 太灵敏，已去掉）');
-  ok(T.handling === 'fast' && T.HANDLING.fast.name === '适中' && T.HANDLING.fast.das === 190, `默认是「适中」190/55（当前 ${T.handling} ${T.DAS}/${T.ARR}）`);
+  ok(Math.min(...hv.map(v => v.das)) >= 165 && Math.min(...hv.map(v => v.arr)) >= 16, '最快一档起步不低于 165、连发不快过 16（原来起步 115 以下轻点就越线）');
+  ok(T.HANDLING.faster.das === 185 && T.HANDLING.faster.arr === 30, `「快」185/30（用户在用的档：起步比原来 165 晚 20ms、连发 45→30）`);
+  ok(T.handling === 'fast' && T.HANDLING.fast.name === '适中' && T.HANDLING.fast.das === 195, `默认是「适中」195/38（当前 ${T.handling} ${T.DAS}/${T.ARR}）`);
 
   // ── 轻点（比连发门槛短）：只走 1 格。按下时机错开 40 次 ──
   const bad = [];
