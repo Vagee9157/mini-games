@@ -55,6 +55,18 @@ JS = r"""async (eng) => {
   ok(ts.length >= 4 && ts[0] < 40 && ts[1] >= T.DAS - 10 && ts[1] < T.DAS + 40 && T.game.piece.x === 8,
      `按住右：按下立刻 1 格、${T.DAS}ms 左右开始连发、走到墙（时刻 ${ts.join(', ')}ms）`);
 
+  // ── 卡帧：按住右时喂进一大段 dt（模拟卡了 0.2 秒），不能一口气冲过去 ──
+  fresh(); T.game.piece.x = 0; await sleep(100);
+  ev('btnRight', 'mousedown');
+  for (let i = 0; i < 6; i++) T.step(40);                   // 起步走完（> 195）
+  const xa = T.game.piece.x;
+  T.step(200);
+  const jump = T.game.piece.x - xa;
+  ev('btnRight', 'mouseup');
+  ok(jump >= 1 && jump <= 6, `卡 200ms 的一大帧：连发最多多走 ${jump} 格（不是按 200ms 全额补走，上限 6）`);
+  const xstop = T.game.piece.x; T.step(500);
+  ok(T.game.piece.x === xstop, `松手后一格都不再走（${xstop} → ${T.game.piece.x}）`);
+
   // ── 消行动画那 0.26 秒里的点按：存着，新块一出来照做；落底不存、也不启动防连点 ──
   const clearSetup = () => { fresh('I'); const R = T.TOTAL_ROWS;
     for (let x = 0; x < 9; x++) T.game.board[R - 1][x] = 'J';

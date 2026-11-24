@@ -9994,12 +9994,17 @@ function handleAutoRepeat(dt){
   for (const dir of ['left', 'right']){
     if (!held[dir]) continue;
     if (held.left && held.right && dir !== lastDir) continue;
-    repeat[dir] += dt;
+    // 卡帧时一帧的 dt 会有几十到两百多 ms，原来按它全额补走：连发一口气多走好几格，
+    // 而画面卡着你看不到，等你看到想松手，方块已经冲过头了（「松开停不准」）。
+    // 连发只认最多 40ms（两帧多一点）的时长，一帧最多走 2 格，补不上的丢掉 —— 卡一下就是慢一下，不会瞬移
+    repeat[dir] += Math.min(dt, 40);
     const thresh = repeat.started[dir] ? ARR : DAS;
+    let n = 0;
     while (repeat[dir] >= thresh){
       repeat[dir] -= thresh;
       repeat.started[dir] = true;
       tryMove(dir === 'left' ? -1 : 1, 0);
+      if (++n >= 2){ repeat[dir] = Math.min(repeat[dir], thresh - 1); break; }
     }
   }
 }
